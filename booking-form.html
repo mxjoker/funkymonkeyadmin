@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Book Funky Monkey Events</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0F0A1E; font-family: 'Nunito', sans-serif; color: #F3E8FF; min-height: 100vh; }
+input, select, textarea, button { font-family: 'Nunito', sans-serif; }
+input::placeholder, textarea::placeholder { color: #9A7BC0; }
+select option { background: #1A1035; color: #F3E8FF; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0F0A1E; }
+::-webkit-scrollbar-thumb { background: #3D2460; border-radius: 3px; }
+.field-label { display: block; font-size: 11px; font-weight: 700; color: #9A7BC0; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.08em; }
+.field-input { width: 100%; background: #0F0A1E; border: 1.5px solid #2E1F50; border-radius: 10px; padding: 11px 14px; color: #F3E8FF; font-size: 14px; font-family: 'Nunito', sans-serif; }
+.field-input:focus { outline: none; border-color: #7C3AED; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.btn { padding: 12px 28px; border-radius: 12px; font-weight: 800; font-size: 14px; cursor: pointer; border: none; transition: all .15s; font-family: 'Nunito', sans-serif; }
+.btn-primary { background: linear-gradient(135deg,#FF6B00,#FFD600); color: #0F0A1E; }
+.btn-outline { background: transparent; color: #F3E8FF; border: 1.5px solid #2E1F50; }
+.btn-green { background: linear-gradient(135deg,#10B981,#06B6D4); color: #fff; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.card { background: #1A1035; border: 1px solid #2E1F50; border-radius: 20px; padding: 28px; margin-bottom: 18px; }
+</style>
+</head>
+<body>
+<div id="app" style="padding: 24px 16px; max-width: 680px; margin: 0 auto;"></div>
+
+<script>
+const C = { yellow:"#FFD600",orange:"#FF6B00",purple:"#7C3AED",green:"#10B981",teal:"#06B6D4",dark:"#0F0A1E",card:"#1A1035",border:"#2E1F50",text:"#F3E8FF",muted:"#9A7BC0" };
+const HOME_ZIP = "73118", MPM = 0.70;
+
+const SERVICES = [
+  {id:"magic_kids",   name:"Children's Magic Show",      cat:"Shows",       price:350, dur:"45 min",  icon:"🎩", desc:"Award-winning interactive magic — perfect for birthdays & families!"},
+  {id:"magic_corp",   name:"Corporate Magic Show",       cat:"Shows",       price:800, dur:"60 min",  icon:"✨", desc:"Elegant close-up and stage magic for corporate events."},
+  {id:"balloon",      name:"Balloon Artist",             cat:"Performers",  price:200, dur:"2 hrs",   icon:"🎈", desc:"Colorful balloon animals and creations for all ages."},
+  {id:"balloon_wkshp",name:"Balloon Sculpting Workshop", cat:"Shows",       price:275, dur:"45 min",  icon:"🎀", desc:"Hands-on balloon sculpting — great for parties or team-building!"},
+  {id:"face_paint",   name:"Face Painting",              cat:"Performers",  price:200, dur:"2 hrs",   icon:"🎨", desc:"Superheroes to princesses — stunning face art for all ages."},
+  {id:"glitter",      name:"Glitter Tattoos",            cat:"Performers",  price:175, dur:"2 hrs",   icon:"⭐", desc:"Long-lasting shimmery glitter tattoos in dozens of designs."},
+  {id:"foam",         name:"Foam Party",                 cat:"Experiences", price:650, dur:"2 hrs",   icon:"🫧", desc:"Epic foam experience that makes your party the talk of town!"},
+  {id:"snow",         name:"Snow Experience",            cat:"Experiences", price:550, dur:"2 hrs",   icon:"❄️", desc:"Real snow at your event — no matter the season!"},
+  {id:"juggler",      name:"Juggler",                    cat:"Performers",  price:225, dur:"2 hrs",   icon:"🤹", desc:"High-energy juggling with humor and audience interaction."},
+  {id:"stilts",       name:"Stilt Walker",               cat:"Performers",  price:275, dur:"2 hrs",   icon:"🦒", desc:"Towering above the crowd with dazzling costumes."},
+  {id:"acrobat",      name:"Acrobat",                    cat:"Performers",  price:350, dur:"2 hrs",   icon:"🤸", desc:"Gravity-defying acrobatic performances."},
+  {id:"fire",         name:"Fire Breather",              cat:"Performers",  price:400, dur:"30 min",  icon:"🔥", desc:"A fiery mesmerizing spectacle of skill and artistry."},
+  {id:"dj_pinata",    name:"DJ Piñata",                  cat:"Shows",       price:500, dur:"2 hrs",   icon:"🎵", desc:"Epic glow dance party — exceed fundraising goals!"},
+  {id:"gameshow",     name:"Game Show Champions",        cat:"Shows",       price:450, dur:"90 min",  icon:"🏆", desc:"Full game show experience with classics + originals."},
+  {id:"school_asm",   name:"Magic School Assembly",      cat:"Shows",       price:600, dur:"60 min",  icon:"🏫", desc:"Educational magic shows mixing tricks with real lessons."},
+  {id:"camp",         name:"Magic Camp",                 cat:"Camps",       price:150, dur:"Per day", icon:"⛺", desc:"Fun-filled magic camps for kids of all ages!"},
+];
+const ADDONS = [
+  {id:"ao1",name:"Extra Hour of Service",price:85, icon:"⏰"},
+  {id:"ao2",name:"Glitter Tattoos Add-On",price:75, icon:"✨"},
+  {id:"ao3",name:"Balloon Animals Add-On",price:75, icon:"🎈"},
+  {id:"ao4",name:"Photo Booth Add-On",   price:150,icon:"📸"},
+  {id:"ao5",name:"Second Performer",     price:175,icon:"👯"},
+];
+
+// ── State ──────────────────────────────────────
+let state = {
+  step: 1,
+  done: false,
+  saving: false,
+  error: "",
+  mileageLoading: false,
+  form: {
+    serviceId:"", addons:[], date:"", time:"", eventType:"",
+    guests:"", zip:"", location:"", notes:"",
+    name:"", phone:"", email:"", referral:"",
+    miles: 0, mileageFee: 0
+  }
+};
+
+const setState = (updates) => { Object.assign(state, updates); render(); };
+const setForm  = (updates) => { Object.assign(state.form, updates); render(); };
+
+// ── Mileage via Zippopotam (Haversine) ────────
+const OKC_LAT = 35.5514, OKC_LON = -97.4075;
+const toRad = d => d * Math.PI / 180;
+const haversine = (lat1, lon1, lat2, lon2) => {
+  const R = 3958.8; // miles
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+};
+
+let zipLookupTimer = null;
+const lookupZip = (zip) => {
+  clearTimeout(zipLookupTimer);
+  if (zip.length !== 5 || !/^\d{5}$/.test(zip)) {
+    setForm({ miles: 0, mileageFee: 0 });
+    return;
+  }
+  setState({ mileageLoading: true });
+  zipLookupTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(`https://api.zippopotam.us/us/${zip}`);
+      if (!res.ok) throw new Error("ZIP not found");
+      const data = await res.json();
+      const lat = parseFloat(data.places[0].latitude);
+      const lon = parseFloat(data.places[0].longitude);
+      const straightLine = haversine(OKC_LAT, OKC_LON, lat, lon);
+      const drivingEst = Math.round(straightLine * 1.25 * 10) / 10;
+      const fee = Math.round(drivingEst * 2 * MPM * 100) / 100;
+      setForm({ miles: drivingEst, mileageFee: fee });
+    } catch(e) {
+      setForm({ miles: 0, mileageFee: 0 });
+    }
+    setState({ mileageLoading: false });
+  }, 600);
+};
+
+// ── Derived ───────────────────────────────────
+const getSvc     = () => SERVICES.find(s => s.id === state.form.serviceId);
+const getAddons  = () => ADDONS.filter(a => state.form.addons.includes(a.id));
+const getTotal   = () => {
+  const svc = getSvc();
+  const addonsTotal = getAddons().reduce((s,a) => s+a.price, 0);
+  return (svc?.price||0) + addonsTotal + (state.form.mileageFee||0);
+};
+const getDeposit = () => Math.round(getTotal() * 0.5);
+
+// ── Submit ────────────────────────────────────
+const handleSubmit = async () => {
+  setState({ saving: true, error: "" });
+  try {
+    const svc = getSvc();
+    const total = getTotal();
+    const res = await fetch("/api/bookings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client:     state.form.name,
+        phone:      state.form.phone,
+        email:      state.form.email,
+        eventType:  state.form.eventType,
+        guests:     parseInt(state.form.guests)||0,
+        referral:   state.form.referral,
+        serviceId:  state.form.serviceId,
+        service:    svc?.name||"",
+        date:       state.form.date,
+        time:       state.form.time,
+        zip:        state.form.zip,
+        location:   state.form.location,
+        notes:      state.form.notes,
+        addons:     state.form.addons,
+        mileageFee: state.form.mileageFee||0,
+        miles:      state.form.miles||0,
+        total,
+        depositDue: getDeposit(),
+      })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    setState({ done: true, saving: false });
+  } catch(e) {
+    setState({ saving: false, error: "Something went wrong. Please call (405) 431-6625 or try again." });
+    console.error(e);
+  }
+};
+
+// ── HTML helpers ──────────────────────────────
+const field = (label, key, opts={}) => {
+  const val = state.form[key]||"";
+  const req = opts.required ? '<span style="color:#FF6B00"> *</span>' : "";
+  if (opts.options) {
+    const optHtml = opts.options.map(o => {
+      const v = o.value||o, l = o.label||o;
+      return `<option value="${v}" ${val===v?"selected":""}>${l}</option>`;
+    }).join("");
+    return `<div style="margin-bottom:14px">
+      <label class="field-label">${label}${req}</label>
+      <select class="field-input" onchange="setForm({'${key}':this.value})">
+        <option value="">Select…</option>${optHtml}
+      </select></div>`;
+  }
+  const type = opts.type||"text";
+  const extra = key==="zip" ? `oninput="setForm({'zip':this.value});lookupZip(this.value)"` : `oninput="setForm({'${key}':this.value})"`;
+  return `<div style="margin-bottom:14px">
+    <label class="field-label">${label}${req}</label>
+    <input type="${type}" class="field-input" value="${val}" placeholder="${opts.placeholder||''}" ${extra}/>
+  </div>`;
+};
+
+const stepDots = () => {
+  const STEPS = ["Service","Event Details","Your Info","Quote & Submit"];
+  return `<div style="display:flex;margin-bottom:28px">${STEPS.map((label,i) => {
+    const active = state.step===i+1, done = state.step>i+1;
+    const bg = done ? C.green : active ? `linear-gradient(135deg,${C.orange},${C.yellow})` : C.border;
+    const col = active ? C.dark : done ? "#fff" : C.muted;
+    const lineR = i<STEPS.length-1 ? `<div style="flex:1;height:2px;background:${state.step>i+1?C.orange:C.border}"></div>` : "";
+    const lineL = i>0 ? `<div style="flex:1;height:2px;background:${state.step>i?C.orange:C.border}"></div>` : "";
+    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px">
+      <div style="display:flex;align-items:center;width:100%">${lineL}
+        <div style="width:30px;height:30px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:${bg};color:${col};font-weight:900;font-size:12px">${done?"✓":i+1}</div>
+      ${lineR}</div>
+      <div style="font-size:9px;color:${active?C.orange:C.muted};font-weight:700;text-transform:uppercase;text-align:center">${label}</div>
+    </div>`;
+  }).join("")}</div>`;
+};
+
+const quoteBar = () => {
+  const svc = getSvc(); if (!svc || state.step===1) return "";
+  const addonsTotal = getAddons().reduce((s,a)=>s+a.price,0);
+  const fee = state.form.mileageFee||0;
+  const total = getTotal();
+  return `<div style="background:linear-gradient(135deg,#1A1035,#0A2010);border:1px solid ${C.green}44;border-radius:14px;padding:12px 20px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      <div><div style="font-size:10px;color:${C.muted};font-weight:700;text-transform:uppercase">Service</div><div style="font-size:12px;color:${C.text};font-weight:700">${svc.icon} ${svc.name}</div></div>
+      ${fee>0?`<div><div style="font-size:10px;color:${C.muted};font-weight:700;text-transform:uppercase">Travel</div><div style="font-size:12px;color:${C.teal};font-weight:700">+$${fee.toFixed(2)}</div></div>`:""}
+      ${addonsTotal>0?`<div><div style="font-size:10px;color:${C.muted};font-weight:700;text-transform:uppercase">Add-ons</div><div style="font-size:12px;color:${C.purple};font-weight:700">+$${addonsTotal}</div></div>`:""}
+    </div>
+    <div style="text-align:right"><div style="font-size:10px;color:${C.muted};font-weight:700;text-transform:uppercase">Est. Total</div><div style="font-size:22px;font-weight:900;color:${C.green}">$${total.toFixed(2)}</div></div>
+  </div>`;
+};
+
+// ── Step renderers ────────────────────────────
+const renderStep1 = () => {
+  const cats = [...new Set(SERVICES.map(s=>s.cat))];
+  const svcHtml = cats.map(cat => {
+    const cards = SERVICES.filter(s=>s.cat===cat).map(s => {
+      const sel = state.form.serviceId===s.id;
+      return `<div onclick="setForm({serviceId:'${s.id}'})" style="padding:14px 16px;border-radius:14px;cursor:pointer;display:flex;align-items:flex-start;gap:12px;border:2px solid ${sel?C.orange:C.border};background:${sel?"#200E0044":C.dark};box-shadow:${sel?`0 0 0 3px ${C.orange}22`:"none"};transition:all .2s">
+        <div style="font-size:26px;line-height:1;flex-shrink:0">${s.icon}</div>
+        <div style="flex:1">
+          <div style="font-weight:800;color:${sel?C.yellow:C.text};font-size:13px;margin-bottom:2px">${s.name}</div>
+          <div style="font-size:11px;color:${C.muted};line-height:1.4;margin-bottom:6px">${s.desc}</div>
+          <div style="display:flex;gap:10px"><span style="font-size:15px;font-weight:900;color:${C.green}">from $${s.price}</span><span style="font-size:11px;color:${C.muted}">· ${s.dur}</span></div>
+        </div>
+        ${sel?`<span style="color:${C.orange};font-size:16px;flex-shrink:0">✓</span>`:""}
+      </div>`;
+    }).join("");
+    return `<div style="margin-bottom:22px"><div style="font-size:11px;font-weight:800;color:${C.orange};text-transform:uppercase;letter-spacing:0.1em;margin-bottom:10px">${cat}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px">${cards}</div></div>`;
+  }).join("");
+
+  const addonHtml = !state.form.serviceId ? "" : `
+    <div style="font-size:14px;font-weight:800;color:${C.text};margin-bottom:10px">✨ Add-Ons (optional)</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
+      ${ADDONS.map(a => {
+        const sel = state.form.addons.includes(a.id);
+        return `<div onclick="toggleAddon('${a.id}')" style="padding:11px 14px;border-radius:12px;cursor:pointer;display:flex;align-items:center;gap:10px;border:2px solid ${sel?C.purple:C.border};background:${sel?"#1A0040":C.dark};transition:all .15s">
+          <span style="font-size:20px">${a.icon}</span>
+          <div style="flex:1"><div style="font-size:12px;font-weight:700;color:${C.text}">${a.name}</div><div style="font-size:12px;color:${C.green};font-weight:700">+$${a.price}</div></div>
+          <div style="width:18px;height:18px;border-radius:50%;border:2px solid ${sel?C.purple:C.border};background:${sel?C.purple:"transparent"};display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff">${sel?"✓":""}</div>
+        </div>`;
+      }).join("")}
+    </div>`;
+
+  return `<div>
+    <div style="font-weight:900;font-size:18px;color:${C.text};margin-bottom:4px">What can we do for your event? 🎪</div>
+    <div style="color:${C.muted};font-size:13px;margin-bottom:20px">Select a service, then choose any add-ons.</div>
+    ${svcHtml}${addonHtml}
+  </div>`;
+};
+
+const renderStep2 = () => {
+  const f = state.form;
+  const mileBox = f.zip.length===5 ? `
+    <div style="background:linear-gradient(135deg,#0A1A2E,#0A2A1E);border:1.5px solid ${C.teal}44;border-radius:14px;padding:14px 18px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:800;color:${C.teal};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">🚗 Travel Fee Estimate</div>
+      ${state.mileageLoading ? `<div style="color:${C.muted};font-size:13px">Looking up ZIP code…</div>` :
+        f.miles>0 ? `<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center">
+          <div style="text-align:center"><div style="font-size:22px;font-weight:900;color:${C.teal}">${f.miles} mi</div><div style="font-size:10px;color:${C.muted};text-transform:uppercase">Est. One Way</div></div>
+          <div style="text-align:center"><div style="font-size:22px;font-weight:900;color:${C.teal}">${(f.miles*2).toFixed(1)} mi</div><div style="font-size:10px;color:${C.muted};text-transform:uppercase">Round Trip</div></div>
+          <div style="text-align:center"><div style="font-size:26px;font-weight:900;color:${C.green}">$${f.mileageFee.toFixed(2)}</div><div style="font-size:10px;color:${C.muted};text-transform:uppercase">Travel Fee</div></div>
+          <div style="font-size:11px;color:${C.muted};line-height:1.6">From OKC (${HOME_ZIP})<br>$${MPM}/mi × ${(f.miles*2).toFixed(1)} miles<br><em>Straight-line estimate × 1.25 road factor</em></div>
+        </div>` : `<div style="color:${C.muted};font-size:13px">ZIP not found — travel fee will be calculated at booking.</div>`
+      }
+    </div>` : "";
+
+  return `<div>
+    <div style="font-weight:900;font-size:18px;color:${C.text};margin-bottom:4px">Tell us about your event 📅</div>
+    <div style="color:${C.muted};font-size:13px;margin-bottom:20px">We'll check availability and calculate your travel fee.</div>
+    <div class="grid-2">
+      ${field("Event Date","date",{type:"date",required:true})}
+      ${field("Start Time","time",{type:"time",required:true})}
+    </div>
+    ${field("Event Type","eventType",{required:true,options:["Birthday Party","Corporate Event","School Event","Festival","Wedding","Fundraiser","Other"]})}
+    <div class="grid-2">
+      ${field("Estimated Guests","guests",{type:"number",placeholder:"e.g. 30"})}
+      ${field("Event ZIP Code","zip",{placeholder:"73120",required:true})}
+    </div>
+    ${field("Full Event Address","location",{placeholder:"123 Main St, Oklahoma City, OK",required:true})}
+    ${mileBox}
+    <div style="margin-bottom:14px">
+      <label class="field-label">Special Requests / Notes</label>
+      <textarea class="field-input" rows="3" placeholder="Theme, special needs, anything we should know…" oninput="setForm({notes:this.value})">${state.form.notes||""}</textarea>
+    </div>
+  </div>`;
+};
+
+const renderStep3 = () => `<div>
+  <div style="font-weight:900;font-size:18px;color:${C.text};margin-bottom:4px">Almost there! Your details 👤</div>
+  <div style="color:${C.muted};font-size:13px;margin-bottom:20px">We'll send your quote and confirmation here.</div>
+  <div class="grid-2">
+    ${field("Your Name","name",{placeholder:"Jane Smith",required:true})}
+    ${field("Phone Number","phone",{type:"tel",placeholder:"405-555-0000",required:true})}
+  </div>
+  ${field("Email Address","email",{type:"email",placeholder:"jane@example.com",required:true})}
+  ${field("How did you hear about us?","referral",{options:["Google","Facebook","Instagram","Word of Mouth","Returning Client","LinkedIn","Other"]})}
+  <div style="background:#FFFFFF08;border-radius:12px;padding:12px 16px;font-size:12px;color:${C.muted};line-height:1.6">
+    🔒 <strong style="color:${C.text}">Your info is safe.</strong> We only use it to respond to your booking and send event communications.
+  </div>
+</div>`;
+
+const renderStep4 = () => {
+  const svc = getSvc(), f = state.form;
+  const addons = getAddons();
+  const addonsTotal = addons.reduce((s,a)=>s+a.price,0);
+  const total = getTotal(), deposit = getDeposit();
+  const rows = [
+    [svc?`${svc.icon} ${svc.name}`:"Service", `$${svc?.price||0}`, C.text],
+    ...addons.map(a=>[`${a.icon} ${a.name}`,`+$${a.price}`,C.purple]),
+    ...(f.miles>0?[[`🚗 Travel (${(f.miles*2).toFixed(1)}mi round trip)`,`+$${f.mileageFee.toFixed(2)}`,C.teal]]:[]),
+  ];
+  return `<div>
+    <div style="font-weight:900;font-size:18px;color:${C.text};margin-bottom:4px">Your Instant Quote 💰</div>
+    <div style="color:${C.muted};font-size:13px;margin-bottom:20px">Review everything before submitting.</div>
+    <div style="background:linear-gradient(135deg,#1A0035,#001A0F);border:2px solid ${C.green}44;border-radius:18px;padding:22px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-size:11px;color:${C.muted};text-transform:uppercase;font-weight:700">Booking For</div>
+          <div style="font-size:20px;font-weight:900;color:${C.text};font-family:'Fredoka One',sans-serif">${f.name||"—"}</div>
+          <div style="font-size:12px;color:${C.muted}">${f.email} · ${f.phone}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:${C.muted};text-transform:uppercase;font-weight:700">Estimated Total</div>
+          <div style="font-size:36px;font-weight:900;color:${C.green};line-height:1.1">$${total.toFixed(2)}</div>
+        </div>
+      </div>
+      <div style="background:#FFFFFF0A;border-radius:12px;padding:14px;margin-bottom:14px">
+        <div style="font-size:11px;color:${C.muted};font-weight:700;text-transform:uppercase;margin-bottom:8px">Event Details</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          ${[["Date",f.date],["Time",f.time],["Type",f.eventType],["Guests",f.guests],["Location",f.location]].filter(([,v])=>v).map(([k,v])=>`<div><div style="font-size:10px;color:${C.muted};font-weight:700">${k}</div><div style="font-size:12px;color:${C.text};font-weight:600">${v}</div></div>`).join("")}
+        </div>
+      </div>
+      <div style="border-top:1px solid #FFFFFF15;padding-top:14px">
+        <div style="font-size:11px;color:${C.muted};font-weight:700;text-transform:uppercase;margin-bottom:8px">Price Breakdown</div>
+        ${rows.map(([k,v,col])=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #FFFFFF0A"><span style="font-size:13px;color:${C.muted}">${k}</span><span style="font-size:13px;color:${col};font-weight:700">${v}</span></div>`).join("")}
+        <div style="display:flex;justify-content:space-between;padding:10px 0 0"><span style="font-size:15px;color:${C.text};font-weight:800">Total</span><span style="font-size:20px;color:${C.green};font-weight:900">$${total.toFixed(2)}</span></div>
+      </div>
+    </div>
+    <div style="background:${C.card};border-radius:14px;padding:16px;border:1px solid ${C.border};margin-bottom:14px">
+      <div style="font-weight:800;color:${C.text};margin-bottom:8px;font-size:13px">💳 Payment Info</div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0"><span style="font-size:12px;color:${C.muted}">Deposit to secure your date (50%)</span><span style="font-size:14px;color:${C.yellow};font-weight:800">$${deposit}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0"><span style="font-size:12px;color:${C.muted}">Balance due day of event</span><span style="font-size:14px;color:${C.orange};font-weight:700">$${total-deposit}</span></div>
+      <div style="font-size:11px;color:${C.muted};margin-top:8px">We accept Stripe, PayPal, or cash. Invoice sent after approval.</div>
+    </div>
+    ${state.error ? `<div style="background:#450A0A;border:1px solid #7F1D1D;border-radius:10px;padding:12px 16px;font-size:13px;color:#FCA5A5;margin-bottom:14px">${state.error}</div>` : ""}
+    <div style="background:#064E3B22;border-radius:12px;padding:12px 16px;border:1px solid ${C.green}33;font-size:12px;color:#A7F3D0;line-height:1.6">
+      📬 <strong>What happens next?</strong> We review within 24 hours and send a confirmation + deposit invoice. Your date isn't secured until the deposit is received.<br>
+      <em style="font-size:11px">Travel fee is a straight-line estimate — final amount confirmed at booking.</em>
+    </div>
+  </div>`;
+};
+
+const renderDone = () => {
+  const svc = getSvc(), f = state.form, deposit = getDeposit();
+  return `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px">
+    <div style="width:100%;max-width:520px;background:${C.card};border-radius:24px;border:1px solid ${C.border};padding:40px;text-align:center">
+      <div style="font-size:64px;margin-bottom:12px">🎉</div>
+      <div style="font-size:24px;font-weight:900;color:${C.text};font-family:'Fredoka One',sans-serif;margin-bottom:10px">Booking Request Sent!</div>
+      <div style="font-size:14px;color:${C.muted};line-height:1.7;margin-bottom:28px">
+        Thanks <strong style="color:${C.yellow}">${f.name}</strong>! We received your request for <strong style="color:${C.yellow}">${svc?.name||""}</strong> on <strong style="color:${C.yellow}">${f.date}</strong>.<br>
+        Confirmation coming to <strong style="color:${C.teal}">${f.email}</strong> within 24 hours.
+      </div>
+      <div style="background:#FFFFFF08;border-radius:14px;padding:18px;text-align:left;margin-bottom:24px">
+        ${["We review your request within 24 hours","You get a confirmation email","Sign your digital contract",`Pay 50% deposit ($${deposit}) to lock in your date`,"We send a reminder 48 hrs before your event 🐒"].map((s,i)=>`
+          <div style="display:flex;gap:10px;margin-bottom:8px;align-items:flex-start">
+            <div style="width:20px;height:20px;border-radius:50%;flex-shrink:0;background:linear-gradient(135deg,${C.orange},${C.yellow});display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;color:${C.dark}">${i+1}</div>
+            <span style="font-size:12px;color:${C.muted}">${s}</span>
+          </div>`).join("")}
+      </div>
+      <div style="font-size:13px;color:${C.muted}">Questions? <a href="tel:4054316625" style="color:${C.teal};font-weight:700">(405) 431-6625</a></div>
+    </div>
+  </div>`;
+};
+
+// ── Validation ────────────────────────────────
+const canProceed = () => {
+  const f = state.form;
+  if (state.step===1) return !!f.serviceId;
+  if (state.step===2) return !!f.date && !!f.time && !!f.eventType && !!f.location && !!f.zip;
+  if (state.step===3) return !!f.name && !!f.phone && !!f.email;
+  return true;
+};
+
+// ── Main render ───────────────────────────────
+const render = () => {
+  const app = document.getElementById("app");
+  if (state.done) { app.innerHTML = renderDone(); return; }
+
+  const stepContent = [renderStep1, renderStep2, renderStep3, renderStep4][state.step-1]();
+  const nextDisabled = !canProceed();
+  const navRight = state.step < 4
+    ? `<button class="btn btn-primary" onclick="setState({step:${state.step+1}})" ${nextDisabled?"disabled":""}>Next Step →</button>`
+    : `<button class="btn btn-green" onclick="handleSubmit()" ${state.saving?"disabled":""}>${state.saving?"⏳ Submitting…":"🎉 Submit Booking Request"}</button>`;
+
+  app.innerHTML = `
+    <div style="text-align:center;margin-bottom:28px">
+      <div style="font-size:28px;font-weight:900;font-family:'Fredoka One',sans-serif;background:linear-gradient(135deg,${C.orange},${C.yellow});-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px">🐒 Funky Monkey Events</div>
+      <div style="font-size:13px;color:${C.muted}">Oklahoma City, OK · (405) 431-6625</div>
+    </div>
+    ${stepDots()}
+    ${state.step>1 ? quoteBar() : ""}
+    <div class="card">
+      ${stepContent}
+      <div style="display:flex;justify-content:space-between;margin-top:24px;gap:10px">
+        ${state.step>1 ? `<button class="btn btn-outline" onclick="setState({step:${state.step-1}})">← Back</button>` : "<div></div>"}
+        ${navRight}
+      </div>
+    </div>
+    <div style="text-align:center;font-size:11px;color:${C.muted};line-height:1.7;padding-bottom:24px">
+      This is a booking <em>request</em> — not a confirmed reservation.<br>
+      Your date is secured once a deposit is received. · <a href="tel:4054316625" style="color:${C.teal}">(405) 431-6625</a>
+    </div>`;
+};
+
+// ── Global helpers (called from inline HTML) ──
+window.setForm    = setForm;
+window.setState   = setState;
+window.lookupZip  = lookupZip;
+window.handleSubmit = handleSubmit;
+window.toggleAddon = (id) => {
+  const addons = state.form.addons.includes(id)
+    ? state.form.addons.filter(x=>x!==id)
+    : [...state.form.addons, id];
+  setForm({ addons });
+};
+
+render();
+</script>
+</body>
+</html>

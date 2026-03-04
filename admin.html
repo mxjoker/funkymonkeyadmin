@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Funky Monkey Events — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0D0520; font-family: 'Nunito', sans-serif; color: #F3E8FF; display: flex; min-height: 100vh; }
+input, select, textarea, button { font-family: 'Nunito', sans-serif; }
+select option { background: #1A0A2E; color: #F3E8FF; }
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: #0D0520; }
+::-webkit-scrollbar-thumb { background: #3D2460; border-radius: 3px; }
+.card { background: #241545; border: 1px solid #3D2460; border-radius: 16px; padding: 24px; }
+.field-label { display: block; font-size: 11px; font-weight: 700; color: #A78BCA; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.08em; }
+.field-input { width: 100%; background: #0D0520; border: 1px solid #3D2460; border-radius: 8px; padding: 9px 12px; color: #F3E8FF; font-size: 13px; font-family: 'Nunito', sans-serif; }
+.field-input:focus { outline: none; border-color: #7C3AED; }
+table { width: 100%; border-collapse: collapse; }
+th { padding: 11px 12px; text-align: left; font-size: 10px; color: #A78BCA; text-transform: uppercase; letter-spacing: 0.06em; }
+td { padding: 10px 12px; border-bottom: 1px solid #3D246022; }
+tr:hover td { background: #1A0A2E44; cursor: pointer; }
+.modal-overlay { position: fixed; inset: 0; background: #000000cc; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.modal-box { background: #241545; border: 1px solid #3D2460; border-radius: 20px; width: 100%; max-height: 90vh; overflow-y: auto; padding: 28px; position: relative; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div id="sidebar" style="width:220px;background:#1A0A2E;border-right:1px solid #3D2460;display:flex;flex-direction:column;flex-shrink:0;position:sticky;top:0;height:100vh;overflow:hidden"></div>
+
+<!-- Main -->
+<div id="main" style="flex:1;padding:26px;overflow-y:auto;min-width:0"></div>
+
+<!-- Modal -->
+<div id="modal" style="display:none"></div>
+
+<script>
+const C = {yellow:"#FFD600",orange:"#FF6B00",purple:"#7C3AED",pink:"#EC4899",green:"#10B981",teal:"#06B6D4",dark:"#1A0A2E",darker:"#0D0520",card:"#241545",border:"#3D2460",text:"#F3E8FF",muted:"#A78BCA",red:"#EF4444"};
+
+// ── Static data ────────────────────────────────
+const STATUS = {
+  review:    {label:"Needs Review", bg:"#78350F", text:"#FDE68A", dot:"#F59E0B"},
+  pending:   {label:"Pending",      bg:"#1E3A5F", text:"#BAE6FD", dot:"#38BDF8"},
+  confirmed: {label:"Confirmed",    bg:"#064E3B", text:"#A7F3D0", dot:"#34D399"},
+  completed: {label:"Completed",    bg:"#3B0764", text:"#E9D5FF", dot:"#A78BFA"},
+  cancelled: {label:"Cancelled",    bg:"#450A0A", text:"#FECACA", dot:"#F87171"},
+};
+const PAY = {
+  stripe:  {label:"Stripe",  icon:"💳", color:C.purple},
+  paypal:  {label:"PayPal",  icon:"🅿️", color:C.teal},
+  cash:    {label:"Cash",    icon:"💵", color:C.green},
+  pending: {label:"Pending", icon:"⏳", color:C.muted},
+};
+const STAFF = [
+  {id:1, name:"Joe Coover",   role:"Magician / MC",      avatar:"JC", color:C.purple, pin:"1234"},
+  {id:2, name:"Maya Torres",  role:"Face Painter",        avatar:"MT", color:C.pink,   pin:"2345"},
+  {id:3, name:"Finn O'Brien", role:"Balloon Artist",      avatar:"FO", color:C.teal,   pin:"3456"},
+  {id:4, name:"Layla Singh",  role:"Acrobat",             avatar:"LS", color:C.green,  pin:"4567"},
+  {id:5, name:"Rex Drummond", role:"DJ / Host",           avatar:"RD", color:C.orange, pin:"5678"},
+  {id:6, name:"Carla Vega",   role:"Fire Performer",      avatar:"CV", color:C.yellow, pin:"6789"},
+];
+const ADDONS = [
+  {id:"ao1",name:"Extra Hour",        price:85,  icon:"⏰"},
+  {id:"ao2",name:"Glitter Tattoos",   price:75,  icon:"✨"},
+  {id:"ao3",name:"Balloon Animals",   price:75,  icon:"🎈"},
+  {id:"ao4",name:"Photo Booth",       price:150, icon:"📸"},
+  {id:"ao5",name:"Second Performer",  price:175, icon:"👯"},
+];
+const TEMPLATES = [
+  {id:"t1",trigger:"Booking Request Received",    subject:"We got your request! 🎉 — Funky Monkey Events",    body:"Hi {client_name},\n\nThank you for reaching out to Funky Monkey Events! We've received your booking request for {service} on {event_date}.\n\nBooking ID: {booking_id}\nDate: {event_date} at {event_time}\nLocation: {event_location}\nTotal: {total}\n\nWe'll be in touch within 24 hours!\n\nFunky Monkey Events 🐒\n(405) 431-6625"},
+  {id:"t2",trigger:"Booking Approved / Confirmed",subject:"Your booking is CONFIRMED! 🎊 — Funky Monkey Events",body:"Hi {client_name},\n\nYour event is officially CONFIRMED! 🎉\n\n📅 {event_date} at {event_time}\n📍 {event_location}\n🎪 {service}\n💰 Total: {total}\n\nDeposit due: {deposit_amount}\n[PAYMENT LINK]\n\nFunky Monkey Events 🐒"},
+  {id:"t3",trigger:"Deposit Received",             subject:"Deposit received — you're locked in! ✅",           body:"Hi {client_name},\n\nDeposit of {deposit_amount} received — your date is LOCKED IN! 🔒\n\nBalance of {balance_due} is due on the day.\n\n📅 {event_date} at {event_time}\n📍 {event_location}\n\nFunky Monkey Events 🐒"},
+  {id:"t4",trigger:"48-Hour Event Reminder",       subject:"Your event is TOMORROW! 🥳 — Funky Monkey Events",  body:"Hi {client_name},\n\nYour Funky Monkey Event is TOMORROW! 🎉\n\n📅 {event_date} at {event_time}\n📍 {event_location}\n🎭 Entertainer: {staff_name}\n💰 Balance due: {balance_due}\n\nQuestions? Call (405) 431-6625\n\nFunky Monkey Events 🐒"},
+  {id:"t5",trigger:"Balance Payment Due",          subject:"Final balance due 💳 — Funky Monkey Events",        body:"Hi {client_name},\n\nYour balance of {balance_due} is due for your upcoming event.\n\nPay: [PAYMENT LINK] or cash on arrival.\n\n📅 {event_date} at {event_time}\n\nFunky Monkey Events 🐒"},
+  {id:"t6",trigger:"Post-Event Follow-Up",         subject:"How did we do? 🌟 — Funky Monkey Events",           body:"Hi {client_name},\n\nThank you for choosing Funky Monkey Events! Hope everyone had a BLAST! 🎉\n\n👉 [LEAVE A REVIEW]\n\nReturning clients get 10% off!\n\nFunky Monkey Events\n(405) 431-6625"},
+];
+
+// ── App state ──────────────────────────────────
+let state = {
+  view: "dashboard",
+  bookings: [],
+  loading: true,
+  selBooking: null,
+  staffList: [...STAFF],
+  templates: [...TEMPLATES],
+  filterStatus: "all",
+  filterSearch: "",
+  calMonth: new Date().getMonth(),
+  staffSel: null,
+  staffPin: "",
+  staffUnlocked: false,
+  staffPinErr: false,
+};
+
+const setState = (u) => { Object.assign(state, u); renderAll(); };
+const setView  = (v) => setState({ view: v });
+
+// ── API ────────────────────────────────────────
+const api = {
+  load: async () => {
+    try {
+      const res = await fetch("/api/bookings");
+      if (!res.ok) throw new Error(await res.text());
+      const rows = await res.json();
+      // Normalize snake_case from Postgres to camelCase
+      state.bookings = rows.map(normalizeBooking);
+      state.loading = false;
+      renderAll();
+    } catch(e) {
+      console.error("Failed to load bookings:", e);
+      state.loading = false;
+      state.loadError = e.message;
+      renderAll();
+    }
+  },
+  update: async (id, fields) => {
+    try {
+      await fetch(`/api/booking/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields)
+      });
+    } catch(e) { console.error("Update failed:", e); }
+  },
+  delete: async (id) => {
+    try {
+      await fetch(`/api/booking/${id}`, { method: "DELETE" });
+    } catch(e) { console.error("Delete failed:", e); }
+  }
+};
+
+const normalizeBooking = (r) => ({
+  id:             r.id,
+  bookingId:      r.booking_id,
+  client:         r.client,
+  phone:          r.phone,
+  email:          r.email,
+  eventType:      r.event_type,
+  guests:         r.guests,
+  referral:       r.referral,
+  serviceId:      r.service_id,
+  service:        r.service,
+  date:           r.date,
+  time:           r.time,
+  zip:            r.zip,
+  location:       r.location,
+  notes:          r.notes,
+  addons:         r.addons || [],
+  mileageFee:     parseFloat(r.mileage_fee)||0,
+  miles:          parseFloat(r.miles)||0,
+  total:          parseFloat(r.total)||0,
+  depositDue:     parseFloat(r.deposit_due)||0,
+  deposit:        parseFloat(r.deposit)||0,
+  paymentMethod:  r.payment_method||"pending",
+  status:         r.status||"review",
+  staffId:        r.staff_id,
+  contractSigned: r.contract_signed||false,
+  createdAt:      r.created_at,
+});
+
+// Optimistic update helper
+const updateBooking = (id, fields) => {
+  state.bookings = state.bookings.map(b => b.id===id ? {...b,...fields} : b);
+  if (state.selBooking?.id === id) state.selBooking = {...state.selBooking, ...fields};
+  api.update(id, fields);
+  renderAll();
+};
+
+// ── HTML atoms ─────────────────────────────────
+const badge = (status) => {
+  const s = STATUS[status]||STATUS.review;
+  return `<span style="background:${s.bg};color:${s.text};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.05em;display:inline-flex;align-items:center;gap:5px;text-transform:uppercase"><span style="width:6px;height:6px;border-radius:50%;background:${s.dot};display:inline-block"></span>${s.label}</span>`;
+};
+const btn = (label, onclick, variant="primary", small=false) => {
+  const pad = small ? "6px 12px" : "9px 18px";
+  const fs  = small ? 11 : 13;
+  const styles = {
+    primary:   `background:linear-gradient(135deg,${C.orange},${C.yellow});color:${C.dark};border:none`,
+    secondary: `background:transparent;color:${C.text};border:1px solid ${C.border}`,
+    danger:    `background:#450A0A;color:#FCA5A5;border:1px solid #7F1D1D`,
+    success:   `background:#064E3B;color:#6EE7B7;border:1px solid #065F46`,
+    purple:    `background:linear-gradient(135deg,${C.purple},${C.pink});color:#fff;border:none`,
+    ghost:     `background:transparent;color:${C.muted};border:none`,
+  };
+  return `<button onclick="${onclick}" style="padding:${pad};font-size:${fs}px;${styles[variant]||styles.primary};border-radius:10px;font-weight:700;cursor:pointer;font-family:'Nunito',sans-serif">${label}</button>`;
+};
+const field = (label, id, value, opts={}) => {
+  const req = opts.required ? `<span style="color:${C.orange}"> *</span>` : "";
+  if (opts.options) {
+    const optHtml = opts.options.map(o=>{const v=o.value||o,l=o.label||o;return`<option value="${v.replace(/"/g,'&quot;')}" ${value===v?"selected":""}>${l}</option>`;}).join("");
+    return `<div style="margin-bottom:14px"><label class="field-label">${label}${req}</label>
+      <select id="${id}" class="field-input"><option value="">Select…</option>${optHtml}</select></div>`;
+  }
+  const type = opts.type||"text";
+  return `<div style="margin-bottom:14px"><label class="field-label">${label}${req}</label>
+    <input type="${type}" id="${id}" class="field-input" value="${(value||"").toString().replace(/"/g,'&quot;')}" placeholder="${opts.placeholder||''}"/></div>`;
+};
+const fval = (id) => (document.getElementById(id)||{}).value||"";
+
+// ── Sidebar ────────────────────────────────────
+const renderSidebar = () => {
+  const NAV = [
+    {id:"dashboard", icon:"🏠", label:"Dashboard"},
+    {id:"bookings",  icon:"📋", label:"Bookings"},
+    {id:"calendar",  icon:"📅", label:"Calendar"},
+    {id:"staff",     icon:"👥", label:"Staff"},
+    {id:"clients",   icon:"👤", label:"Clients"},
+    {id:"catalogue", icon:"⚙️", label:"Catalogue"},
+    {id:"emails",    icon:"📧", label:"Email Templates"},
+    {id:"analytics", icon:"📊", label:"Analytics"},
+  ];
+  const reviewCount = state.bookings.filter(b=>b.status==="review").length;
+  const navHtml = NAV.map(n => {
+    const active = state.view===n.id || state.view===n.id+"-detail";
+    const badge2 = n.id==="bookings"&&reviewCount>0 ? `<span style="margin-left:auto;background:${C.orange};color:${C.dark};border-radius:50%;width:17px;height:17px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900">${reviewCount}</span>` : "";
+    return `<button onclick="setView('${n.id}')" style="width:100%;display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:10px;border:none;background:${active?`linear-gradient(135deg,${C.orange}22,${C.yellow}11)`:"transparent"};color:${active?C.yellow:C.muted};font-weight:${active?800:600};font-size:12px;cursor:pointer;text-align:left;margin-bottom:2px;border-left:3px solid ${active?C.orange:"transparent"};font-family:'Nunito',sans-serif">
+      <span style="font-size:14px">${n.icon}</span>${n.label}${badge2}
+    </button>`;
+  }).join("");
+  const statusLine = state.loading
+    ? `<div style="font-size:11px;color:${C.muted}">🔄 Connecting…</div>`
+    : `<div style="font-size:11px;color:${C.green};font-weight:700">● Live — ${state.bookings.length} booking${state.bookings.length!==1?"s":""}</div>`;
+  document.getElementById("sidebar").innerHTML = `
+    <div style="padding:18px 16px 14px;border-bottom:1px solid ${C.border}">
+      <div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;line-height:1.1"><span style="background:linear-gradient(135deg,${C.orange},${C.yellow});-webkit-background-clip:text;-webkit-text-fill-color:transparent">🐒 Funky Monkey</span></div>
+      <div style="font-size:9px;color:${C.muted};text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-top:2px">Admin Dashboard</div>
+    </div>
+    <nav style="padding:10px 8px;flex:1;overflow-y:auto">${navHtml}</nav>
+    <div style="padding:12px;border-top:1px solid ${C.border};text-align:center">${statusLine}<div style="margin-top:4px;font-size:9px;color:${C.muted}">OKC · (405) 431-6625</div></div>`;
+};
+
+// ── Dashboard ──────────────────────────────────
+const renderDashboard = () => {
+  const bs = state.bookings;
+  const revenue   = bs.filter(b=>b.status!=="cancelled").reduce((s,b)=>s+b.total+b.mileageFee,0);
+  const collected = bs.reduce((s,b)=>s+b.deposit,0);
+  const needsReview = bs.filter(b=>b.status==="review").length;
+  const stats = [
+    {label:"Total Bookings", value:bs.length,                              icon:"📋", color:C.purple},
+    {label:"Needs Review",   value:needsReview,                            icon:"⚠️", color:C.orange},
+    {label:"Confirmed",      value:bs.filter(b=>b.status==="confirmed").length, icon:"✅", color:C.green},
+    {label:"Gross Revenue",  value:`$${revenue.toLocaleString()}`,         icon:"💰", color:C.yellow},
+    {label:"Deposits In",    value:`$${collected.toLocaleString()}`,       icon:"💳", color:C.teal},
+    {label:"Balance Out",    value:`$${(revenue-collected).toLocaleString()}`, icon:"📤", color:C.pink},
+  ];
+  const statsHtml = stats.map(s=>`<div class="card" style="padding:16px 20px;display:flex;align-items:center;gap:14px"><div style="font-size:26px">${s.icon}</div><div><div style="font-size:20px;font-weight:900;color:${s.color};font-family:'Fredoka One',sans-serif">${s.value}</div><div style="font-size:10px;color:${C.muted};text-transform:uppercase;letter-spacing:0.06em;font-weight:700">${s.label}</div></div></div>`).join("");
+
+  const recent = bs.slice(0,6).map(b=>`<tr onclick="selectBooking(${b.id})">
+    <td style="font-weight:700;color:${C.text}">${b.client}</td>
+    <td style="color:${C.muted};font-size:12px">${b.service}</td>
+    <td style="color:${C.muted};font-size:12px">${b.date}</td>
+    <td style="color:${C.green};font-weight:700">$${(b.total+b.mileageFee).toFixed(2)}</td>
+    <td>${badge(b.status)}</td>
+  </tr>`).join("");
+
+  const svcMap={};bs.forEach(b=>{svcMap[b.service]=(svcMap[b.service]||0)+1;});
+  const topSvc=Object.entries(svcMap).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([n,c])=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid ${C.border}22"><span style="font-size:11px;color:${C.muted};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:80%">${n}</span><span style="font-size:12px;color:${C.yellow};font-weight:700">${c}</span></div>`).join("");
+
+  return `
+    <div style="margin-bottom:24px">
+      <div style="font-size:26px;font-weight:900;font-family:'Fredoka One',sans-serif">🐒 <span style="background:linear-gradient(90deg,${C.orange},${C.yellow});-webkit-background-clip:text;-webkit-text-fill-color:transparent">Funky Monkey Events</span></div>
+      <div style="color:${C.muted};font-size:13px;margin-top:3px">Admin Dashboard · Oklahoma City, OK</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">${statsHtml}</div>
+    <div style="display:grid;grid-template-columns:1fr 280px;gap:16px">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div style="font-weight:800;font-size:15px">Recent Bookings</div>
+          ${btn("View All","setView('bookings')","secondary",true)}
+        </div>
+        ${bs.length===0
+          ? `<div style="color:${C.muted};text-align:center;padding:32px">No bookings yet. They'll appear here when clients submit the form!</div>`
+          : `<table><thead><tr>${["Client","Service","Date","Total","Status"].map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${recent}</tbody></table>`
+        }
+      </div>
+      <div class="card" style="padding:16px">
+        <div style="font-weight:800;font-size:13px;margin-bottom:12px">Quick Actions</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${btn("⚙️ Edit Catalogue","setView('catalogue')","purple")}<br>
+          ${btn("📅 Calendar","setView('calendar')","secondary")}<br>
+          ${btn("👥 Staff","setView('staff')","secondary")}
+        </div>
+        ${topSvc ? `<div style="margin-top:16px"><div style="font-weight:800;font-size:13px;margin-bottom:10px">🏆 Top Services</div>${topSvc}</div>` : ""}
+      </div>
+    </div>`;
+};
+
+// ── Bookings list ──────────────────────────────
+const renderBookings = () => {
+  const filtered = state.bookings
+    .filter(b => state.filterStatus==="all" || b.status===state.filterStatus)
+    .filter(b => [b.client,b.service,b.bookingId||""].join(" ").toLowerCase().includes(state.filterSearch.toLowerCase()));
+
+  const filters = ["all","review","pending","confirmed","completed","cancelled"].map(s =>
+    `<button onclick="setState({filterStatus:'${s}'})" style="background:${state.filterStatus===s?`linear-gradient(135deg,${C.orange},${C.yellow})`:C.darker};color:${state.filterStatus===s?C.dark:C.muted};border:1px solid ${state.filterStatus===s?C.orange:C.border};border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;text-transform:capitalize;font-family:'Nunito',sans-serif">${s}</button>`
+  ).join("");
+
+  const rows = filtered.map((b,i) => {
+    const pm = PAY[b.paymentMethod]||PAY.pending;
+    return `<tr onclick="selectBooking(${b.id})" style="background:${i%2?"transparent":"#0D052044"}">
+      <td style="font-size:11px;color:${C.teal};font-weight:700">${b.bookingId||"—"}</td>
+      <td><div style="font-weight:700">${b.client}</div><div style="font-size:10px;color:${C.muted}">${b.eventType||""}</div></td>
+      <td style="font-size:12px">${b.service}</td>
+      <td style="font-size:12px;color:${C.muted}">${b.date}</td>
+      <td><div style="color:${C.green};font-weight:700">$${(b.total+b.mileageFee).toFixed(2)}</div>${b.mileageFee>0?`<div style="font-size:10px;color:${C.muted}">+$${b.mileageFee.toFixed(2)} travel</div>`:""}</td>
+      <td style="font-size:11px;color:${pm.color};font-weight:700">${pm.icon} ${pm.label}</td>
+      <td>${badge(b.status)}</td>
+      <td style="color:${C.orange};font-size:16px">›</td>
+    </tr>`;
+  }).join("");
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+      <div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif">📋 All Bookings (${state.bookings.length})</div>
+    </div>
+    <div class="card" style="margin-bottom:14px;padding:12px 16px">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <input class="field-input" placeholder="Search…" value="${state.filterSearch}" oninput="setState({filterSearch:this.value})" style="flex:1;min-width:160px"/>
+        ${filters}
+      </div>
+    </div>
+    ${state.bookings.length===0
+      ? `<div class="card"><div style="text-align:center;padding:40px;color:${C.muted}"><div style="font-size:40px;margin-bottom:12px">📭</div><div style="font-weight:700;font-size:16px;color:${C.text};margin-bottom:8px">No bookings yet</div><div style="font-size:13px">When clients submit the booking form, requests appear here.</div></div></div>`
+      : `<div class="card" style="padding:0;overflow:hidden"><table>
+          <thead style="background:${C.darker}"><tr>${["ID","Client","Service","Date","Total","Payment","Status",""].map(h=>`<th>${h}</th>`).join("")}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${filtered.length===0?`<div style="padding:32px;text-align:center;color:${C.muted}">No bookings match that filter.</div>`:""}</div>`
+    }`;
+};
+
+// ── Booking detail ─────────────────────────────
+const renderBookingDetail = () => {
+  const b = state.selBooking; if (!b) return "";
+  const sm = STAFF.find(s=>s.id===b.staffId);
+  const bAddons = ADDONS.filter(a=>(b.addons||[]).includes(a.id));
+  const addonsTotal = bAddons.reduce((s,a)=>s+a.price,0);
+  const grand = b.total + b.mileageFee + addonsTotal;
+  const pm = PAY[b.paymentMethod]||PAY.pending;
+
+  const actionBtns = [];
+  if (b.status==="review")    { actionBtns.push(btn("✅ Approve","updateBooking("+b.id+",{status:'confirmed'})","success")); actionBtns.push(btn("✗ Decline","updateBooking("+b.id+",{status:'cancelled'})","danger")); }
+  if (b.status==="confirmed") { actionBtns.push(btn("✓ Mark Complete","updateBooking("+b.id+",{status:'completed'})","success")); actionBtns.push(btn("✗ Cancel","updateBooking("+b.id+",{status:'cancelled'})","danger")); }
+  if (b.status==="pending")   { actionBtns.push(btn("✅ Confirm","updateBooking("+b.id+",{status:'confirmed'})","primary")); }
+  if (b.status==="cancelled") { actionBtns.push(btn("↩ Reopen","updateBooking("+b.id+",{status:'review'})","secondary")); }
+  actionBtns.push(btn("💳 Record Payment","openPayModal()","secondary"));
+  actionBtns.push(btn("📄 Contract","openContractModal()","secondary"));
+  actionBtns.push(btn(b.contractSigned?"↩ Unmark Signed":"✓ Mark Signed",`updateBooking(${b.id},{contractSigned:${!b.contractSigned}})`,"ghost"));
+
+  const staffCards = STAFF.map(s=>`<div onclick="updateBooking(${b.id},{staffId:${s.id}})" style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:12px;cursor:pointer;border:2px solid ${b.staffId===s.id?s.color:C.border};background:${b.staffId===s.id?"#1A0040":C.darker};transition:all .15s">
+    <div style="width:32px;height:32px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:${C.dark}">${s.avatar}</div>
+    <div><div style="font-size:12px;font-weight:700;color:${C.text}">${s.name}</div><div style="font-size:10px;color:${C.muted}">${s.role}</div></div>
+    ${b.staffId===s.id?`<span style="color:${s.color};font-size:13px;margin-left:auto">✓</span>`:""}
+  </div>`).join("");
+
+  return `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+      ${btn("‹ Back","setView('bookings')","ghost")}
+      <div>
+        <div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif">${b.client}</div>
+        <div style="color:${C.muted};font-size:12px">${b.bookingId||b.id} · ${b.eventType||""}</div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+        ${b.contractSigned?`<span style="font-size:11px;color:${C.green};background:#064E3B;padding:4px 10px;border-radius:12px;font-weight:700">✓ Contract Signed</span>`:`<span style="font-size:11px;color:#FDE68A;background:#78350F;padding:4px 10px;border-radius:12px;font-weight:700">⚠ Contract Pending</span>`}
+        ${badge(b.status)}
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div class="card">
+        <div style="font-weight:800;margin-bottom:14px;font-size:14px">📋 Event Details</div>
+        ${[["Service",b.service],["Date",b.date],["Time",b.time],["Location",b.location],["ZIP",b.zip],["Guests",b.guests],["Event Type",b.eventType],["Referral",b.referral]].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${C.border}22"><span style="font-size:12px;color:${C.muted}">${k}</span><span style="font-size:12px;color:${C.text};font-weight:600;text-align:right;max-width:60%">${v||"—"}</span></div>`).join("")}
+        ${b.notes?`<div style="margin-top:10px;padding:8px 10px;background:${C.darker};border-radius:8px;font-size:12px;color:${C.muted}"><b style="color:${C.text}">Notes:</b> ${b.notes}</div>`:""}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="card">
+          <div style="font-weight:800;margin-bottom:14px;font-size:14px">👤 Client</div>
+          ${[["Name",b.client],["Phone",b.phone],["Email",b.email]].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${C.border}22"><span style="font-size:12px;color:${C.muted}">${k}</span><span style="font-size:12px;color:${C.teal};font-weight:600">${v||"—"}</span></div>`).join("")}
+        </div>
+        <div class="card">
+          <div style="font-weight:800;margin-bottom:12px;font-size:14px">💰 Payment</div>
+          ${[
+            ["Base Service",`$${b.total.toFixed(2)}`,C.text],
+            [`Travel (${b.miles||0}mi×2×$0.70)`,`$${b.mileageFee.toFixed(2)}`,C.teal],
+            ...bAddons.map(a=>[a.name,`$${a.price}`,C.purple]),
+            ["Grand Total",`$${grand.toFixed(2)}`,C.green],
+            ["Deposit Paid",`$${b.deposit.toFixed(2)}`,C.yellow],
+            ["Balance Due",`$${Math.max(0,grand-b.deposit).toFixed(2)}`,Math.max(0,grand-b.deposit)>0?C.orange:C.green],
+          ].map(([k,v,col])=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${C.border}22"><span style="font-size:12px;color:${C.muted}">${k}</span><span style="font-size:13px;color:${col};font-weight:700">${v}</span></div>`).join("")}
+          <div style="margin-top:8px;font-size:11px;color:${pm.color};font-weight:700">${pm.icon} ${pm.label}</div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-weight:800;margin-bottom:12px;font-size:14px">👥 Assign Staff</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">${staffCards}</div>
+    </div>
+    <div class="card">
+      <div style="font-weight:800;margin-bottom:14px;font-size:14px">⚡ Actions</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">${actionBtns.join("")}</div>
+    </div>`;
+};
+
+// ── Calendar ───────────────────────────────────
+const renderCalendar = () => {
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const year = 2026, m = state.calMonth;
+  const dim = new Date(year,m+1,0).getDate(), fd = new Date(year,m,1).getDay();
+  const today = new Date();
+  const getDay = d => { const ds=`${year}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`; return state.bookings.filter(b=>b.date===ds); };
+
+  const cells = [
+    ...Array(fd).fill(null).map(()=>`<div style="min-height:85px;border-right:1px solid ${C.border}22;border-bottom:1px solid ${C.border}22;background:${C.darker}44"></div>`),
+    ...Array(dim).fill(null).map((_,i)=>{
+      const day=i+1, dbs=getDay(day), isToday=day===today.getDate()&&m===today.getMonth();
+      const dotBg = isToday?`linear-gradient(135deg,${C.orange},${C.yellow})`:"transparent";
+      const dotCol = isToday?C.dark:C.text;
+      return `<div style="min-height:85px;padding:6px 5px;border-right:1px solid ${C.border}22;border-bottom:1px solid ${C.border}22">
+        <div style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${dotBg};color:${dotCol};font-weight:${isToday?900:600};font-size:11px;margin-bottom:3px">${day}</div>
+        ${dbs.map(b=>`<div onclick="selectBooking(${b.id})" style="font-size:9px;padding:2px 4px;border-radius:3px;margin-bottom:2px;font-weight:700;background:${STATUS[b.status]?.bg||"#333"};color:${STATUS[b.status]?.text||"#fff"};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer">${(b.service||"").split(" ")[0]}</div>`).join("")}
+      </div>`;
+    })
+  ].join("");
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif">📅 Calendar</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        ${btn("‹","setState({calMonth:"+(m>0?m-1:11)+"})","secondary",true)}
+        <span style="font-weight:800;min-width:130px;text-align:center">${MONTHS[m]} ${year}</span>
+        ${btn("›","setState({calMonth:"+(m<11?m+1:0)+"})","secondary",true)}
+      </div>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);background:${C.darker}">
+        ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>`<div style="padding:10px 8px;text-align:center;font-size:10px;color:${C.muted};font-weight:700;text-transform:uppercase;border-bottom:1px solid ${C.border}">${d}</div>`).join("")}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr)">${cells}</div>
+    </div>`;
+};
+
+// ── Staff portal ───────────────────────────────
+const renderStaff = () => {
+  const staffCards = state.staffList.map(s => {
+    const gigs = state.bookings.filter(b=>b.staffId===s.id&&b.status!=="cancelled").length;
+    const active = state.staffSel?.id===s.id;
+    return `<div onclick="selectStaff(${s.id})" style="padding:14px;border-radius:14px;cursor:pointer;border:2px solid ${active?s.color:C.border};background:${active?C.card:C.darker};margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:40px;height:40px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:${C.dark};flex-shrink:0">${s.avatar}</div>
+        <div><div style="font-weight:800;font-size:13px">${s.name}</div><div style="font-size:10px;color:${C.muted}">${s.role}</div><div style="font-size:10px;color:${C.green};font-weight:700">${gigs} gig${gigs!==1?"s":""}</div></div>
+      </div>
+    </div>`;
+  }).join("");
+
+  let rightPanel = `<div class="card" style="display:flex;align-items:center;justify-content:center;min-height:200px"><div style="text-align:center;color:${C.muted}"><div style="font-size:36px;margin-bottom:8px">👈</div><div style="font-weight:700">Select a staff member</div></div></div>`;
+
+  if (state.staffSel && !state.staffUnlocked) {
+    const s = state.staffSel;
+    rightPanel = `<div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:240px;gap:14px">
+      <div style="width:56px;height:56px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;color:${C.dark}">${s.avatar}</div>
+      <div style="font-weight:800;font-size:18px">${s.name}</div>
+      <div style="font-size:13px;color:${C.muted}">Enter PIN to view schedule</div>
+      <input type="password" id="staffPinInput" maxlength="6" placeholder="••••" onkeydown="if(event.key==='Enter')tryPin()" style="text-align:center;font-size:22px;letter-spacing:0.3em;width:130px;background:${C.darker};border:2px solid ${state.staffPinErr?C.red:C.border};border-radius:10px;padding:9px 14px;color:${C.text};font-family:'Nunito',sans-serif"/>
+      ${state.staffPinErr?`<div style="color:${C.red};font-size:12px;font-weight:700">Incorrect PIN.</div>`:""}
+      ${btn("Unlock","tryPin()","primary")}
+      <div style="font-size:10px;color:${C.muted};text-align:center">Demo PINs: Joe=1234 · Maya=2345 · Finn=3456<br>Layla=4567 · Rex=5678 · Carla=6789</div>
+    </div>`;
+  } else if (state.staffSel && state.staffUnlocked) {
+    const s = state.staffSel;
+    const myGigs = state.bookings.filter(b=>b.staffId===s.id&&b.status!=="cancelled");
+    const gigCards = myGigs.length===0
+      ? `<div class="card"><div style="color:${C.muted};text-align:center;padding:20px">No upcoming gigs.</div></div>`
+      : myGigs.map(b=>`<div class="card" style="padding:16px;margin-bottom:10px;cursor:pointer" onclick="selectBooking(${b.id})">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div><div style="font-weight:800;font-size:14px">${b.service}</div><div style="font-size:12px;color:${C.muted}">${b.client} · ${b.eventType||""} · ${b.guests||0} guests</div><div style="font-size:12px;color:${C.teal};margin-top:4px">📅 ${b.date} at ${b.time}</div><div style="font-size:12px;color:${C.muted}">📍 ${b.location}</div></div>
+            ${badge(b.status)}
+          </div></div>`).join("");
+    rightPanel = `<div>
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:14px">
+          <div style="width:52px;height:52px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:${C.dark}">${s.avatar}</div>
+          <div><div style="font-size:18px;font-weight:900;font-family:'Fredoka One',sans-serif">${s.name}</div><div style="color:${C.muted};font-size:12px">${s.role}</div></div>
+          <div style="margin-left:auto;display:flex;gap:8px">${btn("🔒 Lock","setState({staffUnlocked:false})","ghost",true)}</div>
+        </div>
+      </div>
+      <div style="font-weight:800;margin-bottom:10px;font-size:14px">Upcoming Gigs (${myGigs.length})</div>
+      ${gigCards}
+    </div>`;
+  }
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif">👥 Staff Portal</div>
+    </div>
+    <div style="display:grid;grid-template-columns:250px 1fr;gap:18px">
+      <div>${staffCards}</div>
+      <div>${rightPanel}</div>
+    </div>`;
+};
+
+// ── Clients ────────────────────────────────────
+const renderClients = () => {
+  const cm = {};
+  state.bookings.forEach(b=>{if(!cm[b.client])cm[b.client]={name:b.client,phone:b.phone,email:b.email,referral:b.referral,bookings:[],paid:0};cm[b.client].bookings.push(b);cm[b.client].paid+=b.deposit;});
+  const clients = Object.values(cm).sort((a,b)=>b.paid-a.paid);
+  if (clients.length===0) return `<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:20px">👤 Client Database</div><div class="card"><div style="text-align:center;padding:40px;color:${C.muted}">No clients yet.</div></div>`;
+  const cards = clients.map(c=>`<div class="card" style="padding:18px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+      <div><div style="font-weight:800;font-size:15px">${c.name}</div><div style="font-size:12px;color:${C.teal};margin-top:1px">${c.email||""}</div><div style="font-size:12px;color:${C.muted}">${c.phone||""}</div>${c.referral?`<div style="font-size:11px;color:${C.yellow};margin-top:2px">📣 via ${c.referral}</div>`:""}</div>
+      <div style="text-align:right"><div style="font-size:11px;color:${C.muted};text-transform:uppercase;font-weight:700">Total Paid</div><div style="font-size:20px;font-weight:900;color:${C.green};font-family:'Fredoka One',sans-serif">$${c.paid}</div><div style="font-size:11px;color:${C.muted}">${c.bookings.length} booking${c.bookings.length!==1?"s":""}</div></div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${c.bookings.map(b=>`<span style="font-size:10px;padding:2px 8px;border-radius:12px;background:${STATUS[b.status]?.bg||"#333"};color:${STATUS[b.status]?.text||"#fff"};font-weight:700">${(b.service||"").split(" ").slice(0,2).join(" ")}</span>`).join("")}</div>
+  </div>`).join("");
+  return `<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:20px">👤 Client Database (${clients.length})</div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px">${cards}</div>`;
+};
+
+// ── Catalogue ──────────────────────────────────
+let catalogueTab = "services";
+let catalogueServices = [
+  {id:"magic_kids",name:"Children's Magic Show",category:"Shows",price:350,duration:"45 min",icon:"🎩",active:true},
+  {id:"magic_corp",name:"Corporate Magic Show",category:"Shows",price:800,duration:"60 min",icon:"✨",active:true},
+  {id:"balloon",name:"Balloon Artist",category:"Performers",price:200,duration:"2 hrs",icon:"🎈",active:true},
+  {id:"face_paint",name:"Face Painting",category:"Performers",price:200,duration:"2 hrs",icon:"🎨",active:true},
+  {id:"glitter",name:"Glitter Tattoos",category:"Performers",price:175,duration:"2 hrs",icon:"⭐",active:true},
+  {id:"foam",name:"Foam Party",category:"Experiences",price:650,duration:"2 hrs",icon:"🫧",active:true},
+  {id:"snow",name:"Snow Experience",category:"Experiences",price:550,duration:"2 hrs",icon:"❄️",active:true},
+  {id:"juggler",name:"Juggler",category:"Performers",price:225,duration:"2 hrs",icon:"🤹",active:true},
+  {id:"stilts",name:"Stilt Walker",category:"Performers",price:275,duration:"2 hrs",icon:"🦒",active:true},
+  {id:"acrobat",name:"Acrobat",category:"Performers",price:350,duration:"2 hrs",icon:"🤸",active:true},
+  {id:"fire",name:"Fire Breather",category:"Performers",price:400,duration:"30 min",icon:"🔥",active:true},
+  {id:"dj_pinata",name:"DJ Piñata",category:"Shows",price:500,duration:"2 hrs",icon:"🎵",active:true},
+  {id:"gameshow",name:"Game Show Champions",category:"Shows",price:450,duration:"90 min",icon:"🏆",active:true},
+  {id:"school_asm",name:"Magic School Assembly",category:"Shows",price:600,duration:"60 min",icon:"🏫",active:true},
+  {id:"camp",name:"Magic Camp",category:"Camps",price:150,duration:"Per day",icon:"⛺",active:true},
+];
+let catalogueAddons = [...ADDONS.map(a=>({...a,active:true}))];
+
+const renderCatalogue = () => {
+  const cats = [...new Set(catalogueServices.map(s=>s.category))];
+  const tabs = ["services","addons"].map(t=>`<button onclick="catalogueTab='${t}';renderMain()" style="padding:8px 20px;border-radius:10px;border:none;cursor:pointer;background:${catalogueTab===t?`linear-gradient(135deg,${C.orange},${C.yellow})`:C.card};color:${catalogueTab===t?C.dark:C.muted};font-weight:700;font-size:13px;text-transform:capitalize;font-family:'Nunito',sans-serif">${t}</button>`).join("");
+
+  let content = "";
+  if (catalogueTab==="services") {
+    content = cats.map(cat=>`<div style="margin-bottom:22px">
+      <div style="font-weight:800;color:${C.orange};font-size:12px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">${cat}</div>
+      ${catalogueServices.filter(s=>s.category===cat).map(s=>`<div class="card" style="padding:12px 18px;display:flex;align-items:center;gap:14px;margin-bottom:8px">
+        <span style="font-size:22px;width:32px;text-align:center">${s.icon}</span>
+        <div style="flex:1"><div style="font-weight:700;font-size:14px">${s.name}</div><div style="font-size:11px;color:${C.muted}">⏱ ${s.duration}</div></div>
+        <div style="font-size:18px;font-weight:900;color:${C.green};font-family:'Fredoka One',sans-serif;margin-right:14px">$${s.price}</div>
+        <span style="font-size:11px;color:${s.active?C.green:C.muted};cursor:pointer" onclick="toggleServiceActive('${s.id}')">${s.active?"● Active":"○ Hidden"}</span>
+        ${btn("Edit",`openEditSvc('${s.id}')`, "secondary",true)}
+      </div>`).join("")}
+    </div>`).join("") + btn("➕ Add Service","openEditSvc(null)","primary");
+  } else {
+    content = catalogueAddons.map(a=>`<div class="card" style="padding:12px 18px;display:flex;align-items:center;gap:14px;margin-bottom:8px">
+      <span style="font-size:22px">${a.icon}</span>
+      <div style="flex:1"><div style="font-weight:700;font-size:14px">${a.name}</div></div>
+      <div style="font-size:18px;font-weight:900;color:${C.green};font-family:'Fredoka One',sans-serif;margin-right:14px">$${a.price}</div>
+      <span style="font-size:11px;color:${a.active?C.green:C.muted};cursor:pointer" onclick="toggleAddonActive('${a.id}')">${a.active?"● Active":"○ Hidden"}</span>
+      ${btn("Edit",`openEditAddon('${a.id}')`, "secondary",true)}
+    </div>`).join("") + btn("➕ Add Add-On","openEditAddon(null)","primary");
+  }
+
+  return `<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:20px">⚙️ Catalogue & Pricing Editor</div>
+    <div style="display:flex;gap:8px;margin-bottom:18px">${tabs}</div>
+    ${content}`;
+};
+
+// ── Email templates ────────────────────────────
+const renderEmails = () => {
+  const cards = state.templates.map((t,i)=>`<div class="card" style="padding:18px;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,${C.orange},${C.yellow});display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;color:${C.dark};flex-shrink:0">${i+1}</div>
+          <div style="font-weight:800;font-size:14px">${t.trigger}</div>
+        </div>
+        <div style="font-size:12px;color:${C.teal};margin-bottom:4px">Subject: ${t.subject}</div>
+        <div style="font-size:11px;color:${C.muted}">${t.body.split("\n").slice(0,2).join(" · ")}</div>
+      </div>
+      ${btn("✏️ Edit",`openEmailModal('${t.id}')`, "secondary",true)}
+    </div>
+  </div>`).join("");
+  return `<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:8px">📧 Email Templates</div>
+    <div style="color:${C.muted};font-size:13px;margin-bottom:20px">Auto-trigger templates sent at key points in the booking journey.</div>
+    ${cards}`;
+};
+
+// ── Analytics ──────────────────────────────────
+const renderAnalytics = () => {
+  const bs = state.bookings;
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const mData = Array(12).fill(0).map((_,i)=>{const m=String(i+1).padStart(2,"0");return bs.filter(b=>(b.date||"").startsWith(`2026-${m}`)).reduce((s,b)=>s+b.total+b.mileageFee,0);});
+  const maxR = Math.max(...mData, 1);
+  const svcD={};bs.forEach(b=>{svcD[b.service]=(svcD[b.service]||0)+b.total;});
+  const topS=Object.entries(svcD).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const stD={};bs.forEach(b=>{stD[b.status]=(stD[b.status]||0)+1;});
+  const totR=bs.reduce((s,b)=>s+b.total+b.mileageFee,0);
+  const totM=bs.reduce((s,b)=>s+b.mileageFee,0);
+  const avg=bs.length?(totR/bs.length).toFixed(0):0;
+
+  const statCards = [{label:"Gross Revenue",value:`$${totR.toLocaleString()}`,icon:"💰",color:C.green},{label:"Mileage Revenue",value:`$${totM.toFixed(2)}`,icon:"🚗",color:C.teal},{label:"Avg Booking",value:`$${avg}`,icon:"📈",color:C.purple},{label:"Total Events",value:bs.length,icon:"📋",color:C.yellow}]
+    .map(s=>`<div class="card" style="padding:14px 18px;display:flex;align-items:center;gap:12px"><div style="font-size:22px">${s.icon}</div><div><div style="font-size:18px;font-weight:900;color:${s.color};font-family:'Fredoka One',sans-serif">${s.value}</div><div style="font-size:10px;color:${C.muted};text-transform:uppercase;letter-spacing:0.05em;font-weight:700">${s.label}</div></div></div>`).join("");
+
+  const barChart = mData.map((v,i)=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+    <div style="font-size:8px;color:${C.green};font-weight:700;min-height:12px">${v>0?`$${v}`:""}</div>
+    <div style="width:100%;border-radius:3px 3px 0 0;background:${v>0?`linear-gradient(180deg,${C.orange},${C.yellow})`:`${C.border}44`};height:${Math.max(4,(v/maxR)*100)}px"></div>
+    <div style="font-size:9px;color:${C.muted};font-weight:600">${months[i]}</div>
+  </div>`).join("");
+
+  const svcBars = topS.length===0?`<div style="color:${C.muted};font-size:13px">No data yet.</div>`:topS.map(([name,rev])=>`<div style="margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:75%">${name}</span><span style="font-size:11px;color:${C.green};font-weight:700">$${rev}</span></div>
+    <div style="background:${C.border};border-radius:4px;height:5px"><div style="height:100%;border-radius:4px;background:linear-gradient(90deg,${C.orange},${C.yellow});width:${(rev/topS[0][1])*100}%"></div></div>
+  </div>`).join("");
+
+  return `<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:20px">📊 Analytics & Reports</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">${statCards}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card"><div style="font-weight:800;margin-bottom:16px;font-size:14px">📅 Monthly Revenue 2026</div><div style="display:flex;align-items:flex-end;gap:4px;height:130px">${barChart}</div></div>
+      <div class="card"><div style="font-weight:800;margin-bottom:16px;font-size:14px">🏆 Revenue by Service</div>${svcBars}</div>
+      <div class="card"><div style="font-weight:800;margin-bottom:14px;font-size:14px">📊 Bookings by Status</div>
+        ${Object.entries(stD).map(([s,c])=>`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid ${C.border}22;align-items:center">${badge(s)}<span style="font-size:14px;font-weight:900;color:${STATUS[s]?.dot||C.text}">${c}</span></div>`).join("")}
+        ${Object.keys(stD).length===0?`<div style="color:${C.muted};font-size:13px">No data yet.</div>`:""}
+      </div>
+      <div class="card"><div style="font-weight:800;margin-bottom:14px;font-size:14px">💳 Revenue by Payment</div>
+        ${["stripe","paypal","cash"].map(pm=>{const pmB=bs.filter(b=>b.paymentMethod===pm);const pmR=pmB.reduce((s,b)=>s+b.deposit,0);const cfg=PAY[pm];return`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid ${C.border}22;align-items:center"><span style="font-size:13px;color:${cfg.color};font-weight:700">${cfg.icon} ${cfg.label}</span><div style="text-align:right"><div style="font-size:13px;color:${C.green};font-weight:700">$${pmR}</div><div style="font-size:10px;color:${C.muted}">${pmB.length} bookings</div></div></div>`;}).join("")}
+      </div>
+    </div>`;
+};
+
+// ── Modals ─────────────────────────────────────
+const showModal = (html, maxWidth=560) => {
+  document.getElementById("modal").style.display = "block";
+  document.getElementById("modal").innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal-box" style="max-width:${maxWidth}px">${html}</div></div>`;
+};
+const closeModal = () => { document.getElementById("modal").style.display="none"; document.getElementById("modal").innerHTML=""; };
+
+const openPayModal = () => {
+  const b = state.selBooking;
+  showModal(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div style="font-weight:900;font-size:18px;font-family:'Fredoka One',sans-serif">💳 Record Payment</div><button onclick="closeModal()" style="background:none;border:none;color:${C.muted};font-size:22px;cursor:pointer">✕</button></div>
+    ${field("Amount Received ($)","payAmt","",{type:"number",placeholder:"0.00"})}
+    ${field("Payment Method","payMethod","cash",{options:[{value:"stripe",label:"💳 Stripe"},{value:"paypal",label:"🅿️ PayPal"},{value:"cash",label:"💵 Cash"}]})}
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+      ${btn("Cancel","closeModal()","secondary")}
+      ${btn("Record Payment","recordPayment()","success")}
+    </div>`, 380);
+};
+
+const recordPayment = () => {
+  const amt = parseFloat(fval("payAmt"))||0;
+  const method = fval("payMethod")||"cash";
+  updateBooking(state.selBooking.id, { deposit: state.selBooking.deposit+amt, paymentMethod: method });
+  closeModal();
+};
+
+const openContractModal = () => {
+  const b = state.selBooking;
+  const grand = b.total + b.mileageFee;
+  const text = `ENTERTAINMENT SERVICES AGREEMENT\nFunky Monkey Events · Oklahoma City, OK · (405) 431-6625\n\nClient: ${b.client}\nService: ${b.service}\nDate: ${b.date} at ${b.time}\nLocation: ${b.location}\nTotal: $${grand.toFixed(2)} (includes $${b.mileageFee.toFixed(2)} travel fee)\n\nTERMS:\n1. A 50% deposit is required to secure the date.\n2. Balance is due on the day of the event.\n3. Cancellations under 7 days forfeit the deposit.\n4. Travel fee: $0.70/mile round trip from OKC 73118.\n5. Funky Monkey Events reserves the right to substitute\n   performers of equal skill if necessary.\n\nClient Signature: ___________________________ Date: __________\nFunky Monkey Events: ___________________________ Date: __________`;
+  showModal(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div style="font-weight:900;font-size:18px;font-family:'Fredoka One',sans-serif">📄 Digital Contract</div><button onclick="closeModal()" style="background:none;border:none;color:${C.muted};font-size:22px;cursor:pointer">✕</button></div>
+    <div style="background:${C.darker};border-radius:10px;padding:18px;font-size:12px;line-height:1.7;white-space:pre-wrap;max-height:340px;overflow-y:auto">${text}</div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+      ${btn("Close","closeModal()","secondary")}
+      ${btn("✓ Mark as Signed",`updateBooking(${b.id},{contractSigned:true});closeModal()`,"success")}
+    </div>`, 600);
+};
+
+const openEmailModal = (id) => {
+  const t = state.templates.find(x=>x.id===id); if(!t) return;
+  const PH = ["{client_name}","{service}","{event_date}","{event_time}","{event_location}","{total}","{deposit_amount}","{balance_due}","{staff_name}","{booking_id}"];
+  showModal(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div style="font-weight:900;font-size:16px;font-family:'Fredoka One',sans-serif">✏️ ${t.trigger}</div><button onclick="closeModal()" style="background:none;border:none;color:${C.muted};font-size:22px;cursor:pointer">✕</button></div>
+    ${field("Subject","emailSubject",t.subject)}
+    <div style="margin-bottom:14px"><label class="field-label">Body</label><textarea id="emailBody" class="field-input" rows="10" style="resize:vertical">${t.body}</textarea></div>
+    <div style="background:${C.darker};border-radius:8px;padding:10px 14px;margin-bottom:14px">
+      <div style="font-size:10px;color:${C.muted};font-weight:700;text-transform:uppercase;margin-bottom:6px">Placeholders</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${PH.map(p=>`<code style="font-size:10px;background:${C.border};color:${C.yellow};padding:2px 7px;border-radius:6px">${p}</code>`).join("")}</div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      ${btn("Cancel","closeModal()","secondary")}
+      ${btn("Save","saveEmailTemplate('${id}')","success")}
+    </div>`, 620);
+};
+
+const saveEmailTemplate = (id) => {
+  state.templates = state.templates.map(t=>t.id===id?{...t,subject:fval("emailSubject"),body:fval("emailBody")}:t);
+  closeModal(); renderMain();
+};
+
+const openEditSvc = (id) => {
+  const s = id ? catalogueServices.find(x=>x.id===id) : {name:"",category:"Shows",price:"",duration:"",icon:"🎪",active:true};
+  showModal(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div style="font-weight:900;font-size:18px;font-family:'Fredoka One',sans-serif">${id?"Edit Service":"New Service"}</div><button onclick="closeModal()" style="background:none;border:none;color:${C.muted};font-size:22px;cursor:pointer">✕</button></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      ${field("Service Name","svcName",s.name,{required:true})}
+      ${field("Icon (emoji)","svcIcon",s.icon)}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      ${field("Base Price ($)","svcPrice",s.price,{type:"number",required:true})}
+      ${field("Duration","svcDuration",s.duration)}
+    </div>
+    ${field("Category","svcCat",s.category,{options:["Shows","Performers","Experiences","Camps","Other"]})}
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+      ${btn("Cancel","closeModal()","secondary")}
+      ${btn("Save Service",`saveSvc('${id||""}')`, "success")}
+    </div>`, 460);
+};
+
+const saveSvc = (id) => {
+  const updated = {name:fval("svcName"),category:fval("svcCat"),price:parseFloat(fval("svcPrice"))||0,duration:fval("svcDuration"),icon:fval("svcIcon"),active:true};
+  if(id) { catalogueServices=catalogueServices.map(s=>s.id===id?{...s,...updated}:s); }
+  else { catalogueServices=[...catalogueServices,{...updated,id:"svc_"+Date.now()}]; }
+  closeModal(); renderMain();
+};
+
+const openEditAddon = (id) => {
+  const a = id ? catalogueAddons.find(x=>x.id===id) : {name:"",price:"",icon:"✨",active:true};
+  showModal(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div style="font-weight:900;font-size:18px;font-family:'Fredoka One',sans-serif">${id?"Edit Add-On":"New Add-On"}</div><button onclick="closeModal()" style="background:none;border:none;color:${C.muted};font-size:22px;cursor:pointer">✕</button></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      ${field("Name","addonName",a.name,{required:true})}
+      ${field("Icon","addonIcon",a.icon)}
+    </div>
+    ${field("Price ($)","addonPrice",a.price,{type:"number",required:true})}
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+      ${btn("Cancel","closeModal()","secondary")}
+      ${btn("Save",`saveAddon('${id||""}')`, "success")}
+    </div>`, 380);
+};
+
+const saveAddon = (id) => {
+  const updated = {name:fval("addonName"),price:parseFloat(fval("addonPrice"))||0,icon:fval("addonIcon"),active:true};
+  if(id) { catalogueAddons=catalogueAddons.map(a=>a.id===id?{...a,...updated}:a); }
+  else { catalogueAddons=[...catalogueAddons,{...updated,id:"ao_"+Date.now()}]; }
+  closeModal(); renderMain();
+};
+
+const toggleServiceActive = (id) => { catalogueServices=catalogueServices.map(s=>s.id===id?{...s,active:!s.active}:s); renderMain(); };
+const toggleAddonActive   = (id) => { catalogueAddons=catalogueAddons.map(a=>a.id===id?{...a,active:!a.active}:a); renderMain(); };
+
+// ── Routing ────────────────────────────────────
+const selectBooking = (id) => {
+  state.selBooking = state.bookings.find(b=>b.id===id);
+  setView("booking-detail");
+};
+const selectStaff = (id) => {
+  const s = state.staffList.find(x=>x.id===id);
+  setState({ staffSel:s, staffPin:"", staffUnlocked:false, staffPinErr:false });
+};
+const tryPin = () => {
+  const input = document.getElementById("staffPinInput");
+  const pin = input ? input.value : state.staffPin;
+  if (pin === state.staffSel?.pin) setState({ staffUnlocked:true, staffPinErr:false });
+  else setState({ staffPinErr:true });
+};
+
+// ── Render ─────────────────────────────────────
+const renderMain = () => {
+  const el = document.getElementById("main");
+  if (state.loading) {
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:60vh;flex-direction:column;gap:16px"><div style="font-size:40px">🐒</div><div style="font-size:16px;font-weight:700">Loading bookings…</div><div style="font-size:13px;color:${C.muted}">Connecting to Neon database</div></div>`;
+    return;
+  }
+  if (state.loadError) {
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:60vh;flex-direction:column;gap:16px"><div style="font-size:40px">⚠️</div><div style="font-size:16px;font-weight:700;color:${C.red}">Database connection failed</div><div style="font-size:13px;color:${C.muted};max-width:400px;text-align:center">${state.loadError}</div><div style="font-size:12px;color:${C.muted}">Check that DATABASE_URL is set in Netlify environment variables.</div></div>`;
+    return;
+  }
+  const views = { dashboard:renderDashboard, bookings:renderBookings, "booking-detail":renderBookingDetail, calendar:renderCalendar, staff:renderStaff, clients:renderClients, catalogue:renderCatalogue, emails:renderEmails, analytics:renderAnalytics };
+  el.innerHTML = (views[state.view]||renderDashboard)();
+};
+
+const renderAll = () => { renderSidebar(); renderMain(); };
+
+// ── Expose globals ─────────────────────────────
+Object.assign(window, {
+  setView, setState, selectBooking, selectStaff, tryPin,
+  updateBooking, closeModal, openPayModal, openContractModal,
+  recordPayment, openEmailModal, saveEmailTemplate,
+  openEditSvc, saveSvc, openEditAddon, saveAddon,
+  toggleServiceActive, toggleAddonActive, catalogueTab,
+});
+
+// ── Boot ───────────────────────────────────────
+renderAll();
+api.load();
+
+// Poll for new bookings every 30 seconds
+setInterval(api.load, 30000);
+</script>
+</body>
+</html>

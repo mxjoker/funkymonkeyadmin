@@ -1,0 +1,8 @@
+{
+  "name": "funky-monkey-events",
+  "version": "1.0.0",
+  "description": "Funky Monkey Events booking system",
+  "dependencies": {
+    "pg": "^8.11.3"
+  }
+}
