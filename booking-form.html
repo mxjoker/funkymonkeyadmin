@@ -17,9 +17,8 @@ select option { background: #1A1035; color: #F3E8FF; }
 .fl { display: block; font-size: 11px; font-weight: 700; color: #9A7BC0; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.08em; }
 .fi { width: 100%; background: #0F0A1E; border: 1.5px solid #2E1F50; border-radius: 10px; padding: 11px 14px; color: #F3E8FF; font-size: 14px; font-family: 'Nunito', sans-serif; transition: border-color .2s; }
 .fi:focus { outline: none; border-color: #7C3AED; }
-input[type="date"], input[type="time"] { color-scheme: dark; cursor: pointer; }
-input[type="date"]::-webkit-calendar-picker-indicator,
-input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(0.6) sepia(1) saturate(4) hue-rotate(220deg); cursor: pointer; }
+input[type="date"] { color-scheme: dark; cursor: pointer; }
+input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.6) sepia(1) saturate(4) hue-rotate(220deg); cursor: pointer; }
 .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .btn { padding: 12px 28px; border-radius: 12px; font-weight: 800; font-size: 14px; cursor: pointer; border: none; transition: all .15s; font-family: 'Nunito', sans-serif; }
 .bp { background: linear-gradient(135deg,#FF6B00,#FFD600); color: #0F0A1E; }
@@ -115,16 +114,16 @@ const rad=d=>d*Math.PI/180;
 const hav=(a,b,c,d)=>{const R=3958.8,dL=rad(c-a),dO=rad(d-b),x=Math.sin(dL/2)**2+Math.cos(rad(a))*Math.cos(rad(c))*Math.sin(dO/2)**2;return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));};
 const calcM=(lat,lon)=>{const s=hav(OKC_LAT,OKC_LON,lat,lon),m=Math.round(s*1.25*10)/10,f=Math.round(m*2*MPM*100)/100;return{miles:m,fee:f};};
 
-// ZIP lookup
+// ZIP lookup — only re-renders when result is ready, never on keystroke
 let zt=null;
 const zipLook=(z)=>{
+  sf({zip:z});
   clearTimeout(zt);
-  if(z.length!==5||!/^\d{5}$/.test(z)){sfr({miles:0,fee:0,lat:null,lon:null});return;}
-  set({mileLoad:true});
+  if(z.length!==5||!/^\d{5}$/.test(z)){sf({miles:0,fee:0,lat:null,lon:null});return;}
+  S.mileLoad=true;
   zt=setTimeout(async()=>{
-    try{const r=await fetch(`https://api.zippopotam.us/us/${z}`);if(!r.ok)throw 0;const d=await r.json();const lat=+d.places[0].latitude,lon=+d.places[0].longitude;const{miles,fee}=calcM(lat,lon);sfr({miles,fee,lat,lon});}
-    catch{sfr({miles:0,fee:0,lat:null,lon:null});}
-    set({mileLoad:false});
+    try{const r=await fetch(`https://api.zippopotam.us/us/${z}`);if(!r.ok)throw 0;const d=await r.json();const lat=+d.places[0].latitude,lon=+d.places[0].longitude;const{miles,fee}=calcM(lat,lon);S.mileLoad=false;sfr({miles,fee,lat,lon});}
+    catch{S.mileLoad=false;sfr({miles:0,fee:0,lat:null,lon:null});}
   },600);
 };
 
@@ -166,7 +165,7 @@ const ok=()=>{
 
 // Sync inputs before navigation (prevents focus-loss issue)
 const sync=()=>{
-  const m={date:"i-date",time:"i-time",guests:"i-guests",zip:"i-zip",loc:"i-loc",notes:"i-notes",name:"i-name",phone:"i-phone",email:"i-email"};
+  const m={date:"i-date",guests:"i-guests",zip:"i-zip",loc:"i-loc",notes:"i-notes",name:"i-name",phone:"i-phone",email:"i-email"};
   Object.entries(m).forEach(([k,id])=>{const e=document.getElementById(id);if(e)S.form[k]=e.value;});
 };
 const nxt=()=>{sync();set({step:S.step+1});};
@@ -257,7 +256,7 @@ const s2=()=>{
       <div style="margin-bottom:14px"><label class="fl">Event Date <span style="color:#FF6B00">*</span></label>
         <input type="date" id="i-date" class="fi" value="${f.date}" min="${today()}" onchange="sfr({date:this.value})"/></div>
       <div style="margin-bottom:14px"><label class="fl">Start Time <span style="color:#FF6B00">*</span></label>
-        <input type="time" id="i-time" class="fi" value="${f.time}" onchange="sfr({time:this.value})"/></div>
+        <select id="i-time" class="fi" onchange="sfr({time:this.value})"><option value="">Select time…</option><option value="08:00" ${f.time==="08:00"?"selected":""}>8:00 AM</option><option value="08:15" ${f.time==="08:15"?"selected":""}>8:15 AM</option><option value="08:30" ${f.time==="08:30"?"selected":""}>8:30 AM</option><option value="08:45" ${f.time==="08:45"?"selected":""}>8:45 AM</option><option value="09:00" ${f.time==="09:00"?"selected":""}>9:00 AM</option><option value="09:15" ${f.time==="09:15"?"selected":""}>9:15 AM</option><option value="09:30" ${f.time==="09:30"?"selected":""}>9:30 AM</option><option value="09:45" ${f.time==="09:45"?"selected":""}>9:45 AM</option><option value="10:00" ${f.time==="10:00"?"selected":""}>10:00 AM</option><option value="10:15" ${f.time==="10:15"?"selected":""}>10:15 AM</option><option value="10:30" ${f.time==="10:30"?"selected":""}>10:30 AM</option><option value="10:45" ${f.time==="10:45"?"selected":""}>10:45 AM</option><option value="11:00" ${f.time==="11:00"?"selected":""}>11:00 AM</option><option value="11:15" ${f.time==="11:15"?"selected":""}>11:15 AM</option><option value="11:30" ${f.time==="11:30"?"selected":""}>11:30 AM</option><option value="11:45" ${f.time==="11:45"?"selected":""}>11:45 AM</option><option value="12:00" ${f.time==="12:00"?"selected":""}>12:00 PM</option><option value="12:15" ${f.time==="12:15"?"selected":""}>12:15 PM</option><option value="12:30" ${f.time==="12:30"?"selected":""}>12:30 PM</option><option value="12:45" ${f.time==="12:45"?"selected":""}>12:45 PM</option><option value="13:00" ${f.time==="13:00"?"selected":""}>1:00 PM</option><option value="13:15" ${f.time==="13:15"?"selected":""}>1:15 PM</option><option value="13:30" ${f.time==="13:30"?"selected":""}>1:30 PM</option><option value="13:45" ${f.time==="13:45"?"selected":""}>1:45 PM</option><option value="14:00" ${f.time==="14:00"?"selected":""}>2:00 PM</option><option value="14:15" ${f.time==="14:15"?"selected":""}>2:15 PM</option><option value="14:30" ${f.time==="14:30"?"selected":""}>2:30 PM</option><option value="14:45" ${f.time==="14:45"?"selected":""}>2:45 PM</option><option value="15:00" ${f.time==="15:00"?"selected":""}>3:00 PM</option><option value="15:15" ${f.time==="15:15"?"selected":""}>3:15 PM</option><option value="15:30" ${f.time==="15:30"?"selected":""}>3:30 PM</option><option value="15:45" ${f.time==="15:45"?"selected":""}>3:45 PM</option><option value="16:00" ${f.time==="16:00"?"selected":""}>4:00 PM</option><option value="16:15" ${f.time==="16:15"?"selected":""}>4:15 PM</option><option value="16:30" ${f.time==="16:30"?"selected":""}>4:30 PM</option><option value="16:45" ${f.time==="16:45"?"selected":""}>4:45 PM</option><option value="17:00" ${f.time==="17:00"?"selected":""}>5:00 PM</option><option value="17:15" ${f.time==="17:15"?"selected":""}>5:15 PM</option><option value="17:30" ${f.time==="17:30"?"selected":""}>5:30 PM</option><option value="17:45" ${f.time==="17:45"?"selected":""}>5:45 PM</option><option value="18:00" ${f.time==="18:00"?"selected":""}>6:00 PM</option><option value="18:15" ${f.time==="18:15"?"selected":""}>6:15 PM</option><option value="18:30" ${f.time==="18:30"?"selected":""}>6:30 PM</option><option value="18:45" ${f.time==="18:45"?"selected":""}>6:45 PM</option><option value="19:00" ${f.time==="19:00"?"selected":""}>7:00 PM</option><option value="19:15" ${f.time==="19:15"?"selected":""}>7:15 PM</option><option value="19:30" ${f.time==="19:30"?"selected":""}>7:30 PM</option><option value="19:45" ${f.time==="19:45"?"selected":""}>7:45 PM</option><option value="20:00" ${f.time==="20:00"?"selected":""}>8:00 PM</option><option value="20:15" ${f.time==="20:15"?"selected":""}>8:15 PM</option><option value="20:30" ${f.time==="20:30"?"selected":""}>8:30 PM</option><option value="20:45" ${f.time==="20:45"?"selected":""}>8:45 PM</option><option value="21:00" ${f.time==="21:00"?"selected":""}>9:00 PM</option><option value="21:15" ${f.time==="21:15"?"selected":""}>9:15 PM</option><option value="21:30" ${f.time==="21:30"?"selected":""}>9:30 PM</option><option value="21:45" ${f.time==="21:45"?"selected":""}>9:45 PM</option><option value="22:00" ${f.time==="22:00"?"selected":""}>10:00 PM</option><option value="22:15" ${f.time==="22:15"?"selected":""}>10:15 PM</option><option value="22:30" ${f.time==="22:30"?"selected":""}>10:30 PM</option><option value="22:45" ${f.time==="22:45"?"selected":""}>10:45 PM</option></select></div>
     </div>
     <div style="margin-bottom:14px"><label class="fl">Event Type <span style="color:#FF6B00">*</span></label>
       <select class="fi" onchange="sfr({evType:this.value})"><option value="">Select…</option>
@@ -267,7 +266,7 @@ const s2=()=>{
       <div style="margin-bottom:14px"><label class="fl">Estimated Guests</label>
         <input type="number" id="i-guests" class="fi" value="${f.guests}" placeholder="e.g. 30" oninput="sf({guests:this.value})"/></div>
       <div style="margin-bottom:14px"><label class="fl">Event ZIP Code <span style="color:#FF6B00">*</span></label>
-        <input type="text" id="i-zip" class="fi" value="${f.zip}" placeholder="73120" maxlength="5" oninput="sf({zip:this.value});zipLook(this.value)"/></div>
+        <input type="text" id="i-zip" class="fi" value="${f.zip}" placeholder="73120" maxlength="5" oninput="zipLook(this.value)"/></div>
     </div>
     <div style="margin-bottom:14px"><label class="fl">Full Event Address <span style="color:#FF6B00">*</span></label>
       <div class="ac-wrap">
