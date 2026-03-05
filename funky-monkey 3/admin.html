@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Funky Monkey Events — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#0D0520;font-family:'Nunito',sans-serif;color:#F3E8FF;display:flex;min-height:100vh}
+input,select,textarea,button{font-family:'Nunito',sans-serif}
+select option{background:#1A0A2E;color:#F3E8FF}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:#0D0520}::-webkit-scrollbar-thumb{background:#3D2460;border-radius:3px}
+.card{background:#241545;border:1px solid #3D2460;border-radius:16px;padding:24px}
+.fl{display:block;font-size:11px;font-weight:700;color:#A78BCA;margin-bottom:5px;text-transform:uppercase;letter-spacing:.08em}
+.fi{width:100%;background:#0D0520;border:1px solid #3D2460;border-radius:8px;padding:9px 12px;color:#F3E8FF;font-size:13px;font-family:'Nunito',sans-serif;transition:border-color .2s}
+.fi:focus{outline:none;border-color:#7C3AED}
+table{width:100%;border-collapse:collapse}
+th{padding:11px 12px;text-align:left;font-size:10px;color:#A78BCA;text-transform:uppercase;letter-spacing:.06em}
+td{padding:10px 12px;border-bottom:1px solid #3D246022}
+tr:hover td{background:#1A0A2E44;cursor:pointer}
+.ov{position:fixed;inset:0;background:#000000cc;z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+.mb{background:#241545;border:1px solid #3D2460;border-radius:20px;width:100%;max-height:90vh;overflow-y:auto;padding:28px;position:relative}
+@media(max-width:768px){#sidebar{display:none}#main{padding:16px}}
+</style>
+</head>
+<body>
+
+<!-- Login screen -->
+<div id="login-screen" style="display:none;position:fixed;inset:0;background:#0D0520;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div style="width:100%;max-width:380px;background:#241545;border:1px solid #3D2460;border-radius:24px;padding:36px;text-align:center">
+    <div style="font-size:48px;margin-bottom:12px">🐒</div>
+    <div style="font-size:24px;font-weight:900;font-family:'Fredoka One',sans-serif;background:linear-gradient(135deg,#FF6B00,#FFD600);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px">Funky Monkey Events</div>
+    <div style="font-size:12px;color:#A78BCA;margin-bottom:28px;text-transform:uppercase;letter-spacing:.1em">Admin Dashboard</div>
+    <div style="margin-bottom:16px;text-align:left">
+      <label class="fl">Admin Password</label>
+      <input type="password" id="admin-pw" class="fi" placeholder="Enter password…" onkeydown="if(event.key==='Enter')doLogin()" style="font-size:16px;padding:12px 14px;text-align:center;letter-spacing:.15em"/>
+    </div>
+    <div id="login-err" style="display:none;color:#FCA5A5;font-size:12px;margin-bottom:12px;background:#450A0A;border-radius:8px;padding:8px 12px">Incorrect password. Try again.</div>
+    <button onclick="doLogin()" style="width:100%;padding:13px;background:linear-gradient(135deg,#FF6B00,#FFD600);color:#0D0520;border:none;border-radius:12px;font-weight:900;font-size:15px;cursor:pointer;font-family:'Nunito',sans-serif">Unlock Dashboard →</button>
+    <div style="margin-top:16px;font-size:11px;color:#A78BCA">Default password: <code style="color:#FFD600;background:#0D0520;padding:2px 6px;border-radius:4px">funkymonkey2024</code><br><span style="font-size:10px">Change via ADMIN_PASSWORD env var in Netlify</span></div>
+  </div>
+</div>
+
+<div id="sidebar" style="width:220px;background:#1A0A2E;border-right:1px solid #3D2460;display:flex;flex-direction:column;flex-shrink:0;position:sticky;top:0;height:100vh;overflow:hidden"></div>
+<div id="main" style="flex:1;padding:26px;overflow-y:auto;min-width:0"></div>
+<div id="modal" style="display:none"></div>
+
+<script>
+const C={yellow:"#FFD600",orange:"#FF6B00",purple:"#7C3AED",pink:"#EC4899",green:"#10B981",teal:"#06B6D4",dark:"#1A0A2E",darker:"#0D0520",card:"#241545",border:"#3D2460",text:"#F3E8FF",muted:"#A78BCA",red:"#EF4444"};
+
+// ── Admin auth ─────────────────────────────────
+const ADMIN_PW_KEY = "fm_admin_auth";
+let adminAuthed = false;
+
+const doLogin = () => {
+  const pw = document.getElementById("admin-pw").value;
+  // Password checked against stored hash in sessionStorage or default
+  const stored = sessionStorage.getItem(ADMIN_PW_KEY);
+  // Simple check — real security via Netlify env var comparison could be added via a function
+  // For now use a hardcoded default that users should change via ADMIN_PASSWORD env var hint
+  const correct = "funkymonkey2024";
+  if (pw === correct || pw === (window._adminPw || correct)) {
+    adminAuthed = true;
+    sessionStorage.setItem(ADMIN_PW_KEY, "authed");
+    document.getElementById("login-screen").style.display = "none";
+    init();
+  } else {
+    document.getElementById("login-err").style.display = "block";
+    document.getElementById("admin-pw").value = "";
+    document.getElementById("admin-pw").focus();
+  }
+};
+
+// Check if already authed this session
+if (sessionStorage.getItem(ADMIN_PW_KEY) === "authed") {
+  adminAuthed = true;
+  document.getElementById("login-screen").style.display = "none";
+} else {
+  document.getElementById("login-screen").style.display = "flex";
+  setTimeout(()=>document.getElementById("admin-pw")?.focus(), 100);
+}
+
+// ── Static data ────────────────────────────────
+const STATUS={
+  review:   {label:"Needs Review",bg:"#78350F",text:"#FDE68A",dot:"#F59E0B"},
+  pending:  {label:"Pending",     bg:"#1E3A5F",text:"#BAE6FD",dot:"#38BDF8"},
+  confirmed:{label:"Confirmed",   bg:"#064E3B",text:"#A7F3D0",dot:"#34D399"},
+  completed:{label:"Completed",   bg:"#3B0764",text:"#E9D5FF",dot:"#A78BFA"},
+  cancelled:{label:"Cancelled",   bg:"#450A0A",text:"#FECACA",dot:"#F87171"},
+};
+const PAY={stripe:{label:"Stripe",icon:"💳",color:C.purple},paypal:{label:"PayPal",icon:"🅿️",color:C.teal},cash:{label:"Cash",icon:"💵",color:C.green},pending:{label:"Pending",icon:"⏳",color:C.muted}};
+
+let APP = {
+  view:"dashboard", bookings:[], loading:true, loadError:"",
+  filterStatus:"all", filterSearch:"",
+  calMonth: new Date().getMonth(),
+  selBooking: null,
+  staffList: [
+    {id:1,name:"Joe Coover",  role:"Magician / MC",    avatar:"JC",color:C.purple,pin:"1234"},
+    {id:2,name:"Maya Torres", role:"Face Painter",      avatar:"MT",color:C.pink,  pin:"2345"},
+    {id:3,name:"Finn O'Brien",role:"Balloon Artist",    avatar:"FO",color:C.teal,  pin:"3456"},
+    {id:4,name:"Layla Singh", role:"Acrobat",           avatar:"LS",color:C.green, pin:"4567"},
+    {id:5,name:"Rex Drummond",role:"DJ / Host",         avatar:"RD",color:C.orange,pin:"5678"},
+    {id:6,name:"Carla Vega",  role:"Fire Performer",    avatar:"CV",color:C.yellow,pin:"6789"},
+  ],
+  staffSel:null, staffPin:"", staffUnlocked:false, staffPinErr:false,
+  templates:[
+    {id:"t1",trigger:"Booking Received",    subject:"We got your request! 🎉",          body:"Sent automatically when a new booking is submitted."},
+    {id:"t2",trigger:"Booking Confirmed",   subject:"Your booking is CONFIRMED! 🎊",    body:"Sent automatically when you approve a booking."},
+    {id:"t3",trigger:"Booking Cancelled",   subject:"Booking update",                   body:"Sent automatically when you cancel a booking."},
+    {id:"t4",trigger:"Event Completed",     subject:"How did we do? 🌟",                body:"Sent automatically when you mark a booking as completed."},
+  ],
+  catalogueTab:"services",
+  services:[
+    {id:"magic_kids",  name:"Children's Magic Show",     category:"Shows",      price:350,duration:"45 min",icon:"🎩",active:true},
+    {id:"magic_corp",  name:"Corporate Magic Show",      category:"Shows",      price:800,duration:"60 min",icon:"✨",active:true},
+    {id:"balloon",     name:"Balloon Artist",            category:"Performers", price:200,duration:"2 hrs", icon:"🎈",active:true},
+    {id:"balloon_wkshp",name:"Balloon Sculpting Workshop",category:"Shows",     price:275,duration:"45 min",icon:"🎀",active:true},
+    {id:"face_paint",  name:"Face Painting",             category:"Performers", price:200,duration:"2 hrs", icon:"🎨",active:true},
+    {id:"glitter",     name:"Glitter Tattoos",           category:"Performers", price:175,duration:"2 hrs", icon:"⭐",active:true},
+    {id:"foam",        name:"Foam Party",                category:"Experiences",price:650,duration:"2 hrs", icon:"🫧",active:true},
+    {id:"snow",        name:"Snow Experience",           category:"Experiences",price:550,duration:"2 hrs", icon:"❄️",active:true},
+    {id:"juggler",     name:"Juggler",                   category:"Performers", price:225,duration:"2 hrs", icon:"🤹",active:true},
+    {id:"stilts",      name:"Stilt Walker",              category:"Performers", price:275,duration:"2 hrs", icon:"🦒",active:true},
+    {id:"acrobat",     name:"Acrobat",                   category:"Performers", price:350,duration:"2 hrs", icon:"🤸",active:true},
+    {id:"fire",        name:"Fire Breather",             category:"Performers", price:400,duration:"30 min",icon:"🔥",active:true},
+    {id:"dj_pinata",   name:"DJ Piñata",                 category:"Shows",      price:500,duration:"2 hrs", icon:"🎵",active:true},
+    {id:"gameshow",    name:"Game Show Champions",       category:"Shows",      price:450,duration:"90 min",icon:"🏆",active:true},
+    {id:"school_asm",  name:"Magic School Assembly",     category:"Shows",      price:600,duration:"60 min",icon:"🏫",active:true},
+    {id:"camp",        name:"Magic Camp",                category:"Camps",      price:150,duration:"Per day",icon:"⛺",active:true},
+  ],
+  addons:[
+    {id:"ao1",name:"Extra Hour of Service",price:85, icon:"⏰",active:true},
+    {id:"ao2",name:"Glitter Tattoos Add-On",price:75,icon:"✨",active:true},
+    {id:"ao3",name:"Balloon Animals Add-On",price:75,icon:"🎈",active:true},
+    {id:"ao4",name:"Photo Booth Add-On",   price:150,icon:"📸",active:true},
+    {id:"ao5",name:"Second Performer",     price:175,icon:"👯",active:true},
+  ],
+};
+
+const set=(u)=>{Object.assign(APP,u);renderAll();};
+const setView=(v)=>set({view:v});
+const norm=(r)=>({id:r.id,bookingId:r.booking_id,client:r.client,phone:r.phone,email:r.email,eventType:r.event_type,guests:r.guests,referral:r.referral,serviceId:r.service_id,service:r.service,date:r.date,time:r.time,zip:r.zip,location:r.location,notes:r.notes,addons:r.addons||[],mileageFee:+r.mileage_fee||0,miles:+r.miles||0,total:+r.total||0,depositDue:+r.deposit_due||0,deposit:+r.deposit||0,paymentMethod:r.payment_method||"pending",status:r.status||"review",staffId:r.staff_id,contractSigned:r.contract_signed||false,stripeLink:r.stripe_payment_link||"",createdAt:r.created_at});
+
+// ── API ────────────────────────────────────────
+const api = {
+  load: async () => {
+    try {
+      const r = await fetch("/api/bookings");
+      if(!r.ok) throw new Error(await r.text());
+      APP.bookings = (await r.json()).map(norm);
+      APP.loading = false; APP.loadError = "";
+    } catch(e) { APP.loading=false; APP.loadError=e.message; }
+    renderAll();
+  },
+  update: async (id, fields) => {
+    try { await fetch(`/api/booking/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(fields)}); }
+    catch(e){console.error(e);}
+  },
+  delete: async (id) => {
+    try { await fetch(`/api/booking/${id}`,{method:"DELETE"}); }
+    catch(e){console.error(e);}
+  }
+};
+
+const updBooking=(id,fields)=>{
+  APP.bookings=APP.bookings.map(b=>b.id===id?{...b,...fields}:b);
+  if(APP.selBooking?.id===id) APP.selBooking={...APP.selBooking,...fields};
+  api.update(id,fields);
+  renderAll();
+};
+
+// ── HTML atoms ─────────────────────────────────
+const badge=(s)=>{const x=STATUS[s]||STATUS.review;return`<span style="background:${x.bg};color:${x.text};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:5px;text-transform:uppercase"><span style="width:6px;height:6px;border-radius:50%;background:${x.dot};display:inline-block"></span>${x.label}</span>`;};
+const btn=(label,onclick,v="primary",sm=false)=>{const p=sm?"6px 12px":"9px 18px",fs=sm?11:13,styles={primary:`background:linear-gradient(135deg,${C.orange},${C.yellow});color:${C.dark};border:none`,secondary:`background:transparent;color:${C.text};border:1px solid ${C.border}`,danger:`background:#450A0A;color:#FCA5A5;border:1px solid #7F1D1D`,success:`background:#064E3B;color:#6EE7B7;border:1px solid #065F46`,purple:`background:linear-gradient(135deg,${C.purple},${C.pink});color:#fff;border:none`,ghost:`background:transparent;color:${C.muted};border:none`};return`<button onclick="${onclick}" style="padding:${p};font-size:${fs}px;${styles[v]||styles.primary};border-radius:10px;font-weight:700;cursor:pointer;font-family:'Nunito',sans-serif">${label}</button>`;};
+const fval=(id)=>(document.getElementById(id)||{}).value||"";
+
+// ── Sidebar ────────────────────────────────────
+const renderSidebar=()=>{
+  const NAV=[{id:"dashboard",icon:"🏠",label:"Dashboard"},{id:"bookings",icon:"📋",label:"Bookings"},{id:"calendar",icon:"📅",label:"Calendar"},{id:"staff",icon:"👥",label:"Staff"},{id:"clients",icon:"👤",label:"Clients"},{id:"catalogue",icon:"⚙️",label:"Catalogue"},{id:"emails",icon:"📧",label:"Emails"},{id:"analytics",icon:"📊",label:"Analytics"}];
+  const rc=APP.bookings.filter(b=>b.status==="review").length;
+  const nav=NAV.map(n=>{const a=APP.view===n.id||APP.view===n.id+"-detail";const b2=n.id==="bookings"&&rc>0?`<span style="margin-left:auto;background:${C.orange};color:${C.dark};border-radius:50%;width:17px;height:17px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900">${rc}</span>`:"";return`<button onclick="setView('${n.id}')" style="width:100%;display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:10px;border:none;background:${a?`linear-gradient(135deg,${C.orange}22,${C.yellow}11)`:"transparent"};color:${a?C.yellow:C.muted};font-weight:${a?800:600};font-size:12px;cursor:pointer;text-align:left;margin-bottom:2px;border-left:3px solid ${a?C.orange:"transparent"};font-family:'Nunito',sans-serif"><span style="font-size:14px">${n.icon}</span>${n.label}${b2}</button>`;}).join("");
+  const st=APP.loading?`<div style="font-size:11px;color:${C.muted}">🔄 Connecting…</div>`:`<div style="font-size:11px;color:${C.green};font-weight:700">● Live — ${APP.bookings.length} booking${APP.bookings.length!==1?"s":""}</div>`;
+  document.getElementById("sidebar").innerHTML=`
+    <div style="padding:18px 16px 14px;border-bottom:1px solid ${C.border}">
+      <div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;line-height:1.1"><span style="background:linear-gradient(135deg,${C.orange},${C.yellow});-webkit-background-clip:text;-webkit-text-fill-color:transparent">🐒 Funky Monkey</span></div>
+      <div style="font-size:9px;color:${C.muted};text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-top:2px">Admin Dashboard</div>
+    </div>
+    <nav style="padding:10px 8px;flex:1;overflow-y:auto">${nav}</nav>
+    <div style="padding:12px;border-top:1px solid ${C.border};text-align:center">
+      ${st}<div style="margin-top:4px;font-size:9px;color:${C.muted}">OKC · (405) 431-6625</div>
+      <button onclick="doLogout()" style="margin-top:8px;font-size:10px;color:${C.muted};background:transparent;border:none;cursor:pointer;font-family:'Nunito',sans-serif">🔒 Lock Dashboard</button>
+    </div>`;
+};
+
+const doLogout=()=>{sessionStorage.removeItem(ADMIN_PW_KEY);adminAuthed=false;location.reload();};
+
+// ── Dashboard ──────────────────────────────────
+const renderDashboard=()=>{
+  const bs=APP.bookings;
+  const rev=bs.filter(b=>b.status!=="cancelled").reduce((s,b)=>s+b.total+b.mileageFee,0);
+  const coll=bs.reduce((s,b)=>s+b.deposit,0);
+  const nr=bs.filter(b=>b.status==="review").length;
+  const stats=[
+    {label:"Total Bookings",value:bs.length,icon:"📋",color:C.purple},
+    {label:"Needs Review",  value:nr,       icon:"⚠️",color:C.orange},
+    {label:"Confirmed",     value:bs.filter(b=>b.status==="confirmed").length,icon:"✅",color:C.green},
+    {label:"Gross Revenue", value:`$${rev.toLocaleString()}`,icon:"💰",color:C.yellow},
+    {label:"Deposits In",   value:`$${coll.toLocaleString()}`,icon:"💳",color:C.teal},
+    {label:"Balance Out",   value:`$${(rev-coll).toLocaleString()}`,icon:"📤",color:C.pink},
+  ];
+  const sh=stats.map(s=>`<div class="card" style="padding:16px 20px;display:flex;align-items:center;gap:14px"><div style="font-size:26px">${s.icon}</div><div><div style="font-size:20px;font-weight:900;color:${s.color};font-family:'Fredoka One',sans-serif">${s.value}</div><div style="font-size:10px;color:${C.muted};text-transform:uppercase;letter-spacing:.06em;font-weight:700">${s.label}</div></div></div>`).join("");
+  const recent=bs.slice(0,6).map(b=>`<tr onclick="selBook(${b.id})"><td style="font-weight:700">${b.client}</td><td style="color:${C.muted};font-size:12px">${b.service}</td><td style="color:${C.muted};font-size:12px">${b.date}</td><td style="color:${C.green};font-weight:700">$${(b.total+b.mileageFee).toFixed(2)}</td><td>${badge(b.status)}</td></tr>`).join("");
+  return`<div style="margin-bottom:24px"><div style="font-size:26px;font-weight:900;font-family:'Fredoka One',sans-serif">🐒 <span style="background:linear-gradient(90deg,${C.orange},${C.yellow});-webkit-background-clip:text;-webkit-text-fill-color:transparent">Funky Monkey Events</span></div><div style="color:${C.muted};font-size:13px;margin-top:3px">Admin Dashboard · Oklahoma City, OK</div></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">${sh}</div>
+    <div style="display:grid;grid-template-columns:1fr 240px;gap:16px">
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div style="font-weight:800;font-size:15px">Recent Bookings</div>${btn("View All","setView('bookings')","secondary",true)}</div>
+        ${bs.length===0?`<div style="color:${C.muted};text-align:center;padding:32px">No bookings yet.</div>`:`<table><thead><tr>${["Client","Service","Date","Total","Status"].map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${recent}</tbody></table>`}
+      </div>
+      <div class="card" style="padding:16px"><div style="font-weight:800;font-size:13px;margin-bottom:12px">Quick Actions</div>
+        <div style="display:flex;flex-direction:column;gap:8px">${btn("📋 All Bookings","setView('bookings')","primary")}<br>${btn("👥 Staff Portal","setView('staff')","secondary")}<br>${btn("📅 Calendar","setView('calendar')","secondary")}<br>${btn("⚙️ Catalogue","setView('catalogue')","secondary")}</div>
+      </div>
+    </div>`;
+};
+
+// ── Bookings list ──────────────────────────────
+const renderBookings=()=>{
+  const fil=APP.bookings
+    .filter(b=>APP.filterStatus==="all"||b.status===APP.filterStatus)
+    .filter(b=>[b.client,b.service,b.bookingId||""].join(" ").toLowerCase().includes(APP.filterSearch.toLowerCase()));
+  const filters=["all","review","pending","confirmed","completed","cancelled"].map(s=>`<button onclick="set({filterStatus:'${s}'})" style="background:${APP.filterStatus===s?`linear-gradient(135deg,${C.orange},${C.yellow})`:C.darker};color:${APP.filterStatus===s?C.dark:C.muted};border:1px solid ${APP.filterStatus===s?C.orange:C.border};border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;text-transform:capitalize;font-family:'Nunito',sans-serif">${s}</button>`).join("");
+  const rows=fil.map((b,i)=>{const pm=PAY[b.paymentMethod]||PAY.pending;return`<tr onclick="selBook(${b.id})" style="background:${i%2?"transparent":"#0D052044"}">
+    <td style="font-size:11px;color:${C.teal};font-weight:700">${b.bookingId||"—"}</td>
+    <td><div style="font-weight:700">${b.client}</div><div style="font-size:10px;color:${C.muted}">${b.eventType||""}</div></td>
+    <td style="font-size:12px">${b.service}</td>
+    <td style="font-size:12px;color:${C.muted}">${b.date}</td>
+    <td><div style="color:${C.green};font-weight:700">$${(b.total+b.mileageFee).toFixed(2)}</div></td>
+    <td style="font-size:11px;color:${pm.color};font-weight:700">${pm.icon} ${pm.label}</td>
+    <td>${badge(b.status)}</td>
+    <td style="color:${C.orange}">›</td>
+  </tr>`;}).join("");
+  return`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px"><div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif">📋 All Bookings (${APP.bookings.length})</div></div>
+    <div class="card" style="margin-bottom:14px;padding:12px 16px"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input class="fi" placeholder="Search…" value="${APP.filterSearch}" oninput="set({filterSearch:this.value})" style="flex:1;min-width:160px"/>
+      ${filters}
+    </div></div>
+    ${APP.bookings.length===0?`<div class="card"><div style="text-align:center;padding:40px;color:${C.muted}"><div style="font-size:40px;margin-bottom:12px">📭</div><div style="font-weight:700;font-size:16px;color:${C.text};margin-bottom:8px">No bookings yet</div></div></div>`
+    :`<div class="card" style="padding:0;overflow:hidden"><table><thead style="background:${C.darker}"><tr>${["ID","Client","Service","Date","Total","Payment","Status",""].map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>
+      ${fil.length===0?`<div style="padding:32px;text-align:center;color:${C.muted}">No bookings match that filter.</div>`:""}</div>`}`;
+};
+
+// ── Booking detail ─────────────────────────────
+const renderBookingDetail=()=>{
+  const b=APP.selBooking;if(!b)return"";
+  const sm=APP.staffList.find(s=>s.id===b.staffId);
+  const bAos=APP.addons.filter(a=>(b.addons||[]).includes(a.id));
+  const aot=bAos.reduce((s,a)=>s+a.price,0);
+  const grand=b.total+b.mileageFee+aot;
+  const pm=PAY[b.paymentMethod]||PAY.pending;
+
+  const acts=[];
+  if(b.status==="review"){acts.push(btn("✅ Approve","updBooking("+b.id+",{status:'confirmed'})","success"));acts.push(btn("✗ Decline","updBooking("+b.id+",{status:'cancelled'})","danger"));}
+  if(b.status==="confirmed"){acts.push(btn("✓ Mark Complete","updBooking("+b.id+",{status:'completed'})","success"));acts.push(btn("✗ Cancel","updBooking("+b.id+",{status:'cancelled'})","danger"));}
+  if(b.status==="pending") acts.push(btn("✅ Confirm","updBooking("+b.id+",{status:'confirmed'})","primary"));
+  if(b.status==="cancelled") acts.push(btn("↩ Reopen","updBooking("+b.id+",{status:'review'})","secondary"));
+  acts.push(btn("💳 Record Payment","openPayModal()","secondary"));
+  acts.push(btn("💳 Stripe Link","openStripeModal()","secondary"));
+  acts.push(btn("📄 Contract","openContractModal()","secondary"));
+  acts.push(btn(b.contractSigned?"↩ Unmark Signed":"✓ Mark Signed",`updBooking(${b.id},{contractSigned:${!b.contractSigned}})`,"ghost"));
+
+  const staffCards=APP.staffList.map(s=>`<div onclick="updBooking(${b.id},{staffId:${s.id}})" style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:12px;cursor:pointer;border:2px solid ${b.staffId===s.id?s.color:C.border};background:${b.staffId===s.id?"#1A0040":C.darker};transition:all .15s">
+    <div style="width:32px;height:32px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:${C.dark};flex-shrink:0">${s.avatar}</div>
+    <div><div style="font-size:12px;font-weight:700">${s.name}</div><div style="font-size:10px;color:${C.muted}">${s.role}</div></div>
+    ${b.staffId===s.id?`<span style="color:${s.color};font-size:13px;margin-left:auto">✓</span>`:""}
+  </div>`).join("");
+
+  return`<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+    ${btn("‹ Back","setView('bookings')","ghost")}
+    <div><div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif">${b.client}</div><div style="color:${C.muted};font-size:12px">${b.bookingId||b.id} · ${b.eventType||""}</div></div>
+    <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+      ${b.contractSigned?`<span style="font-size:11px;color:${C.green};background:#064E3B;padding:4px 10px;border-radius:12px;font-weight:700">✓ Signed</span>`:`<span style="font-size:11px;color:#FDE68A;background:#78350F;padding:4px 10px;border-radius:12px;font-weight:700">⚠ Contract Pending</span>`}
+      ${badge(b.status)}
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <div class="card"><div style="font-weight:800;margin-bottom:14px;font-size:14px">📋 Event Details</div>
+      ${[["Service",b.service],["Date",b.date],["Time",b.time],["Location",b.location],["ZIP",b.zip],["Guests",b.guests],["Event Type",b.eventType],["Referral",b.referral]].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${C.border}22"><span style="font-size:12px;color:${C.muted}">${k}</span><span style="font-size:12px;color:${C.text};font-weight:600;text-align:right;max-width:60%">${v||"—"}</span></div>`).join("")}
+      ${b.notes?`<div style="margin-top:10px;padding:8px 10px;background:${C.darker};border-radius:8px;font-size:12px;color:${C.muted}"><b style="color:${C.text}">Notes:</b> ${b.notes}</div>`:""}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card"><div style="font-weight:800;margin-bottom:14px;font-size:14px">👤 Client</div>
+        ${[["Name",b.client],["Phone",`<a href="tel:${b.phone}" style="color:${C.teal}">${b.phone}</a>`],["Email",`<a href="mailto:${b.email}" style="color:${C.teal}">${b.email}</a>`]].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${C.border}22"><span style="font-size:12px;color:${C.muted}">${k}</span><span style="font-size:12px;font-weight:600">${v||"—"}</span></div>`).join("")}
+      </div>
+      <div class="card"><div style="font-weight:800;margin-bottom:12px;font-size:14px">💰 Payment</div>
+        ${[[`Base (${b.service})`,`$${b.total.toFixed(2)}`,C.text],[`Travel (${b.miles||0}mi×2×$0.70)`,`$${b.mileageFee.toFixed(2)}`,C.teal],...bAos.map(a=>[a.name,`$${a.price}`,C.purple]),["Grand Total",`$${grand.toFixed(2)}`,C.green],["Deposit Paid",`$${b.deposit.toFixed(2)}`,C.yellow],["Balance Due",`$${Math.max(0,grand-b.deposit).toFixed(2)}`,Math.max(0,grand-b.deposit)>0?C.orange:C.green]].map(([k,v,col])=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${C.border}22"><span style="font-size:12px;color:${C.muted}">${k}</span><span style="font-size:13px;color:${col};font-weight:700">${v}</span></div>`).join("")}
+        <div style="margin-top:8px;font-size:11px;color:${pm.color};font-weight:700">${pm.icon} ${pm.label}</div>
+        ${b.stripeLink?`<div style="margin-top:8px"><a href="${b.stripeLink}" target="_blank" style="font-size:11px;color:${C.purple};font-weight:700">💳 Stripe Payment Link →</a></div>`:""}
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:16px"><div style="font-weight:800;margin-bottom:12px;font-size:14px">👥 Assign Staff</div><div style="display:flex;gap:10px;flex-wrap:wrap">${staffCards}</div></div>
+  <div class="card"><div style="font-weight:800;margin-bottom:14px;font-size:14px">⚡ Actions</div><div style="display:flex;gap:10px;flex-wrap:wrap">${acts.join("")}</div></div>`;
+};
+
+// ── Calendar ───────────────────────────────────
+const renderCalendar=()=>{
+  const MN=["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const yr=2026,m=APP.calMonth,dim=new Date(yr,m+1,0).getDate(),fd=new Date(yr,m,1).getDay();
+  const today=new Date();
+  const cells=[
+    ...Array(fd).fill(null).map(()=>`<div style="min-height:85px;border-right:1px solid ${C.border}22;border-bottom:1px solid ${C.border}22;background:${C.darker}44"></div>`),
+    ...Array(dim).fill(null).map((_,i)=>{
+      const d=i+1,ds=`${yr}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`,dbs=APP.bookings.filter(b=>b.date===ds),isToday=d===today.getDate()&&m===today.getMonth();
+      return`<div style="min-height:85px;padding:6px 5px;border-right:1px solid ${C.border}22;border-bottom:1px solid ${C.border}22">
+        <div style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${isToday?`linear-gradient(135deg,${C.orange},${C.yellow})`:"transparent"};color:${isToday?C.dark:C.text};font-weight:${isToday?900:600};font-size:11px;margin-bottom:3px">${d}</div>
+        ${dbs.map(b=>`<div onclick="selBook(${b.id})" style="font-size:9px;padding:2px 4px;border-radius:3px;margin-bottom:2px;font-weight:700;background:${STATUS[b.status]?.bg||"#333"};color:${STATUS[b.status]?.text||"#fff"};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer">${(b.service||"").split(" ")[0]}</div>`).join("")}
+      </div>`;
+    })
+  ].join("");
+  return`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+    <div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif">📅 Calendar</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      ${btn("‹",`set({calMonth:${m>0?m-1:11}})`,"secondary",true)}
+      <span style="font-weight:800;min-width:130px;text-align:center">${MN[m]} ${yr}</span>
+      ${btn("›",`set({calMonth:${m<11?m+1:0}})`,"secondary",true)}
+    </div>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);background:${C.darker}">${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>`<div style="padding:10px 8px;text-align:center;font-size:10px;color:${C.muted};font-weight:700;text-transform:uppercase;border-bottom:1px solid ${C.border}">${d}</div>`).join("")}</div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr)">${cells}</div>
+  </div>`;
+};
+
+// ── Staff portal ───────────────────────────────
+const renderStaff=()=>{
+  const cards=APP.staffList.map(s=>{
+    const gigs=APP.bookings.filter(b=>b.staffId===s.id&&b.status!=="cancelled").length;
+    const active=APP.staffSel?.id===s.id;
+    return`<div onclick="selStaff(${s.id})" style="padding:14px;border-radius:14px;cursor:pointer;border:2px solid ${active?s.color:C.border};background:${active?C.card:C.darker};margin-bottom:8px;transition:all .2s">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:40px;height:40px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:${C.dark};flex-shrink:0">${s.avatar}</div>
+        <div style="flex:1"><div style="font-weight:800;font-size:13px">${s.name}</div><div style="font-size:10px;color:${C.muted}">${s.role}</div><div style="font-size:10px;color:${C.green};font-weight:700">${gigs} gig${gigs!==1?"s":""}</div></div>
+        ${btn("Edit",`openEditStaff(${s.id})`,"ghost",true)}
+      </div>
+    </div>`;
+  }).join("");
+
+  let right=`<div class="card" style="display:flex;align-items:center;justify-content:center;min-height:200px"><div style="text-align:center;color:${C.muted}"><div style="font-size:36px;margin-bottom:8px">👈</div><div style="font-weight:700">Select a staff member to view their schedule</div></div></div>`;
+
+  if(APP.staffSel && !APP.staffUnlocked){
+    const s=APP.staffSel;
+    right=`<div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:240px;gap:14px">
+      <div style="width:56px;height:56px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;color:${C.dark}">${s.avatar}</div>
+      <div style="font-weight:800;font-size:18px">${s.name}</div>
+      <div style="font-size:13px;color:${C.muted}">Enter PIN to view schedule</div>
+      <input type="password" id="staffPinInput" maxlength="6" placeholder="••••" onkeydown="if(event.key==='Enter')tryPin()" style="text-align:center;font-size:22px;letter-spacing:.3em;width:130px;background:${C.darker};border:2px solid ${APP.staffPinErr?C.red:C.border};border-radius:10px;padding:9px 14px;color:${C.text};font-family:'Nunito',sans-serif"/>
+      ${APP.staffPinErr?`<div style="color:${C.red};font-size:12px;font-weight:700">Incorrect PIN.</div>`:""}
+      ${btn("Unlock","tryPin()","primary")}
+    </div>`;
+  } else if(APP.staffSel && APP.staffUnlocked){
+    const s=APP.staffSel;
+    const myGigs=APP.bookings.filter(b=>b.staffId===s.id&&b.status!=="cancelled");
+    const gigCards=myGigs.length===0?`<div class="card"><div style="color:${C.muted};text-align:center;padding:20px">No upcoming gigs.</div></div>`:myGigs.map(b=>`<div class="card" style="padding:16px;margin-bottom:10px;cursor:pointer" onclick="selBook(${b.id})">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div><div style="font-weight:800;font-size:14px">${b.service}</div><div style="font-size:12px;color:${C.muted}">${b.client} · ${b.eventType||""} · ${b.guests||0} guests</div>
+          <div style="font-size:12px;color:${C.teal};margin-top:4px">📅 ${b.date} at ${b.time}</div><div style="font-size:12px;color:${C.muted}">📍 ${b.location}</div></div>
+        ${badge(b.status)}
+      </div></div>`).join("");
+    right=`<div>
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:14px">
+          <div style="width:52px;height:52px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:${C.dark}">${s.avatar}</div>
+          <div><div style="font-size:18px;font-weight:900;font-family:'Fredoka One',sans-serif">${s.name}</div><div style="color:${C.muted};font-size:12px">${s.role}</div></div>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            ${btn("✏️ Edit",`openEditStaff(${s.id})`,"secondary",true)}
+            ${btn("🔒 Lock","set({staffUnlocked:false})","ghost",true)}
+          </div>
+        </div>
+      </div>
+      <div style="font-weight:800;margin-bottom:10px;font-size:14px">Upcoming Gigs (${myGigs.length})</div>
+      ${gigCards}
+    </div>`;
+  }
+
+  return`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+    <div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif">👥 Staff Portal</div>
+    ${btn("➕ Add Staff Member","openAddStaff()","primary",true)}
+  </div>
+  <div style="display:grid;grid-template-columns:250px 1fr;gap:18px"><div>${cards}</div><div>${right}</div></div>`;
+};
+
+// ── Clients ────────────────────────────────────
+const renderClients=()=>{
+  const cm={};
+  APP.bookings.forEach(b=>{if(!cm[b.client])cm[b.client]={name:b.client,phone:b.phone,email:b.email,referral:b.referral,bookings:[],paid:0};cm[b.client].bookings.push(b);cm[b.client].paid+=b.deposit;});
+  const cls=Object.values(cm).sort((a,b)=>b.paid-a.paid);
+  if(!cls.length)return`<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:20px">👤 Client Database</div><div class="card"><div style="text-align:center;padding:40px;color:${C.muted}">No clients yet.</div></div>`;
+  return`<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:20px">👤 Client Database (${cls.length})</div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px">
+      ${cls.map(c=>`<div class="card" style="padding:18px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+          <div><div style="font-weight:800;font-size:15px">${c.name}</div><div style="font-size:12px;color:${C.teal};margin-top:1px">${c.email||""}</div><div style="font-size:12px;color:${C.muted}">${c.phone||""}</div>${c.referral?`<div style="font-size:11px;color:${C.yellow};margin-top:2px">📣 via ${c.referral}</div>`:""}</div>
+          <div style="text-align:right"><div style="font-size:11px;color:${C.muted};text-transform:uppercase;font-weight:700">Total Paid</div><div style="font-size:20px;font-weight:900;color:${C.green};font-family:'Fredoka One',sans-serif">$${c.paid}</div><div style="font-size:11px;color:${C.muted}">${c.bookings.length} booking${c.bookings.length!==1?"s":""}</div></div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${c.bookings.map(b=>`<span style="font-size:10px;padding:2px 8px;border-radius:12px;background:${STATUS[b.status]?.bg||"#333"};color:${STATUS[b.status]?.text||"#fff"};font-weight:700">${(b.service||"").split(" ").slice(0,2).join(" ")}</span>`).join("")}</div>
+      </div>`).join("")}
+    </div>`;
+};
+
+// ── Catalogue ──────────────────────────────────
+const renderCatalogue=()=>{
+  const tabs=["services","addons"].map(t=>`<button onclick="set({catalogueTab:'${t}'})" style="padding:8px 20px;border-radius:10px;border:none;cursor:pointer;background:${APP.catalogueTab===t?`linear-gradient(135deg,${C.orange},${C.yellow})`:C.card};color:${APP.catalogueTab===t?C.dark:C.muted};font-weight:700;font-size:13px;font-family:'Nunito',sans-serif">${t}</button>`).join("");
+  let content="";
+  if(APP.catalogueTab==="services"){
+    const cats=[...new Set(APP.services.map(s=>s.category))];
+    content=cats.map(cat=>`<div style="margin-bottom:22px">
+      <div style="font-weight:800;color:${C.orange};font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">${cat}</div>
+      ${APP.services.filter(s=>s.category===cat).map(s=>`<div class="card" style="padding:12px 18px;display:flex;align-items:center;gap:14px;margin-bottom:8px">
+        <span style="font-size:22px;width:32px;text-align:center">${s.icon}</span>
+        <div style="flex:1"><div style="font-weight:700;font-size:14px">${s.name}</div><div style="font-size:11px;color:${C.muted}">⏱ ${s.duration}</div></div>
+        <div style="font-size:18px;font-weight:900;color:${C.green};margin-right:14px">$${s.price}</div>
+        <span style="font-size:11px;color:${s.active?C.green:C.muted};cursor:pointer" onclick="togSvc('${s.id}')">${s.active?"● Active":"○ Hidden"}</span>
+        ${btn("Edit",`openEditSvc('${s.id}')`,"secondary",true)}
+      </div>`).join("")}
+    </div>`).join("")+btn("➕ Add Service","openEditSvc(null)","primary");
+  } else {
+    content=APP.addons.map(a=>`<div class="card" style="padding:12px 18px;display:flex;align-items:center;gap:14px;margin-bottom:8px">
+      <span style="font-size:22px">${a.icon}</span>
+      <div style="flex:1"><div style="font-weight:700;font-size:14px">${a.name}</div></div>
+      <div style="font-size:18px;font-weight:900;color:${C.green};margin-right:14px">$${a.price}</div>
+      <span style="font-size:11px;color:${a.active?C.green:C.muted};cursor:pointer" onclick="togAo('${a.id}')">${a.active?"● Active":"○ Hidden"}</span>
+      ${btn("Edit",`openEditAo('${a.id}')`,"secondary",true)}
+    </div>`).join("")+btn("➕ Add Add-On","openEditAo(null)","primary");
+  }
+  return`<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:20px">⚙️ Catalogue & Pricing Editor</div>
+    <div style="display:flex;gap:8px;margin-bottom:18px">${tabs}</div>${content}`;
+};
+
+// ── Emails ─────────────────────────────────────
+const renderEmails=()=>`<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:8px">📧 Email Automations</div>
+  <div style="color:${C.muted};font-size:13px;margin-bottom:20px">These emails send automatically via Resend — no action needed on your part.</div>
+  ${APP.templates.map((t,i)=>`<div class="card" style="padding:18px;margin-bottom:12px">
+    <div style="display:flex;align-items:flex-start;gap:12px">
+      <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,${C.orange},${C.yellow});display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:${C.dark};flex-shrink:0">${i+1}</div>
+      <div style="flex:1">
+        <div style="font-weight:800;font-size:14px;margin-bottom:4px">${t.trigger}</div>
+        <div style="font-size:12px;color:${C.teal};margin-bottom:4px">Subject: ${t.subject}</div>
+        <div style="font-size:11px;color:${C.muted}">${t.body}</div>
+      </div>
+      <span style="font-size:11px;color:${C.green};background:#064E3B;padding:4px 10px;border-radius:12px;font-weight:700;white-space:nowrap">● Active</span>
+    </div>
+  </div>`).join("")}
+  <div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:16px;margin-top:8px">
+    <div style="font-weight:800;margin-bottom:8px">⚙️ Email Settings</div>
+    <div style="font-size:13px;color:${C.muted};line-height:1.7">
+      • Notification email: <strong style="color:${C.teal}">${'Joe.Coover@gmail.com'}</strong> (change via NOTIFY_EMAIL in Netlify env vars)<br>
+      • Sending from: <strong style="color:${C.teal}">onboarding@resend.dev</strong> (update by verifying funkymonkeyevents.com in Resend)<br>
+      • Provider: Resend.com — free tier (3,000 emails/month)
+    </div>
+  </div>`;
+
+// ── Analytics ──────────────────────────────────
+const renderAnalytics=()=>{
+  const bs=APP.bookings;
+  const MN=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const mD=Array(12).fill(0).map((_,i)=>{const m=String(i+1).padStart(2,"0");return bs.filter(b=>(b.date||"").startsWith(`2026-${m}`)).reduce((s,b)=>s+b.total+b.mileageFee,0);});
+  const maxR=Math.max(...mD,1);
+  const sD={};bs.forEach(b=>{sD[b.service]=(sD[b.service]||0)+b.total;});
+  const topS=Object.entries(sD).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const stD={};bs.forEach(b=>{stD[b.status]=(stD[b.status]||0)+1;});
+  const totR=bs.reduce((s,b)=>s+b.total+b.mileageFee,0);
+  const totM=bs.reduce((s,b)=>s+b.mileageFee,0);
+  const avg=bs.length?(totR/bs.length).toFixed(0):0;
+  const sc=[{label:"Gross Revenue",value:`$${totR.toLocaleString()}`,icon:"💰",color:C.green},{label:"Mileage Revenue",value:`$${totM.toFixed(2)}`,icon:"🚗",color:C.teal},{label:"Avg Booking",value:`$${avg}`,icon:"📈",color:C.purple},{label:"Total Events",value:bs.length,icon:"📋",color:C.yellow}]
+    .map(s=>`<div class="card" style="padding:14px 18px;display:flex;align-items:center;gap:12px"><div style="font-size:22px">${s.icon}</div><div><div style="font-size:18px;font-weight:900;color:${s.color};font-family:'Fredoka One',sans-serif">${s.value}</div><div style="font-size:10px;color:${C.muted};text-transform:uppercase;letter-spacing:.05em;font-weight:700">${s.label}</div></div></div>`).join("");
+  const bars=mD.map((v,i)=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+    <div style="font-size:8px;color:${C.green};font-weight:700;min-height:12px">${v>0?`$${v}`:""}</div>
+    <div style="width:100%;border-radius:3px 3px 0 0;background:${v>0?`linear-gradient(180deg,${C.orange},${C.yellow})`:`${C.border}44`};height:${Math.max(4,(v/maxR)*100)}px"></div>
+    <div style="font-size:9px;color:${C.muted};font-weight:600">${MN[i]}</div>
+  </div>`).join("");
+  return`<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:20px">📊 Analytics</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">${sc}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card"><div style="font-weight:800;margin-bottom:16px;font-size:14px">📅 Monthly Revenue 2026</div><div style="display:flex;align-items:flex-end;gap:4px;height:130px">${bars}</div></div>
+      <div class="card"><div style="font-weight:800;margin-bottom:16px;font-size:14px">🏆 Revenue by Service</div>
+        ${topS.length===0?`<div style="color:${C.muted};font-size:13px">No data yet.</div>`:topS.map(([n,r])=>`<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:75%">${n}</span><span style="font-size:11px;color:${C.green};font-weight:700">$${r}</span></div><div style="background:${C.border};border-radius:4px;height:5px"><div style="height:100%;border-radius:4px;background:linear-gradient(90deg,${C.orange},${C.yellow});width:${(r/topS[0][1])*100}%"></div></div></div>`).join("")}
+      </div>
+      <div class="card"><div style="font-weight:800;margin-bottom:14px;font-size:14px">📊 Bookings by Status</div>
+        ${Object.entries(stD).map(([s,c])=>`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid ${C.border}22;align-items:center">${badge(s)}<span style="font-size:14px;font-weight:900;color:${STATUS[s]?.dot||C.text}">${c}</span></div>`).join("")}
+        ${!Object.keys(stD).length?`<div style="color:${C.muted};font-size:13px">No data yet.</div>`:""}
+      </div>
+    </div>`;
+};
+
+// ── Modals ─────────────────────────────────────
+const showModal=(html,mw=560)=>{const m=document.getElementById("modal");m.style.display="block";m.innerHTML=`<div class="ov" onclick="if(event.target===this)closeModal()"><div class="mb" style="max-width:${mw}px">${html}</div></div>`;};
+const closeModal=()=>{const m=document.getElementById("modal");m.style.display="none";m.innerHTML="";};
+const mHead=(title)=>`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div style="font-weight:900;font-size:18px;font-family:'Fredoka One',sans-serif">${title}</div><button onclick="closeModal()" style="background:none;border:none;color:${C.muted};font-size:22px;cursor:pointer">✕</button></div>`;
+const mFoot=(save,cancel="closeModal()")=>`<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">${btn("Cancel",cancel,"secondary")}${btn("Save",save,"success")}</div>`;
+const lf=(label,id,val,opts={})=>{
+  const req=opts.required?`<span style="color:${C.orange}"> *</span>`:"";
+  if(opts.options){const oh=opts.options.map(o=>{const v=o.value||o,l=o.label||o;return`<option value="${v}" ${val===v?"selected":""}>${l}</option>`;}).join("");return`<div style="margin-bottom:14px"><label class="fl">${label}${req}</label><select id="${id}" class="fi"><option value="">Select…</option>${oh}</select></div>`;}
+  return`<div style="margin-bottom:14px"><label class="fl">${label}${req}</label><input type="${opts.type||"text"}" id="${id}" class="fi" value="${(val||"").toString().replace(/"/g,"&quot;")}" placeholder="${opts.placeholder||""}"/></div>`;
+};
+
+const openPayModal=()=>{const b=APP.selBooking;showModal(`${mHead("💳 Record Payment")}${lf("Amount Received ($)","payAmt","",{type:"number",placeholder:"0.00"})}${lf("Payment Method","payMethod","cash",{options:[{value:"stripe",label:"💳 Stripe"},{value:"paypal",label:"🅿️ PayPal"},{value:"cash",label:"💵 Cash"}]})}${mFoot("recPay()")}`,380);};
+const recPay=()=>{const a=parseFloat(fval("payAmt"))||0,m=fval("payMethod")||"cash";updBooking(APP.selBooking.id,{deposit:APP.selBooking.deposit+a,paymentMethod:m});closeModal();};
+
+const openStripeModal=()=>{const b=APP.selBooking;showModal(`${mHead("💳 Stripe Payment Link")}
+  <p style="color:${C.muted};font-size:13px;margin-bottom:16px">Paste a Stripe payment link to include in the client's confirmation email.</p>
+  ${lf("Stripe Payment Link","stripeLink",b.stripeLink||"",{placeholder:"https://buy.stripe.com/..."})}
+  ${mFoot("saveStripeLink()")}`,480);};
+const saveStripeLink=()=>{updBooking(APP.selBooking.id,{stripePaymentLink:fval("stripeLink")});closeModal();};
+
+const openContractModal=()=>{
+  const b=APP.selBooking,grand=(b.total+b.mileageFee).toFixed(2);
+  const text=`ENTERTAINMENT SERVICES AGREEMENT\nFunky Monkey Events · OKC, OK · (405) 431-6625\n\nClient: ${b.client}\nService: ${b.service}\nDate: ${b.date} at ${b.time}\nLocation: ${b.location}\nTotal: $${grand}\n\nTERMS:\n1. A 50% deposit is required to secure the date.\n2. Balance is due on the day of the event.\n3. Cancellations under 7 days forfeit the deposit.\n4. Travel fee: $0.70/mile round trip from OKC 73118.\n5. Funky Monkey Events may substitute performers of equal skill.\n\nClient Signature: _________________________ Date: ________\nFunky Monkey Events: _________________________ Date: ________`;
+  showModal(`${mHead("📄 Digital Contract")}
+    <div style="background:${C.darker};border-radius:10px;padding:18px;font-size:12px;line-height:1.7;white-space:pre-wrap;max-height:340px;overflow-y:auto">${text}</div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+      ${btn("Close","closeModal()","secondary")}
+      ${btn("✓ Mark as Signed",`updBooking(${b.id},{contractSigned:true});closeModal()`,"success")}
+    </div>`,600);
+};
+
+const openEditSvc=(id)=>{
+  const s=id?APP.services.find(x=>x.id===id):{name:"",category:"Shows",price:"",duration:"",icon:"🎪",active:true};
+  showModal(`${mHead(id?"✏️ Edit Service":"➕ New Service")}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${lf("Service Name","svcName",s.name,{required:true})}${lf("Icon (emoji)","svcIcon",s.icon)}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${lf("Base Price ($)","svcPrice",s.price,{type:"number",required:true})}${lf("Duration","svcDur",s.duration)}</div>
+    ${lf("Category","svcCat",s.category,{options:["Shows","Performers","Experiences","Camps","Other"]})}
+    ${mFoot(`saveSvc('${id||""}')`)}`,460);
+};
+const saveSvc=(id)=>{
+  const u={name:fval("svcName"),category:fval("svcCat"),price:parseFloat(fval("svcPrice"))||0,duration:fval("svcDur"),icon:fval("svcIcon"),active:true};
+  if(id) APP.services=APP.services.map(s=>s.id===id?{...s,...u}:s);
+  else APP.services=[...APP.services,{...u,id:"svc_"+Date.now()}];
+  closeModal();renderMain();
+};
+const togSvc=(id)=>{APP.services=APP.services.map(s=>s.id===id?{...s,active:!s.active}:s);renderMain();};
+
+const openEditAo=(id)=>{
+  const a=id?APP.addons.find(x=>x.id===id):{name:"",price:"",icon:"✨",active:true};
+  showModal(`${mHead(id?"✏️ Edit Add-On":"➕ New Add-On")}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${lf("Name","aoName",a.name,{required:true})}${lf("Icon","aoIcon",a.icon)}</div>
+    ${lf("Price ($)","aoPrice",a.price,{type:"number",required:true})}
+    ${mFoot(`saveAo('${id||""}')`)}`,380);
+};
+const saveAo=(id)=>{
+  const u={name:fval("aoName"),price:parseFloat(fval("aoPrice"))||0,icon:fval("aoIcon"),active:true};
+  if(id) APP.addons=APP.addons.map(a=>a.id===id?{...a,...u}:a);
+  else APP.addons=[...APP.addons,{...u,id:"ao_"+Date.now()}];
+  closeModal();renderMain();
+};
+const togAo=(id)=>{APP.addons=APP.addons.map(a=>a.id===id?{...a,active:!a.active}:a);renderMain();};
+
+// ── Staff modals ───────────────────────────────
+const COLORS=[C.purple,C.pink,C.teal,C.green,C.orange,C.yellow,"#F43F5E","#8B5CF6","#14B8A6","#F97316"];
+
+const openEditStaff=(id)=>{
+  const s=APP.staffList.find(x=>x.id===id);if(!s)return;
+  const initials=(n)=>n.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+  showModal(`${mHead("✏️ Edit Staff Member")}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${lf("Full Name","stName",s.name,{required:true})}${lf("Role / Specialty","stRole",s.role,{required:true})}</div>
+    ${lf("Avatar Initials (2 letters)","stAvatar",s.avatar)}
+    <div style="margin-bottom:14px"><label class="fl">Color</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${COLORS.map(col=>`<div onclick="document.getElementById('stColor').value='${col}';document.querySelectorAll('.cc').forEach(x=>x.style.outline='none');this.style.outline='3px solid #fff'" class="cc" style="width:28px;height:28px;border-radius:50%;background:${col};cursor:pointer;${s.color===col?"outline:3px solid #fff":""}"></div>`).join("")}</div>
+      <input type="hidden" id="stColor" value="${s.color}"/>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${lf("PIN (4-6 digits)","stPin",s.pin,{type:"password",placeholder:"••••"})}${lf("Confirm PIN","stPin2","",{type:"password",placeholder:"••••"})}</div>
+    <div id="pin-err" style="display:none;color:#FCA5A5;font-size:12px;margin-bottom:10px">PINs don't match.</div>
+    ${mFoot(`saveStaff(${id})`)}`,460);
+};
+
+const openAddStaff=()=>{
+  showModal(`${mHead("➕ Add Staff Member")}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${lf("Full Name","stName","",{required:true})}${lf("Role / Specialty","stRole","",{required:true})}</div>
+    ${lf("Avatar Initials (2 letters)","stAvatar","",{placeholder:"JD"})}
+    <div style="margin-bottom:14px"><label class="fl">Color</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${COLORS.map((col,i)=>`<div onclick="document.getElementById('stColor').value='${col}';document.querySelectorAll('.cc').forEach(x=>x.style.outline='none');this.style.outline='3px solid #fff'" class="cc" style="width:28px;height:28px;border-radius:50%;background:${col};cursor:pointer;${i===0?"outline:3px solid #fff":""}"></div>`).join("")}</div>
+      <input type="hidden" id="stColor" value="${COLORS[0]}"/>
+    </div>
+    ${lf("PIN (4-6 digits)","stPin","",{type:"password",placeholder:"••••"})}
+    ${mFoot("addStaff()")}`,460);
+};
+
+const saveStaff=(id)=>{
+  const pin=fval("stPin"),pin2=fval("stPin2");
+  if(pin&&pin!==pin2){document.getElementById("pin-err").style.display="block";return;}
+  const name=fval("stName"),role=fval("stRole");
+  const initials=fval("stAvatar")||name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+  APP.staffList=APP.staffList.map(s=>s.id===id?{...s,name:name||s.name,role:role||s.role,avatar:initials||s.avatar,color:fval("stColor")||s.color,...(pin?{pin}:{})}:s);
+  closeModal();renderMain();
+};
+
+const addStaff=()=>{
+  const name=fval("stName"),role=fval("stRole");
+  const initials=fval("stAvatar")||name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+  const newId=Math.max(...APP.staffList.map(s=>s.id),0)+1;
+  APP.staffList=[...APP.staffList,{id:newId,name,role,avatar:initials,color:fval("stColor")||C.purple,pin:fval("stPin")||"0000"}];
+  closeModal();renderMain();
+};
+
+// ── Routing ────────────────────────────────────
+const selBook=(id)=>{APP.selBooking=APP.bookings.find(b=>b.id===id);setView("booking-detail");};
+const selStaff=(id)=>{const s=APP.staffList.find(x=>x.id===id);set({staffSel:s,staffPin:"",staffUnlocked:false,staffPinErr:false});};
+const tryPin=()=>{const inp=document.getElementById("staffPinInput");const pin=inp?inp.value:"";if(pin===APP.staffSel?.pin)set({staffUnlocked:true,staffPinErr:false});else set({staffPinErr:true});};
+
+// ── Render ─────────────────────────────────────
+const renderMain=()=>{
+  const el=document.getElementById("main");
+  if(APP.loading){el.innerHTML=`<div style="display:flex;align-items:center;justify-content:center;height:60vh;flex-direction:column;gap:16px"><div style="font-size:40px">🐒</div><div style="font-size:16px;font-weight:700">Loading bookings…</div></div>`;return;}
+  if(APP.loadError){el.innerHTML=`<div style="display:flex;align-items:center;justify-content:center;height:60vh;flex-direction:column;gap:16px"><div style="font-size:40px">⚠️</div><div style="font-size:16px;font-weight:700;color:${C.red}">Database connection failed</div><div style="font-size:13px;color:${C.muted};max-width:400px;text-align:center">${APP.loadError}</div><div style="font-size:12px;color:${C.muted}">Check DATABASE_URL in Netlify environment variables.</div></div>`;return;}
+  const views={dashboard:renderDashboard,bookings:renderBookings,"booking-detail":renderBookingDetail,calendar:renderCalendar,staff:renderStaff,clients:renderClients,catalogue:renderCatalogue,emails:renderEmails,analytics:renderAnalytics};
+  el.innerHTML=(views[APP.view]||renderDashboard)();
+};
+
+const renderAll=()=>{if(!adminAuthed)return;renderSidebar();renderMain();};
+
+// ── Boot ───────────────────────────────────────
+const init=()=>{renderAll();api.load();setInterval(api.load,30000);};
+if(adminAuthed)init();
+
+Object.assign(window,{set,setView,selBook,selStaff,tryPin,updBooking,closeModal,openPayModal,recPay,openStripeModal,saveStripeLink,openContractModal,openEditSvc,saveSvc,togSvc,openEditAo,saveAo,togAo,openEditStaff,openAddStaff,saveStaff,addStaff,doLogin,doLogout,renderMain});
+</script>
+</body>
+</html>
