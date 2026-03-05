@@ -175,7 +175,7 @@ const ok=()=>{
 
 // Sync inputs before navigation (prevents focus-loss issue)
 const sync=()=>{
-  const m={date:"i-date",guests:"i-guests",zip:"i-zip",loc:"i-loc",notes:"i-notes",name:"i-name",phone:"i-phone",email:"i-email"};
+  const m={date:"i-date",guests:"i-guests",zip:"i-zip",loc:"i-loc",notes:"i-notes",name:"i-name",phone:"i-phone",email:"i-email",referral:"i-referral"};
   Object.entries(m).forEach(([k,id])=>{const e=document.getElementById(id);if(e)S.form[k]=e.value;});
 };
 const nxt=()=>{sync();set({step:S.step+1});};
@@ -304,7 +304,7 @@ const s3=()=>{
     <div style="margin-bottom:14px"><label class="fl">Email Address <span style="color:#FF6B00">*</span></label>
       <input type="email" id="i-email" class="fi" value="${f.email}" placeholder="jane@example.com" oninput="sf({email:this.value})"/></div>
     <div style="margin-bottom:14px"><label class="fl">How did you hear about us?</label>
-      <select class="fi" onchange="sfr({referral:this.value})"><option value="">Select…</option>
+      <select id="i-referral" class="fi" onchange="sf({referral:this.value})"><option value="">Select…</option>
         ${["Google","Facebook","Instagram","Word of Mouth","Returning Client","LinkedIn","Other"].map(o=>`<option value="${o}" ${f.referral===o?"selected":""}>${o}</option>`).join("")}
       </select></div>
     <div style="background:#FFFFFF08;border-radius:12px;padding:12px 16px;font-size:12px;color:${C.muted};line-height:1.6">
