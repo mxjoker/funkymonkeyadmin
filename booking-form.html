@@ -169,8 +169,21 @@ const ok=()=>{
   const f=S.form;
   if(S.step===1)return!!f.svcId;
   if(S.step===2)return!!f.date&&!!f.time&&!!f.evType&&!!f.loc&&!!f.zip;
-  if(S.step===3)return!!f.name&&!!f.phone&&!!f.email;
+  if(S.step===3){
+    // Read live from DOM since sf() updates silently without re-render
+    const name=(document.getElementById("i-name")||{}).value||f.name;
+    const phone=(document.getElementById("i-phone")||{}).value||f.phone;
+    const email=(document.getElementById("i-email")||{}).value||f.email;
+    return!!(name&&phone&&email);
+  }
   return true;
+};
+
+// Update just the Next button without full re-render
+const updNextBtn=()=>{
+  const btn=document.querySelector(".btn.bp");
+  if(!btn)return;
+  btn.disabled=!ok();
 };
 
 // Sync inputs before navigation (prevents focus-loss issue)
@@ -297,12 +310,12 @@ const s3=()=>{
     <div style="color:${C.muted};font-size:13px;margin-bottom:20px">We'll send your quote and confirmation here.</div>
     <div class="g2">
       <div style="margin-bottom:14px"><label class="fl">Your Name <span style="color:#FF6B00">*</span></label>
-        <input type="text" id="i-name" class="fi" value="${f.name}" placeholder="Jane Smith" oninput="sf({name:this.value})"/></div>
+        <input type="text" id="i-name" class="fi" value="${f.name}" placeholder="Jane Smith" oninput="sf({name:this.value});updNextBtn()"/></div>
       <div style="margin-bottom:14px"><label class="fl">Phone Number <span style="color:#FF6B00">*</span></label>
-        <input type="tel" id="i-phone" class="fi" value="${f.phone}" placeholder="405-555-0000" oninput="sf({phone:this.value})"/></div>
+        <input type="tel" id="i-phone" class="fi" value="${f.phone}" placeholder="405-555-0000" oninput="sf({phone:this.value});updNextBtn()"/></div>
     </div>
     <div style="margin-bottom:14px"><label class="fl">Email Address <span style="color:#FF6B00">*</span></label>
-      <input type="email" id="i-email" class="fi" value="${f.email}" placeholder="jane@example.com" oninput="sf({email:this.value})"/></div>
+      <input type="email" id="i-email" class="fi" value="${f.email}" placeholder="jane@example.com" oninput="sf({email:this.value});updNextBtn()"/></div>
     <div style="margin-bottom:14px"><label class="fl">How did you hear about us?</label>
       <select id="i-referral" class="fi" onchange="sf({referral:this.value})"><option value="">Select…</option>
         ${["Google","Facebook","Instagram","Word of Mouth","Returning Client","LinkedIn","Other"].map(o=>`<option value="${o}" ${f.referral===o?"selected":""}>${o}</option>`).join("")}
@@ -376,7 +389,7 @@ const renderDone=()=>{
 };
 
 // Expose globals
-Object.assign(window,{set,sf,sfr,nxt,back,sub,zipLook,acLook,acKey,acPick,renderAcDrop,togAo:(id)=>sfr({addons:S.form.addons.includes(id)?S.form.addons.filter(x=>x!==id):[...S.form.addons,id]})});
+Object.assign(window,{set,sf,sfr,nxt,back,sub,zipLook,acLook,acKey,acPick,renderAcDrop,updNextBtn,togAo:(id)=>sfr({addons:S.form.addons.includes(id)?S.form.addons.filter(x=>x!==id):[...S.form.addons,id]})});
 re();
 </script>
 </body>
