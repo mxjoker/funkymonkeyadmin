@@ -1,6 +1,3 @@
-[build]
-  functions = "netlify/functions"
-
 [[redirects]]
   from = "/api/bookings"
   to = "/.netlify/functions/bookings"
@@ -17,6 +14,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/services"
+  to = "/.netlify/functions/services"
+  status = 200
+
+[[redirects]]
   from = "/api/stripe-webhook"
   to = "/.netlify/functions/stripe-webhook"
   status = 200
@@ -25,3 +27,6 @@
   from = "/api/create-stripe-link"
   to = "/.netlify/functions/create-stripe-link"
   status = 200
+
+[functions]
+  node_bundler = "esbuild"

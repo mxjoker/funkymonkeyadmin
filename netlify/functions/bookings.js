@@ -1,147 +1,240 @@
-const { Client } = require("pg");
+const { Pool } = require('pg');
 
-const db = () => new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-const NOTIFY = process.env.NOTIFY_EMAIL || "Joe.Coover@gmail.com";
-const FROM = "onboarding@resend.dev";
-const SITE = "https://funkymonkeyadmin.netlify.app";
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
-const ensureTable = async (c) => {
-  await c.query(`CREATE TABLE IF NOT EXISTS bookings (
-    id SERIAL PRIMARY KEY, booking_id TEXT,
-    client TEXT, phone TEXT, email TEXT, event_type TEXT, guests INTEGER, referral TEXT,
-    service_id TEXT, service TEXT, date TEXT, time TEXT, zip TEXT, location TEXT, notes TEXT,
-    addons JSONB DEFAULT '[]', mileage_fee NUMERIC DEFAULT 0, miles NUMERIC DEFAULT 0,
-    total NUMERIC DEFAULT 0, deposit_due NUMERIC DEFAULT 0, deposit NUMERIC DEFAULT 0,
-    payment_method TEXT DEFAULT 'pending', status TEXT DEFAULT 'review',
-    staff_id INTEGER, contract_signed BOOLEAN DEFAULT false,
-    stripe_payment_link TEXT DEFAULT '', created_at TIMESTAMPTZ DEFAULT NOW()
-  )`);
-  await c.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_payment_link TEXT DEFAULT ''`).catch(()=>{});
-};
+async function ensureTable(client) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS bookings (
+      id SERIAL PRIMARY KEY,
+      reference VARCHAR(20) UNIQUE,
+      status VARCHAR(32) DEFAULT 'review',
 
-const sendEmail = async (to, subject, html) => {
-  if (!process.env.RESEND_API_KEY || !to) return;
+      service_id VARCHAR(64),
+      service_name VARCHAR(255),
+      service_price NUMERIC(10,2),
+      addons JSONB DEFAULT '[]',
+      addon_total NUMERIC(10,2) DEFAULT 0,
+      mileage_cost NUMERIC(10,2) DEFAULT 0,
+      mileage_miles INTEGER DEFAULT 0,
+      total_price NUMERIC(10,2),
+      deposit_amount NUMERIC(10,2) DEFAULT 100,
+      balance_due NUMERIC(10,2),
+      deposit_paid BOOLEAN DEFAULT FALSE,
+      deposit_paid_at TIMESTAMPTZ,
+      stripe_session_id VARCHAR(255),
+
+      event_date DATE,
+      event_time VARCHAR(10),
+      event_zip VARCHAR(10),
+      event_location TEXT DEFAULT '',
+      event_type VARCHAR(100),
+      guest_count INTEGER,
+      notes TEXT DEFAULT '',
+
+      client_name VARCHAR(255),
+      client_phone VARCHAR(50),
+      client_email VARCHAR(255),
+      referral_source VARCHAR(100) DEFAULT '',
+
+      admin_notes TEXT DEFAULT '',
+      contract_signed BOOLEAN DEFAULT FALSE,
+
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  // Add any missing columns for backwards compat
+  const cols = [
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS service_id VARCHAR(64)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS addons JSONB DEFAULT '[]'",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS addon_total NUMERIC(10,2) DEFAULT 0",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mileage_cost NUMERIC(10,2) DEFAULT 0",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mileage_miles INTEGER DEFAULT 0",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_amount NUMERIC(10,2) DEFAULT 100",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS balance_due NUMERIC(10,2)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_location TEXT DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS admin_notes TEXT DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS referral_source VARCHAR(100) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS contract_signed BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)"
+  ];
+  for (const sql of cols) {
+    try { await client.query(sql); } catch (_) {}
+  }
+}
+
+function generateReference() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let r = 'FM-';
+  for (let i = 0; i < 6; i++) r += chars[Math.floor(Math.random() * chars.length)];
+  return r;
+}
+
+exports.handler = async (event) => {
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Content-Type': 'application/json'
+  };
+
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
+
+  const client = await pool.connect();
   try {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: FROM, to, subject, html })
-    });
-  } catch(e) { console.error("Email error:", e.message); }
-};
+    await ensureTable(client);
 
-const wrap = (body) => `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0F0A1E;color:#F3E8FF;border-radius:16px;overflow:hidden">
-  <div style="background:linear-gradient(135deg,#FF6B00,#FFD600);padding:20px 24px"><div style="font-size:22px;font-weight:900;color:#0F0A1E">🐒 Funky Monkey Events</div></div>
-  <div style="padding:24px">${body}</div></div>`;
+    // GET all bookings
+    if (event.httpMethod === 'GET') {
+      const { rows } = await client.query(
+        'SELECT * FROM bookings ORDER BY created_at DESC'
+      );
+      return { statusCode: 200, headers, body: JSON.stringify(rows) };
+    }
 
-const row = (k,v) => `<tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700;width:130px;vertical-align:top">${k}</td><td style="padding:7px 0;font-weight:600">${v}</td></tr>`;
+    // POST new booking
+    if (event.httpMethod === 'POST') {
+      const b = JSON.parse(event.body || '{}');
 
-// Create a Stripe Checkout payment link for the deposit
-const createStripePaymentLink = async (booking, depositAmount) => {
-  if (!process.env.STRIPE_SECRET_KEY) return null;
-  try {
-    const amountCents = Math.round(depositAmount * 100);
-    const res = await fetch("https://api.stripe.com/v1/payment_links", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.STRIPE_SECRET_KEY}`,
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams({
-        "line_items[0][price_data][currency]": "usd",
-        "line_items[0][price_data][product_data][name]": `${booking.service} Deposit`,
-        "line_items[0][price_data][product_data][description]": `50% deposit for ${booking.service} on ${booking.date} at ${booking.location}`,
-        "line_items[0][price_data][unit_amount]": amountCents,
-        "line_items[0][quantity]": "1",
-        "metadata[booking_id]": booking.booking_id,
-        "after_completion[type]": "redirect",
-        "after_completion[redirect][url]": `${SITE}/booking-form.html?paid=1`,
-        "customer_creation": "always",
-      }).toString()
-    });
-    const data = await res.json();
-    if (data.url) return data.url;
-    console.error("Stripe error:", data);
-    return null;
-  } catch(e) {
-    console.error("Stripe payment link error:", e.message);
-    return null;
+      const reference = generateReference();
+      const deposit = 100;
+      const balance = (Number(b.total_price) || 0) - deposit;
+
+      const { rows } = await client.query(`
+        INSERT INTO bookings (
+          reference, status,
+          service_id, service_name, service_price,
+          addons, addon_total, mileage_cost, mileage_miles,
+          total_price, deposit_amount, balance_due,
+          event_date, event_time, event_zip, event_location,
+          event_type, guest_count, notes,
+          client_name, client_phone, client_email, referral_source
+        ) VALUES (
+          $1, 'review',
+          $2, $3, $4,
+          $5, $6, $7, $8,
+          $9, $10, $11,
+          $12, $13, $14, $15,
+          $16, $17, $18,
+          $19, $20, $21, $22
+        ) RETURNING *
+      `, [
+        reference,
+        b.service_id || null,
+        b.service_name || '',
+        Number(b.service_price) || 0,
+        JSON.stringify(b.addons || []),
+        Number(b.addon_total) || 0,
+        Number(b.mileage_cost) || 0,
+        Number(b.mileage_miles) || 0,
+        Number(b.total_price) || 0,
+        deposit,
+        balance,
+        b.event_date || null,
+        b.event_time || '',
+        b.event_zip || '',
+        b.event_location || '',
+        b.event_type || '',
+        parseInt(b.guest_count) || 0,
+        b.notes || '',
+        b.client_name || '',
+        b.client_phone || '',
+        b.client_email || '',
+        b.referral_source || ''
+      ]);
+
+      const booking = rows[0];
+
+      // Send emails (fire and forget)
+      sendEmails(booking).catch(e => console.error('Email error:', e));
+
+      return {
+        statusCode: 201,
+        headers,
+        body: JSON.stringify({ success: true, reference: booking.reference, id: booking.id })
+      };
+    }
+
+    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
+
+  } catch (err) {
+    console.error('Bookings error:', err);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
+  } finally {
+    client.release();
   }
 };
 
-exports.handler = async (event) => {
-  const h = { "Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"Content-Type","Access-Control-Allow-Methods":"GET,POST,OPTIONS","Content-Type":"application/json" };
-  if (event.httpMethod==="OPTIONS") return { statusCode:200, headers:h, body:"" };
+async function sendEmails(booking) {
+  const RESEND_API_KEY = process.env.RESEND_API_KEY;
+  const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
+  const FROM = 'Funky Monkey Events <onboarding@resend.dev>';
 
-  const c = db();
-  try {
-    await c.connect();
-    await ensureTable(c);
+  const dateStr = booking.event_date
+    ? new Date(booking.event_date + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
+    : 'TBD';
 
-    if (event.httpMethod==="GET") {
-      const r = await c.query("SELECT * FROM bookings ORDER BY created_at DESC");
-      return { statusCode:200, headers:h, body:JSON.stringify(r.rows) };
-    }
+  const addonList = (booking.addons || []).map(a => `<li>${a.name} — $${Number(a.price).toFixed(2)}</li>`).join('');
 
-    if (event.httpMethod==="POST") {
-      const d = JSON.parse(event.body);
-      const bid = "FM-" + Date.now().toString().slice(-6);
-      const depositDue = d.depositDue || Math.round((d.total||0) * 0.5);
+  // Admin notification
+  await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: FROM,
+      to: NOTIFY_EMAIL,
+      subject: `🐒 New Booking Request — ${booking.reference} — ${booking.service_name}`,
+      html: `
+        <h2>New Booking Request</h2>
+        <p><strong>Ref:</strong> ${booking.reference}</p>
+        <p><strong>Service:</strong> ${booking.service_name}</p>
+        <p><strong>Date:</strong> ${dateStr} at ${booking.event_time}</p>
+        <p><strong>ZIP:</strong> ${booking.event_zip}${booking.event_location ? ' — ' + booking.event_location : ''}</p>
+        <p><strong>Event Type:</strong> ${booking.event_type} · ${booking.guest_count} guests</p>
+        <hr/>
+        <p><strong>Client:</strong> ${booking.client_name}</p>
+        <p><strong>Phone:</strong> ${booking.client_phone}</p>
+        <p><strong>Email:</strong> ${booking.client_email}</p>
+        ${booking.referral_source ? `<p><strong>Referral:</strong> ${booking.referral_source}</p>` : ''}
+        <hr/>
+        <p><strong>Service:</strong> $${Number(booking.service_price).toFixed(2)}</p>
+        ${addonList ? `<ul>${addonList}</ul>` : ''}
+        ${Number(booking.mileage_cost) > 0 ? `<p><strong>Travel:</strong> $${Number(booking.mileage_cost).toFixed(2)} (${booking.mileage_miles} mi)</p>` : ''}
+        <p><strong>Total:</strong> $${Number(booking.total_price).toFixed(2)}</p>
+        <p><strong>Deposit:</strong> $${Number(booking.deposit_amount).toFixed(2)}</p>
+        <p><strong>Balance Due:</strong> $${Number(booking.balance_due).toFixed(2)}</p>
+        ${booking.notes ? `<p><strong>Notes:</strong> ${booking.notes}</p>` : ''}
+        <br/>
+        <a href="https://funkymonkeyadmin.netlify.app/admin.html" style="background:#7c3aed;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">View in Admin</a>
+      `
+    })
+  });
 
-      const r = await c.query(
-        `INSERT INTO bookings (booking_id,client,phone,email,event_type,guests,referral,service_id,service,date,time,zip,location,notes,addons,mileage_fee,miles,total,deposit_due,status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'review') RETURNING *`,
-        [bid,d.client,d.phone,d.email,d.eventType,d.guests||0,d.referral,d.serviceId,d.service,d.date,d.time,d.zip,d.location,d.notes,JSON.stringify(d.addons||[]),d.mileageFee||0,d.miles||0,d.total||0,depositDue]
-      );
-      const b = r.rows[0];
-      const grand = (+b.total + +b.mileage_fee).toFixed(2);
-      const dep = Math.round((+b.total + +b.mileage_fee) * 0.5);
-
-      // Admin alert email
-      await sendEmail(NOTIFY, `🐒 New Booking: ${b.service} — ${b.client}`,
-        wrap(`<p style="margin-bottom:16px;font-size:15px;font-weight:700;color:#FFD600">New booking request!</p>
-          <table style="width:100%;border-collapse:collapse">
-            ${row("Booking ID", `<span style="color:#FFD600">${b.booking_id}</span>`)}
-            ${row("Client", b.client)}
-            ${row("Phone", `<a href="tel:${b.phone}" style="color:#06B6D4">${b.phone}</a>`)}
-            ${row("Email", `<a href="mailto:${b.email}" style="color:#06B6D4">${b.email}</a>`)}
-            ${row("Service", b.service)}
-            ${row("Date & Time", `${b.date} at ${b.time}`)}
-            ${row("Location", b.location)}
-            ${row("Event Type", `${b.event_type} · ${b.guests} guests`)}
-            ${b.notes ? row("Notes", b.notes) : ""}
-            ${row("Total", `<span style="color:#10B981;font-size:18px;font-weight:900">$${grand}</span>`)}
-            ${row("Deposit Due", `<span style="color:#FFD600;font-weight:700">$${dep}</span>`)}
-          </table>
-          <div style="margin-top:22px;text-align:center">
-            <a href="${SITE}/admin.html" style="background:linear-gradient(135deg,#FF6B00,#FFD600);color:#0F0A1E;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:900;font-size:14px">Review in Dashboard →</a>
-          </div>`));
-
-      // Client confirmation email
-      await sendEmail(b.email, `We got your request! 🎉 — Funky Monkey Events`,
-        wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${b.client}</strong>! 👋</p>
-          <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">We received your booking request and can't wait to make your event amazing!</p>
-          <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
-            <table style="width:100%;border-collapse:collapse">
-              ${row("Booking ID", `<span style="color:#FFD600">${b.booking_id}</span>`)}
-              ${row("Service", b.service)}
-              ${row("Date & Time", `${b.date} at ${b.time}`)}
-              ${row("Location", b.location)}
-              ${row("Est. Total", `<span style="color:#10B981;font-size:18px;font-weight:900">$${grand}</span>`)}
-            </table>
-          </div>
-          <div style="background:#064E3B22;border:1px solid #10B98133;border-radius:12px;padding:16px;margin-bottom:20px">
-            <p style="font-weight:800;margin-bottom:10px;color:#6EE7B7">What happens next?</p>
-            ${["We review your request within 24 hours","You'll receive a booking confirmation with a payment link","Pay the 50% deposit to lock in your date 🔒","We'll send a reminder 48 hours before your event!"].map((x,i)=>`<div style="display:flex;gap:10px;margin-bottom:8px;align-items:flex-start"><div style="width:20px;height:20px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#FFD600);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;color:#0F0A1E;flex-shrink:0">${i+1}</div><span style="font-size:13px;color:#A78BCA">${x}</span></div>`).join("")}
-          </div>
-          <p style="font-size:13px;color:#A78BCA;text-align:center">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`));
-
-      return { statusCode:201, headers:h, body:JSON.stringify(b) };
-    }
-
-    return { statusCode:405, headers:h, body:JSON.stringify({error:"Method not allowed"}) };
-  } catch(e) {
-    console.error(e);
-    return { statusCode:500, headers:h, body:JSON.stringify({error:e.message}) };
-  } finally { await c.end(); }
-};
+  // Client confirmation
+  await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: FROM,
+      to: booking.client_email,
+      subject: `🎉 Booking Request Received — Funky Monkey Events (${booking.reference})`,
+      html: `
+        <h2>Thanks, ${booking.client_name.split(' ')[0]}!</h2>
+        <p>We've received your booking request. Joe will review it and get back to you within 24 hours.</p>
+        <p><strong>Your reference number:</strong> ${booking.reference}</p>
+        <h3>Booking Summary</h3>
+        <p><strong>Service:</strong> ${booking.service_name}</p>
+        <p><strong>Date:</strong> ${dateStr} at ${booking.event_time}</p>
+        <p><strong>Total Quote:</strong> $${Number(booking.total_price).toFixed(2)}</p>
+        <p><strong>Deposit to Confirm:</strong> $${Number(booking.deposit_amount).toFixed(2)}</p>
+        <p><strong>Balance Due at Event:</strong> $${Number(booking.balance_due).toFixed(2)}</p>
+        <br/>
+        <p>Questions? Call or text Joe at <strong>(405) 431-6625</strong></p>
+        <p>— The Funky Monkey Events Team 🐒</p>
+      `
+    })
+  });
+}

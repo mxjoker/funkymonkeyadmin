@@ -3,670 +3,767 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Funky Monkey Events — Admin</title>
-<link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+<title>Funky Monkey Admin</title>
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:#0D0520;font-family:'Nunito',sans-serif;color:#F3E8FF;display:flex;min-height:100vh}
-input,select,textarea,button{font-family:'Nunito',sans-serif}
-select option{background:#1A0A2E;color:#F3E8FF}
-::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:#0D0520}::-webkit-scrollbar-thumb{background:#3D2460;border-radius:3px}
-.card{background:#241545;border:1px solid #3D2460;border-radius:16px;padding:24px}
-.fl{display:block;font-size:11px;font-weight:700;color:#A78BCA;margin-bottom:5px;text-transform:uppercase;letter-spacing:.08em}
-.fi{width:100%;background:#0D0520;border:1px solid #3D2460;border-radius:8px;padding:9px 12px;color:#F3E8FF;font-size:13px;font-family:'Nunito',sans-serif;transition:border-color .2s}
-.fi:focus{outline:none;border-color:#7C3AED}
-table{width:100%;border-collapse:collapse}
-th{padding:11px 12px;text-align:left;font-size:10px;color:#A78BCA;text-transform:uppercase;letter-spacing:.06em}
-td{padding:10px 12px;border-bottom:1px solid #3D246022}
-tr:hover td{background:#1A0A2E44;cursor:pointer}
-.ov{position:fixed;inset:0;background:#000000cc;z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
-.mb{background:#241545;border:1px solid #3D2460;border-radius:20px;width:100%;max-height:90vh;overflow-y:auto;padding:28px;position:relative}
-@media(max-width:768px){#sidebar{display:none}#main{padding:16px}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#f0f4ff;min-height:100vh}
+/* ── Auth overlay ── */
+#auth-screen{position:fixed;inset:0;background:linear-gradient(135deg,#6c3fc5,#a855f7);display:flex;align-items:center;justify-content:center;z-index:999}
+#auth-box{background:#fff;border-radius:16px;padding:36px 32px;width:100%;max-width:360px;text-align:center}
+#auth-box h1{font-size:1.5rem;color:#1e1b4b;margin-bottom:6px}
+#auth-box p{color:#888;font-size:.9rem;margin-bottom:20px}
+#auth-box input{width:100%;padding:10px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:1rem;margin-bottom:12px}
+#auth-box button{width:100%;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:12px;font-size:1rem;font-weight:700;cursor:pointer}
+#auth-err{color:#dc2626;font-size:.85rem;margin-top:8px;display:none}
+/* ── Layout ── */
+#app{display:none;min-height:100vh}
+.sidebar{position:fixed;top:0;left:0;bottom:0;width:220px;background:#1e1b4b;color:#fff;padding:0;display:flex;flex-direction:column}
+.sidebar-logo{padding:20px 18px;font-size:1.1rem;font-weight:800;border-bottom:1px solid rgba(255,255,255,.1)}
+.sidebar-logo span{opacity:.6;font-size:.75rem;display:block;font-weight:400;margin-top:2px}
+nav a{display:flex;align-items:center;gap:10px;padding:11px 18px;color:rgba(255,255,255,.7);text-decoration:none;font-size:.9rem;font-weight:500;transition:all .2s;cursor:pointer;border-left:3px solid transparent}
+nav a:hover,nav a.active{color:#fff;background:rgba(255,255,255,.08);border-left-color:#a855f7}
+.sidebar-footer{margin-top:auto;padding:16px 18px;font-size:.75rem;color:rgba(255,255,255,.35);border-top:1px solid rgba(255,255,255,.08)}
+.main{margin-left:220px;padding:28px;min-height:100vh}
+.page{display:none}
+.page.active{display:block}
+.page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.page-header h1{font-size:1.4rem;color:#1e1b4b;font-weight:800}
+/* ── Cards & stats ── */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:28px}
+.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.stat-card .label{font-size:.78rem;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.stat-card .val{font-size:1.8rem;font-weight:800;color:#1e1b4b}
+.stat-card .sub{font-size:.8rem;color:#888;margin-top:4px}
+/* ── Buttons ── */
+.btn{padding:9px 18px;border-radius:8px;border:none;font-size:.875rem;font-weight:700;cursor:pointer;transition:all .2s}
+.btn-primary{background:#7c3aed;color:#fff}
+.btn-primary:hover{background:#6d28d9}
+.btn-sm{padding:5px 12px;font-size:.8rem}
+.btn-danger{background:#fee2e2;color:#dc2626}
+.btn-danger:hover{background:#fecaca}
+.btn-success{background:#d1fae5;color:#059669}
+.btn-outline{background:#fff;border:2px solid #e5e7eb;color:#374151}
+.btn-outline:hover{border-color:#a855f7;color:#7c3aed}
+/* ── Tables ── */
+.card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06);overflow:hidden;margin-bottom:24px}
+.card-header{padding:16px 20px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between}
+.card-header h2{font-size:1rem;font-weight:700;color:#1e1b4b}
+.card-body{padding:20px}
+table{width:100%;border-collapse:collapse;font-size:.875rem}
+th{text-align:left;padding:10px 12px;background:#f9fafb;color:#6b7280;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em}
+td{padding:10px 12px;border-top:1px solid #f3f4f6;color:#374151;vertical-align:middle}
+tr:hover td{background:#fafaf8}
+/* ── Badges ── */
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:700}
+.badge-review{background:#fef9c3;color:#854d0e}
+.badge-pending{background:#dbeafe;color:#1d4ed8}
+.badge-confirmed{background:#d1fae5;color:#065f46}
+.badge-completed{background:#f3f4f6;color:#374151}
+.badge-cancelled{background:#fee2e2;color:#991b1b}
+/* ── Booking detail modal ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:none;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto}
+.modal-overlay.open{display:flex}
+.modal{background:#fff;border-radius:16px;width:100%;max-width:680px;max-height:90vh;overflow-y:auto}
+.modal-header{padding:20px 24px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1}
+.modal-header h2{font-size:1.1rem;font-weight:700;color:#1e1b4b}
+.modal-close{background:none;border:none;font-size:1.4rem;cursor:pointer;color:#888;line-height:1}
+.modal-body{padding:24px}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.detail-field label{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:#888;font-weight:700;display:block;margin-bottom:4px}
+.detail-field .val{font-size:.95rem;color:#1e1b4b;font-weight:600}
+.status-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.quote-summary{background:#f5f3ff;border-radius:10px;padding:16px;margin-bottom:20px}
+.quote-summary h3{font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:#7c3aed;font-weight:700;margin-bottom:10px}
+.q-line{display:flex;justify-content:space-between;padding:4px 0;font-size:.875rem;color:#374151;border-bottom:1px solid #e9d5ff}
+.q-line:last-child{border:none;font-weight:700;color:#1e1b4b}
+.stripe-section{background:#faf5ff;border-radius:10px;padding:16px;margin-bottom:20px;border:1px solid #e9d5ff}
+.notes-area{width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:8px;font-size:.875rem;resize:vertical;min-height:80px}
+.notes-area:focus{outline:none;border-color:#7c3aed}
+/* ── Calendar ── */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal-header-days{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px}
+.cal-day-label{text-align:center;font-size:.75rem;font-weight:700;color:#888;padding:4px}
+.cal-day{min-height:72px;background:#f9fafb;border-radius:8px;padding:6px;font-size:.8rem;position:relative}
+.cal-day.today{background:#f5f3ff;border:2px solid #a855f7}
+.cal-day.other-month{opacity:.35}
+.cal-day .day-num{font-weight:700;color:#374151;margin-bottom:4px}
+.cal-event{background:#7c3aed;color:#fff;border-radius:4px;padding:2px 5px;font-size:.7rem;margin-bottom:2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* ── Staff ── */
+.staff-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+.staff-card{background:#fff;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-top:4px solid #7c3aed}
+.staff-card h3{font-size:1rem;font-weight:700;color:#1e1b4b}
+.staff-card .role{font-size:.8rem;color:#888;margin:4px 0 12px}
+/* ── Catalogue ── */
+.cat-section{margin-bottom:28px}
+.cat-section h3{font-size:1rem;font-weight:700;color:#1e1b4b;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #e9d5ff}
+.catalogue-table td input{width:100%;border:1px solid #e5e7eb;border-radius:6px;padding:5px 8px;font-size:.85rem}
+.catalogue-table td input:focus{outline:none;border-color:#7c3aed}
+.cat-loading{text-align:center;padding:40px;color:#7c3aed}
+.cat-loading .spinner{width:32px;height:32px;border:3px solid #e9d5ff;border-top-color:#7c3aed;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.save-indicator{font-size:.8rem;color:#059669;display:none}
+.save-indicator.visible{display:inline}
+/* ── Analytics ── */
+.analytics-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.chart-placeholder{background:#f9fafb;border-radius:8px;height:180px;display:flex;align-items:center;justify-content:center;color:#888;font-size:.85rem}
+/* ── Responsive ── */
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%);z-index:50}
+  .main{margin-left:0}
+  .stats-grid{grid-template-columns:1fr 1fr}
+  .detail-grid{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
 
-<!-- Login screen -->
-<div id="login-screen" style="display:none;position:fixed;inset:0;background:#0D0520;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px">
-  <div style="width:100%;max-width:380px;background:#241545;border:1px solid #3D2460;border-radius:24px;padding:36px;text-align:center">
-    <div style="font-size:48px;margin-bottom:12px">🐒</div>
-    <div style="font-size:24px;font-weight:900;font-family:'Fredoka One',sans-serif;background:linear-gradient(135deg,#FF6B00,#FFD600);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px">Funky Monkey Events</div>
-    <div style="font-size:12px;color:#A78BCA;margin-bottom:28px;text-transform:uppercase;letter-spacing:.1em">Admin Dashboard</div>
-    <div style="margin-bottom:16px;text-align:left">
-      <label class="fl">Admin Password</label>
-      <input type="password" id="admin-pw" class="fi" placeholder="Enter password…" onkeydown="if(event.key==='Enter')doLogin()" style="font-size:16px;padding:12px 14px;text-align:center;letter-spacing:.15em"/>
-    </div>
-    <div id="login-err" style="display:none;color:#FCA5A5;font-size:12px;margin-bottom:12px;background:#450A0A;border-radius:8px;padding:8px 12px">Incorrect password. Try again.</div>
-    <button onclick="doLogin()" style="width:100%;padding:13px;background:linear-gradient(135deg,#FF6B00,#FFD600);color:#0D0520;border:none;border-radius:12px;font-weight:900;font-size:15px;cursor:pointer;font-family:'Nunito',sans-serif">Unlock Dashboard →</button>
-    <div style="margin-top:16px;font-size:11px;color:#A78BCA">Set your password via <code style="color:#FFD600;background:#0D0520;padding:2px 6px;border-radius:4px">ADMIN_PASSWORD</code> in Netlify env vars</div>
+<!-- Auth -->
+<div id="auth-screen">
+  <div id="auth-box">
+    <div style="font-size:2.5rem;margin-bottom:8px">🐒</div>
+    <h1>Funky Monkey Admin</h1>
+    <p>Enter your admin password to continue</p>
+    <input type="password" id="auth-pw" placeholder="Password" onkeydown="if(event.key==='Enter')doLogin()"/>
+    <button onclick="doLogin()">Sign In</button>
+    <div id="auth-err">Incorrect password. Try again.</div>
   </div>
 </div>
 
-<div id="sidebar" style="width:220px;background:#1A0A2E;border-right:1px solid #3D2460;display:flex;flex-direction:column;flex-shrink:0;position:sticky;top:0;height:100vh;overflow:hidden"></div>
-<div id="main" style="flex:1;padding:26px;overflow-y:auto;min-width:0"></div>
-<div id="modal" style="display:none"></div>
+<!-- App -->
+<div id="app">
+  <div class="sidebar">
+    <div class="sidebar-logo">🐒 Funky Monkey<span>Admin Dashboard</span></div>
+    <nav>
+      <a onclick="showPage('dashboard')" id="nav-dashboard">📊 Dashboard</a>
+      <a onclick="showPage('bookings')" id="nav-bookings">📋 Bookings</a>
+      <a onclick="showPage('calendar')" id="nav-calendar">📅 Calendar</a>
+      <a onclick="showPage('clients')" id="nav-clients">👥 Clients</a>
+      <a onclick="showPage('staff')" id="nav-staff">🎭 Staff Portal</a>
+      <a onclick="showPage('catalogue')" id="nav-catalogue">🗂 Catalogue</a>
+      <a onclick="showPage('analytics')" id="nav-analytics">📈 Analytics</a>
+    </nav>
+    <div class="sidebar-footer">Funky Monkey Events · OKC<br/>(405) 431-6625</div>
+  </div>
+
+  <div class="main">
+
+    <!-- DASHBOARD -->
+    <div class="page" id="page-dashboard">
+      <div class="page-header"><h1>Dashboard</h1><span id="dash-date" style="color:#888;font-size:.9rem"></span></div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="label">Total Bookings</div><div class="val" id="stat-total">—</div></div>
+        <div class="stat-card"><div class="label">Needs Review</div><div class="val" id="stat-review">—</div></div>
+        <div class="stat-card"><div class="label">Confirmed</div><div class="val" id="stat-confirmed">—</div></div>
+        <div class="stat-card"><div class="label">Revenue (Confirmed)</div><div class="val" id="stat-revenue">—</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>Recent Bookings</h2><button class="btn btn-primary btn-sm" onclick="showPage('bookings')">View All</button></div>
+        <table>
+          <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Date</th><th>Total</th><th>Status</th></tr></thead>
+          <tbody id="dash-bookings"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- BOOKINGS -->
+    <div class="page" id="page-bookings">
+      <div class="page-header">
+        <h1>All Bookings</h1>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select id="filter-status" onchange="renderBookingsTable()" style="padding:8px 12px;border:2px solid #e5e7eb;border-radius:8px;font-size:.875rem">
+            <option value="">All Statuses</option>
+            <option value="review">Review</option>
+            <option value="pending">Pending</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th><th></th></tr></thead>
+          <tbody id="bookings-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- CALENDAR -->
+    <div class="page" id="page-calendar">
+      <div class="page-header">
+        <h1>Calendar</h1>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">← Prev</button>
+          <span id="cal-month-label" style="font-weight:700;color:#1e1b4b;align-self:center;min-width:140px;text-align:center"></span>
+          <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Next →</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body">
+          <div class="cal-header-days">
+            <div class="cal-day-label">Sun</div><div class="cal-day-label">Mon</div>
+            <div class="cal-day-label">Tue</div><div class="cal-day-label">Wed</div>
+            <div class="cal-day-label">Thu</div><div class="cal-day-label">Fri</div>
+            <div class="cal-day-label">Sat</div>
+          </div>
+          <div class="cal-grid" id="cal-grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CLIENTS -->
+    <div class="page" id="page-clients">
+      <div class="page-header"><h1>Clients</h1></div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Bookings</th><th>Total Spent</th><th>Last Booking</th></tr></thead>
+          <tbody id="clients-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- STAFF -->
+    <div class="page" id="page-staff">
+      <div class="page-header"><h1>Staff Portal</h1><button class="btn btn-primary btn-sm" onclick="openAddStaff()">+ Add Staff</button></div>
+      <div class="staff-grid" id="staff-grid"></div>
+    </div>
+
+    <!-- CATALOGUE -->
+    <div class="page" id="page-catalogue">
+      <div class="page-header">
+        <h1>Service Catalogue</h1>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="save-indicator" id="save-indicator">✓ Saved</span>
+          <button class="btn btn-primary btn-sm" onclick="saveCatalogue()">Save Changes</button>
+        </div>
+      </div>
+      <p style="color:#888;font-size:.875rem;margin-bottom:20px">Changes save to the database and immediately reflect in the booking form.</p>
+      <div id="cat-loading" class="cat-loading"><div class="spinner"></div>Loading services…</div>
+      <div id="cat-content" style="display:none"></div>
+    </div>
+
+    <!-- ANALYTICS -->
+    <div class="page" id="page-analytics">
+      <div class="page-header"><h1>Analytics</h1></div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="label">This Month Revenue</div><div class="val" id="an-month-rev">—</div></div>
+        <div class="stat-card"><div class="label">Bookings This Month</div><div class="val" id="an-month-cnt">—</div></div>
+        <div class="stat-card"><div class="label">Avg Booking Value</div><div class="val" id="an-avg">—</div></div>
+        <div class="stat-card"><div class="label">Completion Rate</div><div class="val" id="an-complete">—</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>Top Services</h2></div>
+        <table>
+          <thead><tr><th>Service</th><th>Bookings</th><th>Revenue</th></tr></thead>
+          <tbody id="an-services"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>Referral Sources</h2></div>
+        <table>
+          <thead><tr><th>Source</th><th>Count</th><th>%</th></tr></thead>
+          <tbody id="an-referrals"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- Booking Detail Modal -->
+<div class="modal-overlay" id="booking-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title">Booking Detail</h2>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
 
 <script>
-const C={yellow:"#FFD600",orange:"#FF6B00",purple:"#7C3AED",pink:"#EC4899",green:"#10B981",teal:"#06B6D4",dark:"#1A0A2E",darker:"#0D0520",card:"#241545",border:"#3D2460",text:"#F3E8FF",muted:"#A78BCA",red:"#EF4444"};
+// ─── Data & State ──────────────────────────────────────────────────────────────
+let allBookings = [];
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth();
+let catalogueServices = [];
+let catalogueAddons = [];
 
-// ── Admin auth ─────────────────────────────────
-const ADMIN_PW_KEY = "fm_admin_auth";
-let adminAuthed = false;
+const defaultStaff = [
+  { id:1, name:'Joe Coover', role:'Owner / Magician', color:'#7c3aed', pin:'1234' },
+  { id:2, name:'Staff Member 2', role:'Performer', color:'#0891b2', pin:'0000' },
+  { id:3, name:'Staff Member 3', role:'Face Painter', color:'#d97706', pin:'0000' },
+  { id:4, name:'Staff Member 4', role:'Balloon Artist', color:'#16a34a', pin:'0000' },
+  { id:5, name:'Staff Member 5', role:'DJ', color:'#dc2626', pin:'0000' },
+  { id:6, name:'Staff Member 6', role:'Assistant', color:'#7c3aed', pin:'0000' }
+];
 
-const doLogin = async () => {
-  const pw = document.getElementById("admin-pw").value;
-  const btn = document.querySelector("#login-screen button");
-  btn.textContent = "Checking…";
-  btn.disabled = true;
+// ─── Auth ──────────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const pw = document.getElementById('auth-pw').value;
+  document.getElementById('auth-err').style.display = 'none';
   try {
-    const res = await fetch("/api/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: pw })
     });
     const data = await res.json();
     if (data.success) {
-      adminAuthed = true;
-      sessionStorage.setItem(ADMIN_PW_KEY, data.token);
-      document.getElementById("login-screen").style.display = "none";
+      sessionStorage.setItem('fm_auth', '1');
+      document.getElementById('auth-screen').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
       init();
     } else {
-      document.getElementById("login-err").style.display = "block";
-      document.getElementById("admin-pw").value = "";
-      document.getElementById("admin-pw").focus();
-      btn.textContent = "Unlock Dashboard →";
-      btn.disabled = false;
+      document.getElementById('auth-err').style.display = 'block';
     }
-  } catch(e) {
-    document.getElementById("login-err").textContent = "Connection error — try again.";
-    document.getElementById("login-err").style.display = "block";
-    btn.textContent = "Unlock Dashboard →";
-    btn.disabled = false;
+  } catch {
+    document.getElementById('auth-err').style.display = 'block';
   }
-};
-
-// Check if already authed this session (token must exist and start with fm-auth)
-const _tok = sessionStorage.getItem(ADMIN_PW_KEY);
-if (_tok && _tok.length > 8) {
-  adminAuthed = true;
-  document.getElementById("login-screen").style.display = "none";
-} else {
-  document.getElementById("login-screen").style.display = "flex";
-  setTimeout(()=>document.getElementById("admin-pw")?.focus(), 100);
 }
 
-// ── Static data ────────────────────────────────
-const STATUS={
-  review:   {label:"Needs Review",bg:"#78350F",text:"#FDE68A",dot:"#F59E0B"},
-  pending:  {label:"Pending",     bg:"#1E3A5F",text:"#BAE6FD",dot:"#38BDF8"},
-  confirmed:{label:"Confirmed",   bg:"#064E3B",text:"#A7F3D0",dot:"#34D399"},
-  completed:{label:"Completed",   bg:"#3B0764",text:"#E9D5FF",dot:"#A78BFA"},
-  cancelled:{label:"Cancelled",   bg:"#450A0A",text:"#FECACA",dot:"#F87171"},
-};
-const PAY={stripe:{label:"Stripe",icon:"💳",color:C.purple},paypal:{label:"PayPal",icon:"🅿️",color:C.teal},cash:{label:"Cash",icon:"💵",color:C.green},pending:{label:"Pending",icon:"⏳",color:C.muted}};
-
-let APP = {
-  view:"dashboard", bookings:[], loading:true, loadError:"",
-  filterStatus:"all", filterSearch:"",
-  calMonth: new Date().getMonth(),
-  selBooking: null,
-  staffList: [
-    {id:1,name:"Joe Coover",  role:"Magician / MC",    avatar:"JC",color:C.purple,pin:"1234"},
-    {id:2,name:"Maya Torres", role:"Face Painter",      avatar:"MT",color:C.pink,  pin:"2345"},
-    {id:3,name:"Finn O'Brien",role:"Balloon Artist",    avatar:"FO",color:C.teal,  pin:"3456"},
-    {id:4,name:"Layla Singh", role:"Acrobat",           avatar:"LS",color:C.green, pin:"4567"},
-    {id:5,name:"Rex Drummond",role:"DJ / Host",         avatar:"RD",color:C.orange,pin:"5678"},
-    {id:6,name:"Carla Vega",  role:"Fire Performer",    avatar:"CV",color:C.yellow,pin:"6789"},
-  ],
-  staffSel:null, staffPin:"", staffUnlocked:false, staffPinErr:false,
-  templates:[
-    {id:"t1",trigger:"Booking Received",    subject:"We got your request! 🎉",          body:"Sent automatically when a new booking is submitted."},
-    {id:"t2",trigger:"Booking Confirmed",   subject:"Your booking is CONFIRMED! 🎊",    body:"Sent automatically when you approve a booking."},
-    {id:"t3",trigger:"Booking Cancelled",   subject:"Booking update",                   body:"Sent automatically when you cancel a booking."},
-    {id:"t4",trigger:"Event Completed",     subject:"How did we do? 🌟",                body:"Sent automatically when you mark a booking as completed."},
-  ],
-  catalogueTab:"services",
-  services:[
-    {id:"magic_kids",  name:"Children's Magic Show",     category:"Shows",      price:350,duration:"45 min",icon:"🎩",active:true},
-    {id:"magic_corp",  name:"Corporate Magic Show",      category:"Shows",      price:800,duration:"60 min",icon:"✨",active:true},
-    {id:"balloon",     name:"Balloon Artist",            category:"Performers", price:200,duration:"2 hrs", icon:"🎈",active:true},
-    {id:"balloon_wkshp",name:"Balloon Sculpting Workshop",category:"Shows",     price:275,duration:"45 min",icon:"🎀",active:true},
-    {id:"face_paint",  name:"Face Painting",             category:"Performers", price:200,duration:"2 hrs", icon:"🎨",active:true},
-    {id:"glitter",     name:"Glitter Tattoos",           category:"Performers", price:175,duration:"2 hrs", icon:"⭐",active:true},
-    {id:"foam",        name:"Foam Party",                category:"Experiences",price:650,duration:"2 hrs", icon:"🫧",active:true},
-    {id:"snow",        name:"Snow Experience",           category:"Experiences",price:550,duration:"2 hrs", icon:"❄️",active:true},
-    {id:"juggler",     name:"Juggler",                   category:"Performers", price:225,duration:"2 hrs", icon:"🤹",active:true},
-    {id:"stilts",      name:"Stilt Walker",              category:"Performers", price:275,duration:"2 hrs", icon:"🦒",active:true},
-    {id:"acrobat",     name:"Acrobat",                   category:"Performers", price:350,duration:"2 hrs", icon:"🤸",active:true},
-    {id:"fire",        name:"Fire Breather",             category:"Performers", price:400,duration:"30 min",icon:"🔥",active:true},
-    {id:"dj_pinata",   name:"DJ Piñata",                 category:"Shows",      price:500,duration:"2 hrs", icon:"🎵",active:true},
-    {id:"gameshow",    name:"Game Show Champions",       category:"Shows",      price:450,duration:"90 min",icon:"🏆",active:true},
-    {id:"school_asm",  name:"Magic School Assembly",     category:"Shows",      price:600,duration:"60 min",icon:"🏫",active:true},
-    {id:"camp",        name:"Magic Camp",                category:"Camps",      price:150,duration:"Per day",icon:"⛺",active:true},
-  ],
-  addons:[
-    {id:"ao1",name:"Extra Hour of Service",price:85, icon:"⏰",active:true},
-    {id:"ao2",name:"Glitter Tattoos Add-On",price:75,icon:"✨",active:true},
-    {id:"ao3",name:"Balloon Animals Add-On",price:75,icon:"🎈",active:true},
-    {id:"ao4",name:"Photo Booth Add-On",   price:150,icon:"📸",active:true},
-    {id:"ao5",name:"Second Performer",     price:175,icon:"👯",active:true},
-  ],
-};
-
-const set=(u)=>{Object.assign(APP,u);renderAll();};
-const setView=(v)=>set({view:v});
-const norm=(r)=>({id:r.id,bookingId:r.booking_id,client:r.client,phone:r.phone,email:r.email,eventType:r.event_type,guests:r.guests,referral:r.referral,serviceId:r.service_id,service:r.service,date:r.date,time:r.time,zip:r.zip,location:r.location,notes:r.notes,addons:r.addons||[],mileageFee:+r.mileage_fee||0,miles:+r.miles||0,total:+r.total||0,depositDue:+r.deposit_due||0,deposit:+r.deposit||0,paymentMethod:r.payment_method||"pending",status:r.status||"review",staffId:r.staff_id,contractSigned:r.contract_signed||false,stripeLink:r.stripe_payment_link||"",createdAt:r.created_at});
-
-// ── API ────────────────────────────────────────
-const api = {
-  load: async () => {
-    try {
-      const r = await fetch("/api/bookings");
-      if(!r.ok) throw new Error(await r.text());
-      APP.bookings = (await r.json()).map(norm);
-      APP.loading = false; APP.loadError = "";
-    } catch(e) { APP.loading=false; APP.loadError=e.message; }
-    renderAll();
-  },
-  update: async (id, fields) => {
-    try { await fetch(`/api/booking/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(fields)}); }
-    catch(e){console.error(e);}
-  },
-  delete: async (id) => {
-    try { await fetch(`/api/booking/${id}`,{method:"DELETE"}); }
-    catch(e){console.error(e);}
+window.addEventListener('DOMContentLoaded', () => {
+  if (sessionStorage.getItem('fm_auth')) {
+    document.getElementById('auth-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    init();
   }
-};
+  document.getElementById('dash-date').textContent = new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+});
 
-const updBooking=(id,fields)=>{
-  APP.bookings=APP.bookings.map(b=>b.id===id?{...b,...fields}:b);
-  if(APP.selBooking?.id===id) APP.selBooking={...APP.selBooking,...fields};
-  api.update(id,fields);
-  renderAll();
-};
+// ─── Init ──────────────────────────────────────────────────────────────────────
+async function init() {
+  await loadBookings();
+  showPage('dashboard');
+}
 
-// ── HTML atoms ─────────────────────────────────
-const badge=(s)=>{const x=STATUS[s]||STATUS.review;return`<span style="background:${x.bg};color:${x.text};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:5px;text-transform:uppercase"><span style="width:6px;height:6px;border-radius:50%;background:${x.dot};display:inline-block"></span>${x.label}</span>`;};
-const btn=(label,onclick,v="primary",sm=false)=>{const p=sm?"6px 12px":"9px 18px",fs=sm?11:13,styles={primary:`background:linear-gradient(135deg,${C.orange},${C.yellow});color:${C.dark};border:none`,secondary:`background:transparent;color:${C.text};border:1px solid ${C.border}`,danger:`background:#450A0A;color:#FCA5A5;border:1px solid #7F1D1D`,success:`background:#064E3B;color:#6EE7B7;border:1px solid #065F46`,purple:`background:linear-gradient(135deg,${C.purple},${C.pink});color:#fff;border:none`,ghost:`background:transparent;color:${C.muted};border:none`};return`<button onclick="${onclick}" style="padding:${p};font-size:${fs}px;${styles[v]||styles.primary};border-radius:10px;font-weight:700;cursor:pointer;font-family:'Nunito',sans-serif">${label}</button>`;};
-const fval=(id)=>(document.getElementById(id)||{}).value||"";
-
-// ── Sidebar ────────────────────────────────────
-const renderSidebar=()=>{
-  const NAV=[{id:"dashboard",icon:"🏠",label:"Dashboard"},{id:"bookings",icon:"📋",label:"Bookings"},{id:"calendar",icon:"📅",label:"Calendar"},{id:"staff",icon:"👥",label:"Staff"},{id:"clients",icon:"👤",label:"Clients"},{id:"catalogue",icon:"⚙️",label:"Catalogue"},{id:"emails",icon:"📧",label:"Emails"},{id:"analytics",icon:"📊",label:"Analytics"}];
-  const rc=APP.bookings.filter(b=>b.status==="review").length;
-  const nav=NAV.map(n=>{const a=APP.view===n.id||APP.view===n.id+"-detail";const b2=n.id==="bookings"&&rc>0?`<span style="margin-left:auto;background:${C.orange};color:${C.dark};border-radius:50%;width:17px;height:17px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900">${rc}</span>`:"";return`<button onclick="setView('${n.id}')" style="width:100%;display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:10px;border:none;background:${a?`linear-gradient(135deg,${C.orange}22,${C.yellow}11)`:"transparent"};color:${a?C.yellow:C.muted};font-weight:${a?800:600};font-size:12px;cursor:pointer;text-align:left;margin-bottom:2px;border-left:3px solid ${a?C.orange:"transparent"};font-family:'Nunito',sans-serif"><span style="font-size:14px">${n.icon}</span>${n.label}${b2}</button>`;}).join("");
-  const st=APP.loading?`<div style="font-size:11px;color:${C.muted}">🔄 Connecting…</div>`:`<div style="font-size:11px;color:${C.green};font-weight:700">● Live — ${APP.bookings.length} booking${APP.bookings.length!==1?"s":""}</div>`;
-  document.getElementById("sidebar").innerHTML=`
-    <div style="padding:18px 16px 14px;border-bottom:1px solid ${C.border}">
-      <div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;line-height:1.1"><span style="background:linear-gradient(135deg,${C.orange},${C.yellow});-webkit-background-clip:text;-webkit-text-fill-color:transparent">🐒 Funky Monkey</span></div>
-      <div style="font-size:9px;color:${C.muted};text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-top:2px">Admin Dashboard</div>
-    </div>
-    <nav style="padding:10px 8px;flex:1;overflow-y:auto">${nav}</nav>
-    <div style="padding:12px;border-top:1px solid ${C.border};text-align:center">
-      ${st}<div style="margin-top:4px;font-size:9px;color:${C.muted}">OKC · (405) 431-6625</div>
-      <button onclick="doLogout()" style="margin-top:8px;font-size:10px;color:${C.muted};background:transparent;border:none;cursor:pointer;font-family:'Nunito',sans-serif">🔒 Lock Dashboard</button>
-    </div>`;
-};
-
-const doLogout=()=>{sessionStorage.removeItem(ADMIN_PW_KEY);adminAuthed=false;location.reload();};
-
-// ── Dashboard ──────────────────────────────────
-const renderDashboard=()=>{
-  const bs=APP.bookings;
-  const rev=bs.filter(b=>b.status!=="cancelled").reduce((s,b)=>s+b.total+b.mileageFee,0);
-  const coll=bs.reduce((s,b)=>s+b.deposit,0);
-  const nr=bs.filter(b=>b.status==="review").length;
-  const stats=[
-    {label:"Total Bookings",value:bs.length,icon:"📋",color:C.purple},
-    {label:"Needs Review",  value:nr,       icon:"⚠️",color:C.orange},
-    {label:"Confirmed",     value:bs.filter(b=>b.status==="confirmed").length,icon:"✅",color:C.green},
-    {label:"Gross Revenue", value:`$${rev.toLocaleString()}`,icon:"💰",color:C.yellow},
-    {label:"Deposits In",   value:`$${coll.toLocaleString()}`,icon:"💳",color:C.teal},
-    {label:"Balance Out",   value:`$${(rev-coll).toLocaleString()}`,icon:"📤",color:C.pink},
-  ];
-  const sh=stats.map(s=>`<div class="card" style="padding:16px 20px;display:flex;align-items:center;gap:14px"><div style="font-size:26px">${s.icon}</div><div><div style="font-size:20px;font-weight:900;color:${s.color};font-family:'Fredoka One',sans-serif">${s.value}</div><div style="font-size:10px;color:${C.muted};text-transform:uppercase;letter-spacing:.06em;font-weight:700">${s.label}</div></div></div>`).join("");
-  const recent=bs.slice(0,6).map(b=>`<tr onclick="selBook(${b.id})"><td style="font-weight:700">${b.client}</td><td style="color:${C.muted};font-size:12px">${b.service}</td><td style="color:${C.muted};font-size:12px">${b.date}</td><td style="color:${C.green};font-weight:700">$${(b.total+b.mileageFee).toFixed(2)}</td><td>${badge(b.status)}</td></tr>`).join("");
-  return`<div style="margin-bottom:24px"><div style="font-size:26px;font-weight:900;font-family:'Fredoka One',sans-serif">🐒 <span style="background:linear-gradient(90deg,${C.orange},${C.yellow});-webkit-background-clip:text;-webkit-text-fill-color:transparent">Funky Monkey Events</span></div><div style="color:${C.muted};font-size:13px;margin-top:3px">Admin Dashboard · Oklahoma City, OK</div></div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">${sh}</div>
-    <div style="display:grid;grid-template-columns:1fr 240px;gap:16px">
-      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div style="font-weight:800;font-size:15px">Recent Bookings</div>${btn("View All","setView('bookings')","secondary",true)}</div>
-        ${bs.length===0?`<div style="color:${C.muted};text-align:center;padding:32px">No bookings yet.</div>`:`<table><thead><tr>${["Client","Service","Date","Total","Status"].map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${recent}</tbody></table>`}
-      </div>
-      <div class="card" style="padding:16px"><div style="font-weight:800;font-size:13px;margin-bottom:12px">Quick Actions</div>
-        <div style="display:flex;flex-direction:column;gap:8px">${btn("📋 All Bookings","setView('bookings')","primary")}<br>${btn("👥 Staff Portal","setView('staff')","secondary")}<br>${btn("📅 Calendar","setView('calendar')","secondary")}<br>${btn("⚙️ Catalogue","setView('catalogue')","secondary")}</div>
-      </div>
-    </div>`;
-};
-
-// ── Bookings list ──────────────────────────────
-const renderBookings=()=>{
-  const fil=APP.bookings
-    .filter(b=>APP.filterStatus==="all"||b.status===APP.filterStatus)
-    .filter(b=>[b.client,b.service,b.bookingId||""].join(" ").toLowerCase().includes(APP.filterSearch.toLowerCase()));
-  const filters=["all","review","pending","confirmed","completed","cancelled"].map(s=>`<button onclick="set({filterStatus:'${s}'})" style="background:${APP.filterStatus===s?`linear-gradient(135deg,${C.orange},${C.yellow})`:C.darker};color:${APP.filterStatus===s?C.dark:C.muted};border:1px solid ${APP.filterStatus===s?C.orange:C.border};border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;text-transform:capitalize;font-family:'Nunito',sans-serif">${s}</button>`).join("");
-  const rows=fil.map((b,i)=>{const pm=PAY[b.paymentMethod]||PAY.pending;return`<tr onclick="selBook(${b.id})" style="background:${i%2?"transparent":"#0D052044"}">
-    <td style="font-size:11px;color:${C.teal};font-weight:700">${b.bookingId||"—"}</td>
-    <td><div style="font-weight:700">${b.client}</div><div style="font-size:10px;color:${C.muted}">${b.eventType||""}</div></td>
-    <td style="font-size:12px">${b.service}</td>
-    <td style="font-size:12px;color:${C.muted}">${b.date}</td>
-    <td><div style="color:${C.green};font-weight:700">$${(b.total+b.mileageFee).toFixed(2)}</div></td>
-    <td style="font-size:11px;color:${pm.color};font-weight:700">${pm.icon} ${pm.label}</td>
-    <td>${badge(b.status)}</td>
-    <td style="color:${C.orange}">›</td>
-  </tr>`;}).join("");
-  return`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px"><div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif">📋 All Bookings (${APP.bookings.length})</div></div>
-    <div class="card" style="margin-bottom:14px;padding:12px 16px"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <input class="fi" placeholder="Search…" value="${APP.filterSearch}" oninput="set({filterSearch:this.value})" style="flex:1;min-width:160px"/>
-      ${filters}
-    </div></div>
-    ${APP.bookings.length===0?`<div class="card"><div style="text-align:center;padding:40px;color:${C.muted}"><div style="font-size:40px;margin-bottom:12px">📭</div><div style="font-weight:700;font-size:16px;color:${C.text};margin-bottom:8px">No bookings yet</div></div></div>`
-    :`<div class="card" style="padding:0;overflow:hidden"><table><thead style="background:${C.darker}"><tr>${["ID","Client","Service","Date","Total","Payment","Status",""].map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>
-      ${fil.length===0?`<div style="padding:32px;text-align:center;color:${C.muted}">No bookings match that filter.</div>`:""}</div>`}`;
-};
-
-// ── Booking detail ─────────────────────────────
-const renderBookingDetail=()=>{
-  const b=APP.selBooking;if(!b)return"";
-  const sm=APP.staffList.find(s=>s.id===b.staffId);
-  const bAos=APP.addons.filter(a=>(b.addons||[]).includes(a.id));
-  const aot=bAos.reduce((s,a)=>s+a.price,0);
-  const grand=b.total+b.mileageFee+aot;
-  const pm=PAY[b.paymentMethod]||PAY.pending;
-
-  const acts=[];
-  if(b.status==="review"){acts.push(btn("✅ Approve","updBooking("+b.id+",{status:'confirmed'})","success"));acts.push(btn("✗ Decline","updBooking("+b.id+",{status:'cancelled'})","danger"));}
-  if(b.status==="confirmed"){acts.push(btn("✓ Mark Complete","updBooking("+b.id+",{status:'completed'})","success"));acts.push(btn("✗ Cancel","updBooking("+b.id+",{status:'cancelled'})","danger"));}
-  if(b.status==="pending") acts.push(btn("✅ Confirm","updBooking("+b.id+",{status:'confirmed'})","primary"));
-  if(b.status==="cancelled") acts.push(btn("↩ Reopen","updBooking("+b.id+",{status:'review'})","secondary"));
-  acts.push(btn("💳 Record Payment","openPayModal()","secondary"));
-  acts.push(btn("💳 Stripe Link","openStripeModal()","secondary"));
-  acts.push(btn("📄 Contract","openContractModal()","secondary"));
-  acts.push(btn(b.contractSigned?"↩ Unmark Signed":"✓ Mark Signed",`updBooking(${b.id},{contractSigned:${!b.contractSigned}})`,"ghost"));
-
-  const staffCards=APP.staffList.map(s=>`<div onclick="updBooking(${b.id},{staffId:${s.id}})" style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:12px;cursor:pointer;border:2px solid ${b.staffId===s.id?s.color:C.border};background:${b.staffId===s.id?"#1A0040":C.darker};transition:all .15s">
-    <div style="width:32px;height:32px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:${C.dark};flex-shrink:0">${s.avatar}</div>
-    <div><div style="font-size:12px;font-weight:700">${s.name}</div><div style="font-size:10px;color:${C.muted}">${s.role}</div></div>
-    ${b.staffId===s.id?`<span style="color:${s.color};font-size:13px;margin-left:auto">✓</span>`:""}
-  </div>`).join("");
-
-  return`<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
-    ${btn("‹ Back","setView('bookings')","ghost")}
-    <div><div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif">${b.client}</div><div style="color:${C.muted};font-size:12px">${b.bookingId||b.id} · ${b.eventType||""}</div></div>
-    <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
-      ${b.contractSigned?`<span style="font-size:11px;color:${C.green};background:#064E3B;padding:4px 10px;border-radius:12px;font-weight:700">✓ Signed</span>`:`<span style="font-size:11px;color:#FDE68A;background:#78350F;padding:4px 10px;border-radius:12px;font-weight:700">⚠ Contract Pending</span>`}
-      ${badge(b.status)}
-    </div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-    <div class="card"><div style="font-weight:800;margin-bottom:14px;font-size:14px">📋 Event Details</div>
-      ${[["Service",b.service],["Date",b.date],["Time",b.time],["Location",b.location],["ZIP",b.zip],["Guests",b.guests],["Event Type",b.eventType],["Referral",b.referral]].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${C.border}22"><span style="font-size:12px;color:${C.muted}">${k}</span><span style="font-size:12px;color:${C.text};font-weight:600;text-align:right;max-width:60%">${v||"—"}</span></div>`).join("")}
-      ${b.notes?`<div style="margin-top:10px;padding:8px 10px;background:${C.darker};border-radius:8px;font-size:12px;color:${C.muted}"><b style="color:${C.text}">Notes:</b> ${b.notes}</div>`:""}
-    </div>
-    <div style="display:flex;flex-direction:column;gap:14px">
-      <div class="card"><div style="font-weight:800;margin-bottom:14px;font-size:14px">👤 Client</div>
-        ${[["Name",b.client],["Phone",`<a href="tel:${b.phone}" style="color:${C.teal}">${b.phone}</a>`],["Email",`<a href="mailto:${b.email}" style="color:${C.teal}">${b.email}</a>`]].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${C.border}22"><span style="font-size:12px;color:${C.muted}">${k}</span><span style="font-size:12px;font-weight:600">${v||"—"}</span></div>`).join("")}
-      </div>
-      <div class="card"><div style="font-weight:800;margin-bottom:12px;font-size:14px">💰 Payment</div>
-        ${[[`Base (${b.service})`,`$${b.total.toFixed(2)}`,C.text],[`Travel (${b.miles||0}mi×2×$0.70)`,`$${b.mileageFee.toFixed(2)}`,C.teal],...bAos.map(a=>[a.name,`$${a.price}`,C.purple]),["Grand Total",`$${grand.toFixed(2)}`,C.green],["Deposit Paid",`$${b.deposit.toFixed(2)}`,C.yellow],["Balance Due",`$${Math.max(0,grand-b.deposit).toFixed(2)}`,Math.max(0,grand-b.deposit)>0?C.orange:C.green]].map(([k,v,col])=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${C.border}22"><span style="font-size:12px;color:${C.muted}">${k}</span><span style="font-size:13px;color:${col};font-weight:700">${v}</span></div>`).join("")}
-        <div style="margin-top:8px;font-size:11px;color:${pm.color};font-weight:700">${pm.icon} ${pm.label}</div>
-        ${b.stripeLink?`<div style="margin-top:8px"><a href="${b.stripeLink}" target="_blank" style="font-size:11px;color:${C.purple};font-weight:700">💳 Stripe Payment Link →</a></div>`:""}
-      </div>
-    </div>
-  </div>
-  <div class="card" style="margin-bottom:16px"><div style="font-weight:800;margin-bottom:12px;font-size:14px">👥 Assign Staff</div><div style="display:flex;gap:10px;flex-wrap:wrap">${staffCards}</div></div>
-  <div class="card"><div style="font-weight:800;margin-bottom:14px;font-size:14px">⚡ Actions</div><div style="display:flex;gap:10px;flex-wrap:wrap">${acts.join("")}</div></div>`;
-};
-
-// ── Calendar ───────────────────────────────────
-const renderCalendar=()=>{
-  const MN=["January","February","March","April","May","June","July","August","September","October","November","December"];
-  const yr=2026,m=APP.calMonth,dim=new Date(yr,m+1,0).getDate(),fd=new Date(yr,m,1).getDay();
-  const today=new Date();
-  const cells=[
-    ...Array(fd).fill(null).map(()=>`<div style="min-height:85px;border-right:1px solid ${C.border}22;border-bottom:1px solid ${C.border}22;background:${C.darker}44"></div>`),
-    ...Array(dim).fill(null).map((_,i)=>{
-      const d=i+1,ds=`${yr}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`,dbs=APP.bookings.filter(b=>b.date===ds),isToday=d===today.getDate()&&m===today.getMonth();
-      return`<div style="min-height:85px;padding:6px 5px;border-right:1px solid ${C.border}22;border-bottom:1px solid ${C.border}22">
-        <div style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${isToday?`linear-gradient(135deg,${C.orange},${C.yellow})`:"transparent"};color:${isToday?C.dark:C.text};font-weight:${isToday?900:600};font-size:11px;margin-bottom:3px">${d}</div>
-        ${dbs.map(b=>`<div onclick="selBook(${b.id})" style="font-size:9px;padding:2px 4px;border-radius:3px;margin-bottom:2px;font-weight:700;background:${STATUS[b.status]?.bg||"#333"};color:${STATUS[b.status]?.text||"#fff"};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer">${(b.service||"").split(" ")[0]}</div>`).join("")}
-      </div>`;
-    })
-  ].join("");
-  return`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-    <div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif">📅 Calendar</div>
-    <div style="display:flex;align-items:center;gap:10px">
-      ${btn("‹",`set({calMonth:${m>0?m-1:11}})`,"secondary",true)}
-      <span style="font-weight:800;min-width:130px;text-align:center">${MN[m]} ${yr}</span>
-      ${btn("›",`set({calMonth:${m<11?m+1:0}})`,"secondary",true)}
-    </div>
-  </div>
-  <div class="card" style="padding:0;overflow:hidden">
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);background:${C.darker}">${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>`<div style="padding:10px 8px;text-align:center;font-size:10px;color:${C.muted};font-weight:700;text-transform:uppercase;border-bottom:1px solid ${C.border}">${d}</div>`).join("")}</div>
-    <div style="display:grid;grid-template-columns:repeat(7,1fr)">${cells}</div>
-  </div>`;
-};
-
-// ── Staff portal ───────────────────────────────
-const renderStaff=()=>{
-  const cards=APP.staffList.map(s=>{
-    const gigs=APP.bookings.filter(b=>b.staffId===s.id&&b.status!=="cancelled").length;
-    const active=APP.staffSel?.id===s.id;
-    return`<div onclick="selStaff(${s.id})" style="padding:14px;border-radius:14px;cursor:pointer;border:2px solid ${active?s.color:C.border};background:${active?C.card:C.darker};margin-bottom:8px;transition:all .2s">
-      <div style="display:flex;align-items:center;gap:10px">
-        <div style="width:40px;height:40px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:${C.dark};flex-shrink:0">${s.avatar}</div>
-        <div style="flex:1"><div style="font-weight:800;font-size:13px">${s.name}</div><div style="font-size:10px;color:${C.muted}">${s.role}</div><div style="font-size:10px;color:${C.green};font-weight:700">${gigs} gig${gigs!==1?"s":""}</div></div>
-        ${btn("Edit",`openEditStaff(${s.id})`,"ghost",true)}
-      </div>
-    </div>`;
-  }).join("");
-
-  let right=`<div class="card" style="display:flex;align-items:center;justify-content:center;min-height:200px"><div style="text-align:center;color:${C.muted}"><div style="font-size:36px;margin-bottom:8px">👈</div><div style="font-weight:700">Select a staff member to view their schedule</div></div></div>`;
-
-  if(APP.staffSel && !APP.staffUnlocked){
-    const s=APP.staffSel;
-    right=`<div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:240px;gap:14px">
-      <div style="width:56px;height:56px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;color:${C.dark}">${s.avatar}</div>
-      <div style="font-weight:800;font-size:18px">${s.name}</div>
-      <div style="font-size:13px;color:${C.muted}">Enter PIN to view schedule</div>
-      <input type="password" id="staffPinInput" maxlength="6" placeholder="••••" onkeydown="if(event.key==='Enter')tryPin()" style="text-align:center;font-size:22px;letter-spacing:.3em;width:130px;background:${C.darker};border:2px solid ${APP.staffPinErr?C.red:C.border};border-radius:10px;padding:9px 14px;color:${C.text};font-family:'Nunito',sans-serif"/>
-      ${APP.staffPinErr?`<div style="color:${C.red};font-size:12px;font-weight:700">Incorrect PIN.</div>`:""}
-      ${btn("Unlock","tryPin()","primary")}
-    </div>`;
-  } else if(APP.staffSel && APP.staffUnlocked){
-    const s=APP.staffSel;
-    const myGigs=APP.bookings.filter(b=>b.staffId===s.id&&b.status!=="cancelled");
-    const gigCards=myGigs.length===0?`<div class="card"><div style="color:${C.muted};text-align:center;padding:20px">No upcoming gigs.</div></div>`:myGigs.map(b=>`<div class="card" style="padding:16px;margin-bottom:10px;cursor:pointer" onclick="selBook(${b.id})">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div><div style="font-weight:800;font-size:14px">${b.service}</div><div style="font-size:12px;color:${C.muted}">${b.client} · ${b.eventType||""} · ${b.guests||0} guests</div>
-          <div style="font-size:12px;color:${C.teal};margin-top:4px">📅 ${b.date} at ${b.time}</div><div style="font-size:12px;color:${C.muted}">📍 ${b.location}</div></div>
-        ${badge(b.status)}
-      </div></div>`).join("");
-    right=`<div>
-      <div class="card" style="margin-bottom:14px">
-        <div style="display:flex;align-items:center;gap:14px">
-          <div style="width:52px;height:52px;border-radius:50%;background:${s.color};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:${C.dark}">${s.avatar}</div>
-          <div><div style="font-size:18px;font-weight:900;font-family:'Fredoka One',sans-serif">${s.name}</div><div style="color:${C.muted};font-size:12px">${s.role}</div></div>
-          <div style="margin-left:auto;display:flex;gap:8px">
-            ${btn("✏️ Edit",`openEditStaff(${s.id})`,"secondary",true)}
-            ${btn("🔒 Lock","set({staffUnlocked:false})","ghost",true)}
-          </div>
-        </div>
-      </div>
-      <div style="font-weight:800;margin-bottom:10px;font-size:14px">Upcoming Gigs (${myGigs.length})</div>
-      ${gigCards}
-    </div>`;
-  }
-
-  return`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-    <div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif">👥 Staff Portal</div>
-    ${btn("➕ Add Staff Member","openAddStaff()","primary",true)}
-  </div>
-  <div style="display:grid;grid-template-columns:250px 1fr;gap:18px"><div>${cards}</div><div>${right}</div></div>`;
-};
-
-// ── Clients ────────────────────────────────────
-const renderClients=()=>{
-  const cm={};
-  APP.bookings.forEach(b=>{if(!cm[b.client])cm[b.client]={name:b.client,phone:b.phone,email:b.email,referral:b.referral,bookings:[],paid:0};cm[b.client].bookings.push(b);cm[b.client].paid+=b.deposit;});
-  const cls=Object.values(cm).sort((a,b)=>b.paid-a.paid);
-  if(!cls.length)return`<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:20px">👤 Client Database</div><div class="card"><div style="text-align:center;padding:40px;color:${C.muted}">No clients yet.</div></div>`;
-  return`<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:20px">👤 Client Database (${cls.length})</div>
-    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px">
-      ${cls.map(c=>`<div class="card" style="padding:18px">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-          <div><div style="font-weight:800;font-size:15px">${c.name}</div><div style="font-size:12px;color:${C.teal};margin-top:1px">${c.email||""}</div><div style="font-size:12px;color:${C.muted}">${c.phone||""}</div>${c.referral?`<div style="font-size:11px;color:${C.yellow};margin-top:2px">📣 via ${c.referral}</div>`:""}</div>
-          <div style="text-align:right"><div style="font-size:11px;color:${C.muted};text-transform:uppercase;font-weight:700">Total Paid</div><div style="font-size:20px;font-weight:900;color:${C.green};font-family:'Fredoka One',sans-serif">$${c.paid}</div><div style="font-size:11px;color:${C.muted}">${c.bookings.length} booking${c.bookings.length!==1?"s":""}</div></div>
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">${c.bookings.map(b=>`<span style="font-size:10px;padding:2px 8px;border-radius:12px;background:${STATUS[b.status]?.bg||"#333"};color:${STATUS[b.status]?.text||"#fff"};font-weight:700">${(b.service||"").split(" ").slice(0,2).join(" ")}</span>`).join("")}</div>
-      </div>`).join("")}
-    </div>`;
-};
-
-// ── Catalogue ──────────────────────────────────
-const renderCatalogue=()=>{
-  const tabs=["services","addons"].map(t=>`<button onclick="set({catalogueTab:'${t}'})" style="padding:8px 20px;border-radius:10px;border:none;cursor:pointer;background:${APP.catalogueTab===t?`linear-gradient(135deg,${C.orange},${C.yellow})`:C.card};color:${APP.catalogueTab===t?C.dark:C.muted};font-weight:700;font-size:13px;font-family:'Nunito',sans-serif">${t}</button>`).join("");
-  let content="";
-  if(APP.catalogueTab==="services"){
-    const cats=[...new Set(APP.services.map(s=>s.category))];
-    content=cats.map(cat=>`<div style="margin-bottom:22px">
-      <div style="font-weight:800;color:${C.orange};font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">${cat}</div>
-      ${APP.services.filter(s=>s.category===cat).map(s=>`<div class="card" style="padding:12px 18px;display:flex;align-items:center;gap:14px;margin-bottom:8px">
-        <span style="font-size:22px;width:32px;text-align:center">${s.icon}</span>
-        <div style="flex:1"><div style="font-weight:700;font-size:14px">${s.name}</div><div style="font-size:11px;color:${C.muted}">⏱ ${s.duration}</div></div>
-        <div style="font-size:18px;font-weight:900;color:${C.green};margin-right:14px">$${s.price}</div>
-        <span style="font-size:11px;color:${s.active?C.green:C.muted};cursor:pointer" onclick="togSvc('${s.id}')">${s.active?"● Active":"○ Hidden"}</span>
-        ${btn("Edit",`openEditSvc('${s.id}')`,"secondary",true)}
-      </div>`).join("")}
-    </div>`).join("")+btn("➕ Add Service","openEditSvc(null)","primary");
-  } else {
-    content=APP.addons.map(a=>`<div class="card" style="padding:12px 18px;display:flex;align-items:center;gap:14px;margin-bottom:8px">
-      <span style="font-size:22px">${a.icon}</span>
-      <div style="flex:1"><div style="font-weight:700;font-size:14px">${a.name}</div></div>
-      <div style="font-size:18px;font-weight:900;color:${C.green};margin-right:14px">$${a.price}</div>
-      <span style="font-size:11px;color:${a.active?C.green:C.muted};cursor:pointer" onclick="togAo('${a.id}')">${a.active?"● Active":"○ Hidden"}</span>
-      ${btn("Edit",`openEditAo('${a.id}')`,"secondary",true)}
-    </div>`).join("")+btn("➕ Add Add-On","openEditAo(null)","primary");
-  }
-  return`<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:20px">⚙️ Catalogue & Pricing Editor</div>
-    <div style="display:flex;gap:8px;margin-bottom:18px">${tabs}</div>${content}`;
-};
-
-// ── Emails ─────────────────────────────────────
-const renderEmails=()=>`<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:8px">📧 Email Automations</div>
-  <div style="color:${C.muted};font-size:13px;margin-bottom:20px">These emails send automatically via Resend — no action needed on your part.</div>
-  ${APP.templates.map((t,i)=>`<div class="card" style="padding:18px;margin-bottom:12px">
-    <div style="display:flex;align-items:flex-start;gap:12px">
-      <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,${C.orange},${C.yellow});display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:${C.dark};flex-shrink:0">${i+1}</div>
-      <div style="flex:1">
-        <div style="font-weight:800;font-size:14px;margin-bottom:4px">${t.trigger}</div>
-        <div style="font-size:12px;color:${C.teal};margin-bottom:4px">Subject: ${t.subject}</div>
-        <div style="font-size:11px;color:${C.muted}">${t.body}</div>
-      </div>
-      <span style="font-size:11px;color:${C.green};background:#064E3B;padding:4px 10px;border-radius:12px;font-weight:700;white-space:nowrap">● Active</span>
-    </div>
-  </div>`).join("")}
-  <div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:16px;margin-top:8px">
-    <div style="font-weight:800;margin-bottom:8px">⚙️ Email Settings</div>
-    <div style="font-size:13px;color:${C.muted};line-height:1.7">
-      • Notification email: <strong style="color:${C.teal}">${'Joe.Coover@gmail.com'}</strong> (change via NOTIFY_EMAIL in Netlify env vars)<br>
-      • Sending from: <strong style="color:${C.teal}">onboarding@resend.dev</strong> (update by verifying funkymonkeyevents.com in Resend)<br>
-      • Provider: Resend.com — free tier (3,000 emails/month)
-    </div>
-  </div>`;
-
-// ── Analytics ──────────────────────────────────
-const renderAnalytics=()=>{
-  const bs=APP.bookings;
-  const MN=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  const mD=Array(12).fill(0).map((_,i)=>{const m=String(i+1).padStart(2,"0");return bs.filter(b=>(b.date||"").startsWith(`2026-${m}`)).reduce((s,b)=>s+b.total+b.mileageFee,0);});
-  const maxR=Math.max(...mD,1);
-  const sD={};bs.forEach(b=>{sD[b.service]=(sD[b.service]||0)+b.total;});
-  const topS=Object.entries(sD).sort((a,b)=>b[1]-a[1]).slice(0,6);
-  const stD={};bs.forEach(b=>{stD[b.status]=(stD[b.status]||0)+1;});
-  const totR=bs.reduce((s,b)=>s+b.total+b.mileageFee,0);
-  const totM=bs.reduce((s,b)=>s+b.mileageFee,0);
-  const avg=bs.length?(totR/bs.length).toFixed(0):0;
-  const sc=[{label:"Gross Revenue",value:`$${totR.toLocaleString()}`,icon:"💰",color:C.green},{label:"Mileage Revenue",value:`$${totM.toFixed(2)}`,icon:"🚗",color:C.teal},{label:"Avg Booking",value:`$${avg}`,icon:"📈",color:C.purple},{label:"Total Events",value:bs.length,icon:"📋",color:C.yellow}]
-    .map(s=>`<div class="card" style="padding:14px 18px;display:flex;align-items:center;gap:12px"><div style="font-size:22px">${s.icon}</div><div><div style="font-size:18px;font-weight:900;color:${s.color};font-family:'Fredoka One',sans-serif">${s.value}</div><div style="font-size:10px;color:${C.muted};text-transform:uppercase;letter-spacing:.05em;font-weight:700">${s.label}</div></div></div>`).join("");
-  const bars=mD.map((v,i)=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
-    <div style="font-size:8px;color:${C.green};font-weight:700;min-height:12px">${v>0?`$${v}`:""}</div>
-    <div style="width:100%;border-radius:3px 3px 0 0;background:${v>0?`linear-gradient(180deg,${C.orange},${C.yellow})`:`${C.border}44`};height:${Math.max(4,(v/maxR)*100)}px"></div>
-    <div style="font-size:9px;color:${C.muted};font-weight:600">${MN[i]}</div>
-  </div>`).join("");
-  return`<div style="font-size:20px;font-weight:900;font-family:'Fredoka One',sans-serif;margin-bottom:20px">📊 Analytics</div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">${sc}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div class="card"><div style="font-weight:800;margin-bottom:16px;font-size:14px">📅 Monthly Revenue 2026</div><div style="display:flex;align-items:flex-end;gap:4px;height:130px">${bars}</div></div>
-      <div class="card"><div style="font-weight:800;margin-bottom:16px;font-size:14px">🏆 Revenue by Service</div>
-        ${topS.length===0?`<div style="color:${C.muted};font-size:13px">No data yet.</div>`:topS.map(([n,r])=>`<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:75%">${n}</span><span style="font-size:11px;color:${C.green};font-weight:700">$${r}</span></div><div style="background:${C.border};border-radius:4px;height:5px"><div style="height:100%;border-radius:4px;background:linear-gradient(90deg,${C.orange},${C.yellow});width:${(r/topS[0][1])*100}%"></div></div></div>`).join("")}
-      </div>
-      <div class="card"><div style="font-weight:800;margin-bottom:14px;font-size:14px">📊 Bookings by Status</div>
-        ${Object.entries(stD).map(([s,c])=>`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid ${C.border}22;align-items:center">${badge(s)}<span style="font-size:14px;font-weight:900;color:${STATUS[s]?.dot||C.text}">${c}</span></div>`).join("")}
-        ${!Object.keys(stD).length?`<div style="color:${C.muted};font-size:13px">No data yet.</div>`:""}
-      </div>
-    </div>`;
-};
-
-// ── Modals ─────────────────────────────────────
-const showModal=(html,mw=560)=>{const m=document.getElementById("modal");m.style.display="block";m.innerHTML=`<div class="ov" onclick="if(event.target===this)closeModal()"><div class="mb" style="max-width:${mw}px">${html}</div></div>`;};
-const closeModal=()=>{const m=document.getElementById("modal");m.style.display="none";m.innerHTML="";};
-const mHead=(title)=>`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div style="font-weight:900;font-size:18px;font-family:'Fredoka One',sans-serif">${title}</div><button onclick="closeModal()" style="background:none;border:none;color:${C.muted};font-size:22px;cursor:pointer">✕</button></div>`;
-const mFoot=(save,cancel="closeModal()")=>`<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">${btn("Cancel",cancel,"secondary")}${btn("Save",save,"success")}</div>`;
-const lf=(label,id,val,opts={})=>{
-  const req=opts.required?`<span style="color:${C.orange}"> *</span>`:"";
-  if(opts.options){const oh=opts.options.map(o=>{const v=o.value||o,l=o.label||o;return`<option value="${v}" ${val===v?"selected":""}>${l}</option>`;}).join("");return`<div style="margin-bottom:14px"><label class="fl">${label}${req}</label><select id="${id}" class="fi"><option value="">Select…</option>${oh}</select></div>`;}
-  return`<div style="margin-bottom:14px"><label class="fl">${label}${req}</label><input type="${opts.type||"text"}" id="${id}" class="fi" value="${(val||"").toString().replace(/"/g,"&quot;")}" placeholder="${opts.placeholder||""}"/></div>`;
-};
-
-const openPayModal=()=>{const b=APP.selBooking;showModal(`${mHead("💳 Record Payment")}${lf("Amount Received ($)","payAmt","",{type:"number",placeholder:"0.00"})}${lf("Payment Method","payMethod","cash",{options:[{value:"stripe",label:"💳 Stripe"},{value:"paypal",label:"🅿️ PayPal"},{value:"cash",label:"💵 Cash"}]})}${mFoot("recPay()")}`,380);};
-const recPay=()=>{const a=parseFloat(fval("payAmt"))||0,m=fval("payMethod")||"cash";updBooking(APP.selBooking.id,{deposit:APP.selBooking.deposit+a,paymentMethod:m});closeModal();};
-
-const openStripeModal=()=>{
-  const b=APP.selBooking;
-  const deposit=Math.round((b.total+b.mileageFee)*0.5);
-  showModal(`${mHead("💳 Stripe Payment Link")}
-    <p style="color:${C.muted};font-size:13px;line-height:1.6;margin-bottom:16px">Generate a Stripe Checkout link for the exact deposit amount. The client clicks it, pays by card/Apple Pay/Google Pay, and their booking auto-confirms.</p>
-    <div style="background:${C.darker};border-radius:12px;padding:14px 18px;margin-bottom:16px">
-      <div style="font-size:11px;color:${C.muted};text-transform:uppercase;font-weight:700;margin-bottom:4px">Deposit Amount</div>
-      <div style="font-size:28px;font-weight:900;color:${C.green};font-family:'Fredoka One',sans-serif">$${deposit}</div>
-      <div style="font-size:11px;color:${C.muted};margin-top:2px">50% of $${(b.total+b.mileageFee).toFixed(2)} total · ${b.service} for ${b.client}</div>
-    </div>
-    ${b.stripeLink?`<div style="background:#064E3B22;border:1px solid #10B98133;border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:#6EE7B7">✓ Link already generated: <a href="${b.stripeLink}" target="_blank" style="color:${C.teal};word-break:break-all">${b.stripeLink}</a></div>`:""}
-    <div id="stripe-gen-status" style="display:none;margin-bottom:14px"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
-      ${btn("Cancel","closeModal()","secondary")}
-      ${btn("⚡ Generate & Send to Client","genStripeLink()","primary")}
-    </div>`,500);
-};
-
-const genStripeLink=async()=>{
-  const b=APP.selBooking;
-  const statusEl=document.getElementById("stripe-gen-status");
-  statusEl.style.display="block";
-  statusEl.innerHTML=`<div style="color:${C.muted};font-size:13px">⏳ Generating Stripe link…</div>`;
+async function loadBookings() {
   try {
-    const res=await fetch("/api/create-stripe-link",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bookingId:b.id,bookingRef:b.bookingId,client:b.client,email:b.email,service:b.service,amount:Math.round((b.total+b.mileageFee)*0.5)})});
-    const data=await res.json();
-    if(!res.ok||!data.url) throw new Error(data.error||"Failed to generate link");
-    updBooking(b.id,{stripePaymentLink:data.url});
-    statusEl.innerHTML=`<div style="background:#064E3B22;border:1px solid #10B98133;border-radius:10px;padding:12px;color:#6EE7B7;font-size:13px;font-weight:700">✅ Done! Link sent to ${b.email}<br><a href="${data.url}" target="_blank" style="color:${C.teal};font-size:11px;font-weight:400;word-break:break-all">${data.url}</a></div>`;
-  } catch(e) {
-    statusEl.innerHTML=`<div style="background:#450A0A;border:1px solid #7F1D1D;border-radius:10px;padding:12px;color:#FCA5A5;font-size:13px">❌ ${e.message}</div>`;
+    const res = await fetch('/api/bookings');
+    allBookings = await res.json();
+    updateDashStats();
+    renderDashBookings();
+    renderBookingsTable();
+    renderCalendar();
+    renderClients();
+    renderAnalytics();
+  } catch(e) { console.error('Load bookings:', e); }
+}
+
+// ─── Navigation ───────────────────────────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.getElementById('nav-' + name).classList.add('active');
+  if (name === 'staff') renderStaff();
+  if (name === 'catalogue') loadCatalogue();
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+function updateDashStats() {
+  document.getElementById('stat-total').textContent = allBookings.length;
+  document.getElementById('stat-review').textContent = allBookings.filter(b => b.status === 'review').length;
+  document.getElementById('stat-confirmed').textContent = allBookings.filter(b => b.status === 'confirmed').length;
+  const rev = allBookings.filter(b => ['confirmed','completed'].includes(b.status))
+    .reduce((s,b) => s + Number(b.total_price||0), 0);
+  document.getElementById('stat-revenue').textContent = '$' + rev.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+}
+
+function renderDashBookings() {
+  const tbody = document.getElementById('dash-bookings');
+  const recent = [...allBookings].slice(0, 8);
+  tbody.innerHTML = recent.map(b => `
+    <tr style="cursor:pointer" onclick="openBooking('${b.id}')">
+      <td><code style="font-size:.8rem">${b.reference||'-'}</code></td>
+      <td>${b.client_name||''}</td>
+      <td>${b.service_name||''}</td>
+      <td>${fmtDate(b.event_date)}</td>
+      <td>$${Number(b.total_price||0).toFixed(0)}</td>
+      <td><span class="badge badge-${b.status||'review'}">${b.status||'review'}</span></td>
+    </tr>`).join('');
+}
+
+// ─── Bookings table ───────────────────────────────────────────────────────────
+function renderBookingsTable() {
+  const filter = document.getElementById('filter-status').value;
+  const list = filter ? allBookings.filter(b => b.status === filter) : allBookings;
+  const tbody = document.getElementById('bookings-tbody');
+  tbody.innerHTML = list.map(b => `
+    <tr style="cursor:pointer" onclick="openBooking('${b.id}')">
+      <td><code style="font-size:.8rem">${b.reference||'-'}</code></td>
+      <td><div style="font-weight:600">${b.client_name||''}</div><div style="font-size:.78rem;color:#888">${b.client_email||''}</div></td>
+      <td>${b.service_name||''}</td>
+      <td>${fmtDate(b.event_date)}</td>
+      <td>$${Number(b.total_price||0).toFixed(0)}</td>
+      <td><span class="badge badge-${b.status||'review'}">${b.status||'review'}</span></td>
+      <td><button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openBooking('${b.id}')">View</button></td>
+    </tr>`).join('');
+}
+
+// ─── Booking detail modal ─────────────────────────────────────────────────────
+function openBooking(id) {
+  const b = allBookings.find(x => String(x.id) === String(id));
+  if (!b) return;
+  document.getElementById('modal-title').textContent = `${b.reference || 'Booking'} — ${b.client_name}`;
+
+  const addons = Array.isArray(b.addons) ? b.addons : (typeof b.addons === 'string' ? JSON.parse(b.addons||'[]') : []);
+  const addonLines = addons.map(a => `<div class="q-line"><span>${a.name}</span><span>$${Number(a.price||0).toFixed(2)}</span></div>`).join('');
+  const mileageLine = Number(b.mileage_cost) > 0 ? `<div class="q-line"><span>Travel (${b.mileage_miles} mi)</span><span>$${Number(b.mileage_cost).toFixed(2)}</span></div>` : '';
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="status-row">
+      ${['review','pending','confirmed','completed','cancelled'].map(s =>
+        `<button class="btn btn-sm ${b.status===s?'btn-primary':'btn-outline'}" onclick="setStatus('${b.id}','${s}')">${s}</button>`
+      ).join('')}
+    </div>
+    <div class="detail-grid">
+      <div class="detail-field"><label>Client</label><div class="val">${b.client_name}</div></div>
+      <div class="detail-field"><label>Phone</label><div class="val">${b.client_phone||'—'}</div></div>
+      <div class="detail-field"><label>Email</label><div class="val">${b.client_email||'—'}</div></div>
+      <div class="detail-field"><label>Referral</label><div class="val">${b.referral_source||'—'}</div></div>
+      <div class="detail-field"><label>Event Date</label><div class="val">${fmtDate(b.event_date)} ${b.event_time||''}</div></div>
+      <div class="detail-field"><label>Event Type</label><div class="val">${b.event_type||'—'}</div></div>
+      <div class="detail-field"><label>Guests</label><div class="val">${b.guest_count||'—'}</div></div>
+      <div class="detail-field"><label>ZIP / Location</label><div class="val">${b.event_zip||'—'}${b.event_location?' — '+b.event_location:''}</div></div>
+    </div>
+    ${b.notes ? `<div style="margin-bottom:16px"><label style="font-size:.75rem;text-transform:uppercase;color:#888;font-weight:700;letter-spacing:.05em">Client Notes</label><p style="margin-top:4px;color:#374151;font-size:.9rem">${b.notes}</p></div>` : ''}
+    <div class="quote-summary">
+      <h3>Quote</h3>
+      <div class="q-line"><span>${b.service_name}</span><span>$${Number(b.service_price||0).toFixed(2)}</span></div>
+      ${addonLines}
+      ${mileageLine}
+      <div class="q-line" style="font-weight:700"><span>Total</span><span>$${Number(b.total_price||0).toFixed(2)}</span></div>
+      <div class="q-line" style="color:#7c3aed"><span>Deposit</span><span>$${Number(b.deposit_amount||100).toFixed(2)} ${b.deposit_paid?'✅ Paid':'⏳ Unpaid'}</span></div>
+      <div class="q-line"><span>Balance Due</span><span>$${Number(b.balance_due||0).toFixed(2)}</span></div>
+    </div>
+    <div class="stripe-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <strong style="font-size:.9rem">💳 Stripe Deposit Link</strong>
+        <button class="btn btn-primary btn-sm" onclick="generateStripeLink('${b.id}')">Send Deposit Link</button>
+      </div>
+      <div id="stripe-result-${b.id}" style="font-size:.8rem;color:#888"></div>
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="font-size:.75rem;text-transform:uppercase;color:#888;font-weight:700;letter-spacing:.05em;display:block;margin-bottom:6px">Admin Notes</label>
+      <textarea class="notes-area" id="admin-notes-${b.id}" placeholder="Internal notes (not visible to client)…">${b.admin_notes||''}</textarea>
+      <button class="btn btn-outline btn-sm" style="margin-top:6px" onclick="saveAdminNotes('${b.id}')">Save Notes</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-outline btn-sm" onclick="recordPayment('${b.id}')">Record Payment</button>
+      <button class="btn btn-outline btn-sm" onclick="toggleContract('${b.id}')">
+        ${b.contract_signed ? '📝 Contract Signed ✓' : '📝 Mark Contract Signed'}
+      </button>
+      <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this booking?'))deleteBooking('${b.id}')">Delete</button>
+    </div>
+  `;
+  document.getElementById('booking-modal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('booking-modal').classList.remove('open');
+}
+document.getElementById('booking-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+async function setStatus(id, status) {
+  await fetch('/api/booking/' + id, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status })
+  });
+  await loadBookings();
+  openBooking(id);
+}
+
+async function saveAdminNotes(id) {
+  const notes = document.getElementById('admin-notes-' + id).value;
+  await fetch('/api/booking/' + id, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ admin_notes: notes })
+  });
+  alert('Notes saved.');
+}
+
+async function generateStripeLink(id) {
+  const el = document.getElementById('stripe-result-' + id);
+  el.textContent = 'Generating…';
+  try {
+    const res = await fetch('/api/create-stripe-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ booking_id: id })
+    });
+    const data = await res.json();
+    if (data.url) {
+      el.innerHTML = `✅ Sent to client. <a href="${data.url}" target="_blank" style="color:#7c3aed">Open link</a>`;
+    } else {
+      el.textContent = '❌ Error: ' + (data.error || 'Unknown error');
+    }
+  } catch(e) { el.textContent = '❌ ' + e.message; }
+}
+
+async function deleteBooking(id) {
+  await fetch('/api/booking/' + id, { method: 'DELETE' });
+  closeModal();
+  await loadBookings();
+}
+
+async function toggleContract(id) {
+  const b = allBookings.find(x => String(x.id) === String(id));
+  if (!b) return;
+  await fetch('/api/booking/' + id, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contract_signed: !b.contract_signed })
+  });
+  await loadBookings();
+  openBooking(id);
+}
+
+function recordPayment(id) {
+  const method = prompt('Payment method? (cash / stripe / paypal)');
+  if (!method) return;
+  const amount = prompt('Amount paid?');
+  if (!amount) return;
+  alert(`Recorded $${amount} via ${method}. (Payment tracking UI coming in Rev 7)`);
+}
+
+// ─── Calendar ─────────────────────────────────────────────────────────────────
+function changeMonth(dir) { calMonth += dir; if(calMonth>11){calMonth=0;calYear++;}else if(calMonth<0){calMonth=11;calYear--;} renderCalendar(); }
+
+function renderCalendar() {
+  const label = new Date(calYear, calMonth, 1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  document.getElementById('cal-month-label').textContent = label;
+  const grid = document.getElementById('cal-grid');
+  const firstDay = new Date(calYear, calMonth, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+  const today = new Date();
+  let html = '';
+  for (let i=0;i<firstDay;i++) html += `<div class="cal-day other-month"></div>`;
+  for (let d=1;d<=daysInMonth;d++) {
+    const isToday = d===today.getDate()&&calMonth===today.getMonth()&&calYear===today.getFullYear();
+    const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dayBookings = allBookings.filter(b => b.event_date && b.event_date.startsWith(dateStr) && b.status !== 'cancelled');
+    const eventsHtml = dayBookings.map(b => `<div class="cal-event" onclick="openBooking('${b.id}')" title="${b.client_name}">${b.service_name||b.client_name}</div>`).join('');
+    html += `<div class="cal-day${isToday?' today':''}"><div class="day-num">${d}</div>${eventsHtml}</div>`;
   }
-};
+  grid.innerHTML = html;
+}
 
-const saveStripeLink=()=>{updBooking(APP.selBooking.id,{stripePaymentLink:fval("stripeLink")});closeModal();};
+// ─── Clients ──────────────────────────────────────────────────────────────────
+function renderClients() {
+  const clientMap = {};
+  allBookings.forEach(b => {
+    const k = b.client_email || b.client_name;
+    if (!clientMap[k]) clientMap[k] = { name: b.client_name, email: b.client_email, phone: b.client_phone, bookings: 0, total: 0, last: null };
+    clientMap[k].bookings++;
+    clientMap[k].total += Number(b.total_price||0);
+    if (!clientMap[k].last || b.event_date > clientMap[k].last) clientMap[k].last = b.event_date;
+  });
+  const clients = Object.values(clientMap).sort((a,b) => b.total - a.total);
+  document.getElementById('clients-tbody').innerHTML = clients.map(c => `
+    <tr>
+      <td style="font-weight:600">${c.name}</td>
+      <td>${c.email||'—'}</td>
+      <td>${c.phone||'—'}</td>
+      <td>${c.bookings}</td>
+      <td>$${c.total.toFixed(0)}</td>
+      <td>${fmtDate(c.last)}</td>
+    </tr>`).join('');
+}
 
-const openContractModal=()=>{
-  const b=APP.selBooking,grand=(b.total+b.mileageFee).toFixed(2);
-  const text=`ENTERTAINMENT SERVICES AGREEMENT\nFunky Monkey Events · OKC, OK · (405) 431-6625\n\nClient: ${b.client}\nService: ${b.service}\nDate: ${b.date} at ${b.time}\nLocation: ${b.location}\nTotal: $${grand}\n\nTERMS:\n1. A 50% deposit is required to secure the date.\n2. Balance is due on the day of the event.\n3. Cancellations under 7 days forfeit the deposit.\n4. Travel fee: $0.70/mile round trip from OKC 73118.\n5. Funky Monkey Events may substitute performers of equal skill.\n\nClient Signature: _________________________ Date: ________\nFunky Monkey Events: _________________________ Date: ________`;
-  showModal(`${mHead("📄 Digital Contract")}
-    <div style="background:${C.darker};border-radius:10px;padding:18px;font-size:12px;line-height:1.7;white-space:pre-wrap;max-height:340px;overflow-y:auto">${text}</div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
-      ${btn("Close","closeModal()","secondary")}
-      ${btn("✓ Mark as Signed",`updBooking(${b.id},{contractSigned:true});closeModal()`,"success")}
-    </div>`,600);
-};
+// ─── Staff ────────────────────────────────────────────────────────────────────
+function renderStaff() {
+  const staff = JSON.parse(localStorage.getItem('fm_staff') || 'null') || defaultStaff;
+  document.getElementById('staff-grid').innerHTML = staff.map(s => `
+    <div class="staff-card" style="border-top-color:${s.color}">
+      <div style="width:44px;height:44px;border-radius:50%;background:${s.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.1rem;margin-bottom:10px">${s.name[0]}</div>
+      <h3>${s.name}</h3>
+      <div class="role">${s.role}</div>
+      <button class="btn btn-outline btn-sm" onclick="editStaff(${s.id})">Edit</button>
+    </div>`).join('');
+}
 
-const openEditSvc=(id)=>{
-  const s=id?APP.services.find(x=>x.id===id):{name:"",category:"Shows",price:"",duration:"",icon:"🎪",active:true};
-  showModal(`${mHead(id?"✏️ Edit Service":"➕ New Service")}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${lf("Service Name","svcName",s.name,{required:true})}${lf("Icon (emoji)","svcIcon",s.icon)}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${lf("Base Price ($)","svcPrice",s.price,{type:"number",required:true})}${lf("Duration","svcDur",s.duration)}</div>
-    ${lf("Category","svcCat",s.category,{options:["Shows","Performers","Experiences","Camps","Other"]})}
-    ${mFoot(`saveSvc('${id||""}')`)}`,460);
-};
-const saveSvc=(id)=>{
-  const u={name:fval("svcName"),category:fval("svcCat"),price:parseFloat(fval("svcPrice"))||0,duration:fval("svcDur"),icon:fval("svcIcon"),active:true};
-  if(id) APP.services=APP.services.map(s=>s.id===id?{...s,...u}:s);
-  else APP.services=[...APP.services,{...u,id:"svc_"+Date.now()}];
-  closeModal();renderMain();
-};
-const togSvc=(id)=>{APP.services=APP.services.map(s=>s.id===id?{...s,active:!s.active}:s);renderMain();};
+function openAddStaff() {
+  const name = prompt('Staff name:'); if(!name) return;
+  const role = prompt('Role:') || 'Performer';
+  const staff = JSON.parse(localStorage.getItem('fm_staff') || 'null') || defaultStaff;
+  staff.push({ id: Date.now(), name, role, color: '#7c3aed', pin: '0000' });
+  localStorage.setItem('fm_staff', JSON.stringify(staff));
+  renderStaff();
+}
 
-const openEditAo=(id)=>{
-  const a=id?APP.addons.find(x=>x.id===id):{name:"",price:"",icon:"✨",active:true};
-  showModal(`${mHead(id?"✏️ Edit Add-On":"➕ New Add-On")}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${lf("Name","aoName",a.name,{required:true})}${lf("Icon","aoIcon",a.icon)}</div>
-    ${lf("Price ($)","aoPrice",a.price,{type:"number",required:true})}
-    ${mFoot(`saveAo('${id||""}')`)}`,380);
-};
-const saveAo=(id)=>{
-  const u={name:fval("aoName"),price:parseFloat(fval("aoPrice"))||0,icon:fval("aoIcon"),active:true};
-  if(id) APP.addons=APP.addons.map(a=>a.id===id?{...a,...u}:a);
-  else APP.addons=[...APP.addons,{...u,id:"ao_"+Date.now()}];
-  closeModal();renderMain();
-};
-const togAo=(id)=>{APP.addons=APP.addons.map(a=>a.id===id?{...a,active:!a.active}:a);renderMain();};
+function editStaff(id) {
+  const staff = JSON.parse(localStorage.getItem('fm_staff') || 'null') || defaultStaff;
+  const s = staff.find(x => x.id === id); if(!s) return;
+  const name = prompt('Name:', s.name); if(!name) return;
+  const role = prompt('Role:', s.role);
+  s.name = name; if(role) s.role = role;
+  localStorage.setItem('fm_staff', JSON.stringify(staff));
+  renderStaff();
+}
 
-// ── Staff modals ───────────────────────────────
-const COLORS=[C.purple,C.pink,C.teal,C.green,C.orange,C.yellow,"#F43F5E","#8B5CF6","#14B8A6","#F97316"];
+// ─── Catalogue ────────────────────────────────────────────────────────────────
+async function loadCatalogue() {
+  document.getElementById('cat-loading').style.display = 'block';
+  document.getElementById('cat-content').style.display = 'none';
+  try {
+    const res = await fetch('/api/services');
+    const data = await res.json();
+    catalogueServices = data.services || [];
+    catalogueAddons = data.addons || [];
+    renderCatalogue();
+    document.getElementById('cat-loading').style.display = 'none';
+    document.getElementById('cat-content').style.display = 'block';
+  } catch(e) {
+    document.getElementById('cat-loading').innerHTML = '<p style="color:#dc2626">Failed to load services. Check API.</p>';
+  }
+}
 
-const openEditStaff=(id)=>{
-  const s=APP.staffList.find(x=>x.id===id);if(!s)return;
-  const initials=(n)=>n.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
-  showModal(`${mHead("✏️ Edit Staff Member")}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${lf("Full Name","stName",s.name,{required:true})}${lf("Role / Specialty","stRole",s.role,{required:true})}</div>
-    ${lf("Avatar Initials (2 letters)","stAvatar",s.avatar)}
-    <div style="margin-bottom:14px"><label class="fl">Color</label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">${COLORS.map(col=>`<div onclick="document.getElementById('stColor').value='${col}';document.querySelectorAll('.cc').forEach(x=>x.style.outline='none');this.style.outline='3px solid #fff'" class="cc" style="width:28px;height:28px;border-radius:50%;background:${col};cursor:pointer;${s.color===col?"outline:3px solid #fff":""}"></div>`).join("")}</div>
-      <input type="hidden" id="stColor" value="${s.color}"/>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${lf("PIN (4-6 digits)","stPin",s.pin,{type:"password",placeholder:"••••"})}${lf("Confirm PIN","stPin2","",{type:"password",placeholder:"••••"})}</div>
-    <div id="pin-err" style="display:none;color:#FCA5A5;font-size:12px;margin-bottom:10px">PINs don't match.</div>
-    ${mFoot(`saveStaff(${id})`)}`,460);
-};
+function renderCatalogue() {
+  const catOrder = ['shows','performers','experiences','camps'];
+  const catLabels = { shows:'🎭 Shows', performers:'🤹 Performers', experiences:'🎊 Experiences', camps:'🏕 Camps' };
+  let html = '';
 
-const openAddStaff=()=>{
-  showModal(`${mHead("➕ Add Staff Member")}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${lf("Full Name","stName","",{required:true})}${lf("Role / Specialty","stRole","",{required:true})}</div>
-    ${lf("Avatar Initials (2 letters)","stAvatar","",{placeholder:"JD"})}
-    <div style="margin-bottom:14px"><label class="fl">Color</label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">${COLORS.map((col,i)=>`<div onclick="document.getElementById('stColor').value='${col}';document.querySelectorAll('.cc').forEach(x=>x.style.outline='none');this.style.outline='3px solid #fff'" class="cc" style="width:28px;height:28px;border-radius:50%;background:${col};cursor:pointer;${i===0?"outline:3px solid #fff":""}"></div>`).join("")}</div>
-      <input type="hidden" id="stColor" value="${COLORS[0]}"/>
-    </div>
-    ${lf("PIN (4-6 digits)","stPin","",{type:"password",placeholder:"••••"})}
-    ${mFoot("addStaff()")}`,460);
-};
+  catOrder.forEach(cat => {
+    const svcs = catalogueServices.filter(s => s.category === cat);
+    if (!svcs.length) return;
+    html += `<div class="cat-section"><h3>${catLabels[cat]||cat}</h3>
+    <table class="catalogue-table" style="width:100%;border-collapse:collapse">
+      <thead><tr><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Icon</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Name</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Price</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Duration</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Guest Note</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Active</th></tr></thead>
+      <tbody>`;
+    svcs.forEach(s => {
+      html += `<tr data-id="${s.id}" data-service-id="${s.service_id}" data-category="${s.category}">
+        <td style="padding:6px 8px"><input type="text" value="${s.icon||'🎪'}" style="width:52px;text-align:center" data-field="icon"/></td>
+        <td style="padding:6px 8px"><input type="text" value="${s.name}" data-field="name"/></td>
+        <td style="padding:6px 8px"><input type="number" value="${Number(s.price).toFixed(0)}" style="width:90px" data-field="price"/></td>
+        <td style="padding:6px 8px"><input type="number" value="${s.duration_minutes||120}" style="width:80px" placeholder="mins" data-field="duration_minutes"/></td>
+        <td style="padding:6px 8px"><input type="text" value="${s.guest_suggestion||''}" data-field="guest_suggestion"/></td>
+        <td style="padding:6px 8px;text-align:center"><input type="checkbox" ${s.active?'checked':''} data-field="active" style="width:auto"/></td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
+  });
 
-const saveStaff=(id)=>{
-  const pin=fval("stPin"),pin2=fval("stPin2");
-  if(pin&&pin!==pin2){document.getElementById("pin-err").style.display="block";return;}
-  const name=fval("stName"),role=fval("stRole");
-  const initials=fval("stAvatar")||name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
-  APP.staffList=APP.staffList.map(s=>s.id===id?{...s,name:name||s.name,role:role||s.role,avatar:initials||s.avatar,color:fval("stColor")||s.color,...(pin?{pin}:{})}:s);
-  closeModal();renderMain();
-};
+  // Add-ons section
+  html += `<div class="cat-section"><h3>➕ Add-ons</h3>
+  <table class="catalogue-table" style="width:100%;border-collapse:collapse">
+    <thead><tr><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Name</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Price</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Active</th></tr></thead>
+    <tbody>`;
+  catalogueAddons.forEach(a => {
+    html += `<tr data-addon-id="${a.addon_id}">
+      <td style="padding:6px 8px"><input type="text" value="${a.name}" data-field="name"/></td>
+      <td style="padding:6px 8px"><input type="number" value="${Number(a.price).toFixed(0)}" style="width:90px" data-field="price"/></td>
+      <td style="padding:6px 8px;text-align:center"><input type="checkbox" ${a.active?'checked':''} data-field="active" style="width:auto"/></td>
+    </tr>`;
+  });
+  html += `</tbody></table></div>`;
 
-const addStaff=()=>{
-  const name=fval("stName"),role=fval("stRole");
-  const initials=fval("stAvatar")||name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
-  const newId=Math.max(...APP.staffList.map(s=>s.id),0)+1;
-  APP.staffList=[...APP.staffList,{id:newId,name,role,avatar:initials,color:fval("stColor")||C.purple,pin:fval("stPin")||"0000"}];
-  closeModal();renderMain();
-};
+  document.getElementById('cat-content').innerHTML = html;
+}
 
-// ── Routing ────────────────────────────────────
-const selBook=(id)=>{APP.selBooking=APP.bookings.find(b=>b.id===id);setView("booking-detail");};
-const selStaff=(id)=>{const s=APP.staffList.find(x=>x.id===id);set({staffSel:s,staffPin:"",staffUnlocked:false,staffPinErr:false});};
-const tryPin=()=>{const inp=document.getElementById("staffPinInput");const pin=inp?inp.value:"";if(pin===APP.staffSel?.pin)set({staffUnlocked:true,staffPinErr:false});else set({staffPinErr:true});};
+async function saveCatalogue() {
+  const btn = document.querySelector('[onclick="saveCatalogue()"]');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const indicator = document.getElementById('save-indicator');
+  indicator.classList.remove('visible');
 
-// ── Render ─────────────────────────────────────
-const renderMain=()=>{
-  const el=document.getElementById("main");
-  if(APP.loading){el.innerHTML=`<div style="display:flex;align-items:center;justify-content:center;height:60vh;flex-direction:column;gap:16px"><div style="font-size:40px">🐒</div><div style="font-size:16px;font-weight:700">Loading bookings…</div></div>`;return;}
-  if(APP.loadError){el.innerHTML=`<div style="display:flex;align-items:center;justify-content:center;height:60vh;flex-direction:column;gap:16px"><div style="font-size:40px">⚠️</div><div style="font-size:16px;font-weight:700;color:${C.red}">Database connection failed</div><div style="font-size:13px;color:${C.muted};max-width:400px;text-align:center">${APP.loadError}</div><div style="font-size:12px;color:${C.muted}">Check DATABASE_URL in Netlify environment variables.</div></div>`;return;}
-  const views={dashboard:renderDashboard,bookings:renderBookings,"booking-detail":renderBookingDetail,calendar:renderCalendar,staff:renderStaff,clients:renderClients,catalogue:renderCatalogue,emails:renderEmails,analytics:renderAnalytics};
-  el.innerHTML=(views[APP.view]||renderDashboard)();
-};
+  try {
+    const rows = document.querySelectorAll('#cat-content tr[data-service-id]');
+    for (const row of rows) {
+      const service_id = row.dataset.serviceId;
+      const category = row.dataset.category;
+      const fields = row.querySelectorAll('[data-field]');
+      const payload = { service_id, category };
+      fields.forEach(f => {
+        const field = f.dataset.field;
+        if (f.type === 'checkbox') payload[field] = f.checked;
+        else if (field === 'price' || field === 'duration_minutes') payload[field] = Number(f.value);
+        else payload[field] = f.value;
+      });
+      await fetch('/api/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }
 
-const renderAll=()=>{if(!adminAuthed)return;renderSidebar();renderMain();};
+    const addonRows = document.querySelectorAll('#cat-content tr[data-addon-id]');
+    for (const row of addonRows) {
+      const addon_id = row.dataset.addonId;
+      const fields = row.querySelectorAll('[data-field]');
+      const payload = { type: 'addon', addon_id };
+      fields.forEach(f => {
+        const field = f.dataset.field;
+        if (f.type === 'checkbox') payload[field] = f.checked;
+        else if (field === 'price') payload[field] = Number(f.value);
+        else payload[field] = f.value;
+      });
+      await fetch('/api/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }
 
-// ── Boot ───────────────────────────────────────
-const init=()=>{renderAll();api.load();setInterval(api.load,30000);};
-if(adminAuthed)init();
+    indicator.classList.add('visible');
+    setTimeout(() => indicator.classList.remove('visible'), 3000);
+  } catch(e) { alert('Save failed: ' + e.message); }
 
-Object.assign(window,{set,setView,selBook,selStaff,tryPin,updBooking,closeModal,openPayModal,recPay,openStripeModal,genStripeLink,saveStripeLink,openContractModal,openEditSvc,saveSvc,togSvc,openEditAo,saveAo,togAo,openEditStaff,openAddStaff,saveStaff,addStaff,doLogin,doLogout,renderMain});
+  btn.disabled = false; btn.textContent = 'Save Changes';
+}
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+function renderAnalytics() {
+  const now = new Date();
+  const thisMonth = allBookings.filter(b => {
+    if (!b.event_date) return false;
+    const d = new Date(b.event_date);
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  });
+  const confirmedAll = allBookings.filter(b => ['confirmed','completed'].includes(b.status));
+  const monthRev = thisMonth.filter(b=>['confirmed','completed'].includes(b.status)).reduce((s,b)=>s+Number(b.total_price||0),0);
+  const avg = confirmedAll.length ? confirmedAll.reduce((s,b)=>s+Number(b.total_price||0),0)/confirmedAll.length : 0;
+  const completeRate = allBookings.length ? Math.round((allBookings.filter(b=>b.status==='completed').length/allBookings.length)*100) : 0;
+
+  document.getElementById('an-month-rev').textContent = '$'+monthRev.toFixed(0);
+  document.getElementById('an-month-cnt').textContent = thisMonth.length;
+  document.getElementById('an-avg').textContent = '$'+avg.toFixed(0);
+  document.getElementById('an-complete').textContent = completeRate+'%';
+
+  // Top services
+  const svcMap = {};
+  allBookings.forEach(b => {
+    const k = b.service_name||'Unknown';
+    if (!svcMap[k]) svcMap[k] = { count:0, rev:0 };
+    svcMap[k].count++;
+    svcMap[k].rev += Number(b.total_price||0);
+  });
+  const svcs = Object.entries(svcMap).sort((a,b)=>b[1].count-a[1].count);
+  document.getElementById('an-services').innerHTML = svcs.map(([k,v])=>`
+    <tr><td>${k}</td><td>${v.count}</td><td>$${v.rev.toFixed(0)}</td></tr>`).join('');
+
+  // Referrals
+  const refMap = {};
+  allBookings.forEach(b => {
+    const k = b.referral_source || 'Unknown';
+    refMap[k] = (refMap[k]||0)+1;
+  });
+  const refs = Object.entries(refMap).sort((a,b)=>b[1]-a[1]);
+  const total = refs.reduce((s,r)=>s+r[1],0);
+  document.getElementById('an-referrals').innerHTML = refs.map(([k,v])=>`
+    <tr><td>${k}</td><td>${v}</td><td>${total?Math.round(v/total*100):0}%</td></tr>`).join('');
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function fmtDate(d) {
+  if (!d) return '—';
+  const dt = new Date(d + (d.includes('T')?'':'T00:00:00'));
+  return dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+}
 </script>
 </body>
 </html>
