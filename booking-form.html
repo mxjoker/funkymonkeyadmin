@@ -129,13 +129,23 @@ const zipLook=(z)=>{
 
 // Address autocomplete
 let at=null;
+const renderAcDrop=()=>{
+  const el=document.getElementById("ac-drop");
+  if(!el)return;
+  if(!S.acResults.length){el.innerHTML="";el.style.display="none";return;}
+  el.style.display="block";
+  el.innerHTML=S.acResults.map((r,i)=>{
+    const p=r.display_name.split(", ");
+    return`<div class="ac-item${S.acHi===i?" hi":""}" onmousedown="acPick(${i})"><div>${p.slice(0,2).join(", ")}</div><div class="ac-sub">${p.slice(2,5).join(", ")}</div></div>`;
+  }).join("");
+};
 const acLook=(v)=>{
   sf({loc:v});
   clearTimeout(at);
-  if(v.length<4){set({acResults:[],acHi:-1});return;}
+  if(v.length<4){S.acResults=[];S.acHi=-1;renderAcDrop();return;}
   at=setTimeout(async()=>{
-    try{const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(v)}&format=json&addressdetails=1&limit=6&countrycodes=us`,{headers:{"Accept-Language":"en"}});const d=await r.json();set({acResults:d,acHi:-1});}
-    catch{set({acResults:[]});}
+    try{const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(v)}&format=json&addressdetails=1&limit=6&countrycodes=us`,{headers:{"Accept-Language":"en"}});const d=await r.json();S.acResults=d;S.acHi=-1;renderAcDrop();}
+    catch{S.acResults=[];renderAcDrop();}
   },400);
 };
 const acPick=(i)=>{
@@ -143,15 +153,15 @@ const acPick=(i)=>{
   const lat=+r.lat,lon=+r.lon;
   const{miles,fee}=calcM(lat,lon);
   const zip=r.address?.postcode?.slice(0,5)||S.form.zip;
+  S.acResults=[];S.acHi=-1;
   sfr({loc:r.display_name,lat,lon,miles,fee,zip});
-  set({acResults:[],acHi:-1});
 };
 const acKey=(e)=>{
   const n=S.acResults.length;if(!n)return;
-  if(e.key==="ArrowDown"){e.preventDefault();set({acHi:Math.min(S.acHi+1,n-1)});}
-  else if(e.key==="ArrowUp"){e.preventDefault();set({acHi:Math.max(S.acHi-1,0)});}
+  if(e.key==="ArrowDown"){e.preventDefault();S.acHi=Math.min(S.acHi+1,n-1);renderAcDrop();}
+  else if(e.key==="ArrowUp"){e.preventDefault();S.acHi=Math.max(S.acHi-1,0);renderAcDrop();}
   else if(e.key==="Enter"&&S.acHi>=0){e.preventDefault();acPick(S.acHi);}
-  else if(e.key==="Escape"){set({acResults:[]});}
+  else if(e.key==="Escape"){S.acResults=[];renderAcDrop();}
 };
 
 // Validation
@@ -239,7 +249,7 @@ const s1=()=>{
 
 const s2=()=>{
   const f=S.form;
-  const acDrop=S.acResults.length?`<div class="ac-list">${S.acResults.map((r,i)=>{const p=r.display_name.split(", ");return`<div class="ac-item${S.acHi===i?" hi":""}" onmousedown="acPick(${i})"><div>${p.slice(0,2).join(", ")}</div><div class="ac-sub">${p.slice(2,5).join(", ")}</div></div>`;}).join("")}</div>`:"";
+
   const mb=(f.zip.length===5||f.lat)?`<div style="background:linear-gradient(135deg,#0A1A2E,#0A2A1E);border:1.5px solid ${C.teal}44;border-radius:14px;padding:14px 18px;margin-bottom:14px">
     <div style="font-size:11px;font-weight:800;color:${C.teal};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">🚗 Travel Fee Estimate</div>
     ${S.mileLoad?`<div style="color:${C.muted};font-size:13px">Looking up location…</div>`:f.miles>0?`<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center">
@@ -271,8 +281,8 @@ const s2=()=>{
     <div style="margin-bottom:14px"><label class="fl">Full Event Address <span style="color:#FF6B00">*</span></label>
       <div class="ac-wrap">
         <input type="text" id="i-loc" class="fi" value="${f.loc.replace(/"/g,"&quot;")}" placeholder="Start typing an address…"
-          oninput="acLook(this.value)" onkeydown="acKey(event)" onblur="setTimeout(()=>set({acResults:[]}),200)" autocomplete="off"/>
-        ${acDrop}
+          oninput="acLook(this.value)" onkeydown="acKey(event)" onblur="setTimeout(()=>{S.acResults=[];renderAcDrop();},200)" autocomplete="off"/>
+        <div id="ac-drop" class="ac-list" style="display:none"></div>
       </div></div>
     ${mb}
     <div style="margin-bottom:14px"><label class="fl">Special Requests / Notes</label>
@@ -366,7 +376,7 @@ const renderDone=()=>{
 };
 
 // Expose globals
-Object.assign(window,{set,sf,sfr,nxt,back,sub,zipLook,acLook,acKey,acPick,togAo:(id)=>sfr({addons:S.form.addons.includes(id)?S.form.addons.filter(x=>x!==id):[...S.form.addons,id]})});
+Object.assign(window,{set,sf,sfr,nxt,back,sub,zipLook,acLook,acKey,acPick,renderAcDrop,togAo:(id)=>sfr({addons:S.form.addons.includes(id)?S.form.addons.filter(x=>x!==id):[...S.form.addons,id]})});
 re();
 </script>
 </body>
