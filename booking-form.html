@@ -106,7 +106,7 @@ const sfr=(u)=>{Object.assign(S.form,u);re();};
 const svc=()=>SVCS.find(s=>s.id===S.form.svcId);
 const saos=()=>AOS.filter(a=>S.form.addons.includes(a.id));
 const tot=()=>(svc()?.price||0)+saos().reduce((s,a)=>s+a.price,0)+(S.form.fee||0);
-const dep=()=>Math.round(tot()*0.5);
+const dep=()=>100;
 const today=()=>new Date().toISOString().split("T")[0];
 
 // Haversine mileage
@@ -341,8 +341,8 @@ const s4=()=>{
     </div>
     <div style="background:${C.card};border-radius:14px;padding:16px;border:1px solid ${C.border};margin-bottom:14px">
       <div style="font-weight:800;color:${C.text};margin-bottom:8px;font-size:13px">💳 Payment Info</div>
-      <div style="display:flex;justify-content:space-between;padding:5px 0"><span style="font-size:12px;color:${C.muted}">Deposit to secure your date (50%)</span><span style="font-size:14px;color:${C.yellow};font-weight:800">$${d}</span></div>
-      <div style="display:flex;justify-content:space-between;padding:5px 0"><span style="font-size:12px;color:${C.muted}">Balance due day of event</span><span style="font-size:14px;color:${C.orange};font-weight:700">$${t-d}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0"><span style="font-size:12px;color:${C.muted}">Deposit to secure your date</span><span style="font-size:14px;color:${C.yellow};font-weight:800">$${d}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0"><span style="font-size:12px;color:${C.muted}">Balance due day of event</span><span style="font-size:14px;color:${C.orange};font-weight:700">$$${(t-100).toFixed(2)}</span></div>
       <div style="font-size:11px;color:${C.muted};margin-top:8px">We accept Stripe, PayPal, or cash. Invoice sent after approval.</div>
     </div>
     ${S.error?`<div style="background:#450A0A;border:1px solid #7F1D1D;border-radius:10px;padding:12px 16px;font-size:13px;color:#FCA5A5;margin-bottom:14px">${S.error}</div>`:""}
