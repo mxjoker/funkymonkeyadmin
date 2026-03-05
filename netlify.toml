@@ -1,5 +1,5 @@
-[functions]
-  directory = "netlify/functions"
+[build]
+  functions = "netlify/functions"
 
 [[redirects]]
   from = "/api/bookings"
@@ -9,4 +9,19 @@
 [[redirects]]
   from = "/api/booking/:id"
   to = "/.netlify/functions/booking/:id"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth"
+  to = "/.netlify/functions/auth"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe-webhook"
+  to = "/.netlify/functions/stripe-webhook"
+  status = 200
+
+[[redirects]]
+  from = "/api/create-stripe-link"
+  to = "/.netlify/functions/create-stripe-link"
   status = 200

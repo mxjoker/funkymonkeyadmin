@@ -38,7 +38,7 @@ tr:hover td{background:#1A0A2E44;cursor:pointer}
     </div>
     <div id="login-err" style="display:none;color:#FCA5A5;font-size:12px;margin-bottom:12px;background:#450A0A;border-radius:8px;padding:8px 12px">Incorrect password. Try again.</div>
     <button onclick="doLogin()" style="width:100%;padding:13px;background:linear-gradient(135deg,#FF6B00,#FFD600);color:#0D0520;border:none;border-radius:12px;font-weight:900;font-size:15px;cursor:pointer;font-family:'Nunito',sans-serif">Unlock Dashboard →</button>
-    <div style="margin-top:16px;font-size:11px;color:#A78BCA">Default password: <code style="color:#FFD600;background:#0D0520;padding:2px 6px;border-radius:4px">funkymonkey2024</code><br><span style="font-size:10px">Change via ADMIN_PASSWORD env var in Netlify</span></div>
+    <div style="margin-top:16px;font-size:11px;color:#A78BCA">Set your password via <code style="color:#FFD600;background:#0D0520;padding:2px 6px;border-radius:4px">ADMIN_PASSWORD</code> in Netlify env vars</div>
   </div>
 </div>
 
@@ -53,27 +53,41 @@ const C={yellow:"#FFD600",orange:"#FF6B00",purple:"#7C3AED",pink:"#EC4899",green
 const ADMIN_PW_KEY = "fm_admin_auth";
 let adminAuthed = false;
 
-const doLogin = () => {
+const doLogin = async () => {
   const pw = document.getElementById("admin-pw").value;
-  // Password checked against stored hash in sessionStorage or default
-  const stored = sessionStorage.getItem(ADMIN_PW_KEY);
-  // Simple check — real security via Netlify env var comparison could be added via a function
-  // For now use a hardcoded default that users should change via ADMIN_PASSWORD env var hint
-  const correct = "funkymonkey2024";
-  if (pw === correct || pw === (window._adminPw || correct)) {
-    adminAuthed = true;
-    sessionStorage.setItem(ADMIN_PW_KEY, "authed");
-    document.getElementById("login-screen").style.display = "none";
-    init();
-  } else {
+  const btn = document.querySelector("#login-screen button");
+  btn.textContent = "Checking…";
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw })
+    });
+    const data = await res.json();
+    if (data.success) {
+      adminAuthed = true;
+      sessionStorage.setItem(ADMIN_PW_KEY, data.token);
+      document.getElementById("login-screen").style.display = "none";
+      init();
+    } else {
+      document.getElementById("login-err").style.display = "block";
+      document.getElementById("admin-pw").value = "";
+      document.getElementById("admin-pw").focus();
+      btn.textContent = "Unlock Dashboard →";
+      btn.disabled = false;
+    }
+  } catch(e) {
+    document.getElementById("login-err").textContent = "Connection error — try again.";
     document.getElementById("login-err").style.display = "block";
-    document.getElementById("admin-pw").value = "";
-    document.getElementById("admin-pw").focus();
+    btn.textContent = "Unlock Dashboard →";
+    btn.disabled = false;
   }
 };
 
-// Check if already authed this session
-if (sessionStorage.getItem(ADMIN_PW_KEY) === "authed") {
+// Check if already authed this session (token must exist and start with fm-auth)
+const _tok = sessionStorage.getItem(ADMIN_PW_KEY);
+if (_tok && _tok.length > 8) {
   adminAuthed = true;
   document.getElementById("login-screen").style.display = "none";
 } else {
@@ -507,10 +521,40 @@ const lf=(label,id,val,opts={})=>{
 const openPayModal=()=>{const b=APP.selBooking;showModal(`${mHead("💳 Record Payment")}${lf("Amount Received ($)","payAmt","",{type:"number",placeholder:"0.00"})}${lf("Payment Method","payMethod","cash",{options:[{value:"stripe",label:"💳 Stripe"},{value:"paypal",label:"🅿️ PayPal"},{value:"cash",label:"💵 Cash"}]})}${mFoot("recPay()")}`,380);};
 const recPay=()=>{const a=parseFloat(fval("payAmt"))||0,m=fval("payMethod")||"cash";updBooking(APP.selBooking.id,{deposit:APP.selBooking.deposit+a,paymentMethod:m});closeModal();};
 
-const openStripeModal=()=>{const b=APP.selBooking;showModal(`${mHead("💳 Stripe Payment Link")}
-  <p style="color:${C.muted};font-size:13px;margin-bottom:16px">Paste a Stripe payment link to include in the client's confirmation email.</p>
-  ${lf("Stripe Payment Link","stripeLink",b.stripeLink||"",{placeholder:"https://buy.stripe.com/..."})}
-  ${mFoot("saveStripeLink()")}`,480);};
+const openStripeModal=()=>{
+  const b=APP.selBooking;
+  const deposit=Math.round((b.total+b.mileageFee)*0.5);
+  showModal(`${mHead("💳 Stripe Payment Link")}
+    <p style="color:${C.muted};font-size:13px;line-height:1.6;margin-bottom:16px">Generate a Stripe Checkout link for the exact deposit amount. The client clicks it, pays by card/Apple Pay/Google Pay, and their booking auto-confirms.</p>
+    <div style="background:${C.darker};border-radius:12px;padding:14px 18px;margin-bottom:16px">
+      <div style="font-size:11px;color:${C.muted};text-transform:uppercase;font-weight:700;margin-bottom:4px">Deposit Amount</div>
+      <div style="font-size:28px;font-weight:900;color:${C.green};font-family:'Fredoka One',sans-serif">$${deposit}</div>
+      <div style="font-size:11px;color:${C.muted};margin-top:2px">50% of $${(b.total+b.mileageFee).toFixed(2)} total · ${b.service} for ${b.client}</div>
+    </div>
+    ${b.stripeLink?`<div style="background:#064E3B22;border:1px solid #10B98133;border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:#6EE7B7">✓ Link already generated: <a href="${b.stripeLink}" target="_blank" style="color:${C.teal};word-break:break-all">${b.stripeLink}</a></div>`:""}
+    <div id="stripe-gen-status" style="display:none;margin-bottom:14px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+      ${btn("Cancel","closeModal()","secondary")}
+      ${btn("⚡ Generate & Send to Client","genStripeLink()","primary")}
+    </div>`,500);
+};
+
+const genStripeLink=async()=>{
+  const b=APP.selBooking;
+  const statusEl=document.getElementById("stripe-gen-status");
+  statusEl.style.display="block";
+  statusEl.innerHTML=`<div style="color:${C.muted};font-size:13px">⏳ Generating Stripe link…</div>`;
+  try {
+    const res=await fetch("/api/create-stripe-link",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bookingId:b.id,bookingRef:b.bookingId,client:b.client,email:b.email,service:b.service,amount:Math.round((b.total+b.mileageFee)*0.5)})});
+    const data=await res.json();
+    if(!res.ok||!data.url) throw new Error(data.error||"Failed to generate link");
+    updBooking(b.id,{stripePaymentLink:data.url});
+    statusEl.innerHTML=`<div style="background:#064E3B22;border:1px solid #10B98133;border-radius:10px;padding:12px;color:#6EE7B7;font-size:13px;font-weight:700">✅ Done! Link sent to ${b.email}<br><a href="${data.url}" target="_blank" style="color:${C.teal};font-size:11px;font-weight:400;word-break:break-all">${data.url}</a></div>`;
+  } catch(e) {
+    statusEl.innerHTML=`<div style="background:#450A0A;border:1px solid #7F1D1D;border-radius:10px;padding:12px;color:#FCA5A5;font-size:13px">❌ ${e.message}</div>`;
+  }
+};
+
 const saveStripeLink=()=>{updBooking(APP.selBooking.id,{stripePaymentLink:fval("stripeLink")});closeModal();};
 
 const openContractModal=()=>{
@@ -622,7 +666,7 @@ const renderAll=()=>{if(!adminAuthed)return;renderSidebar();renderMain();};
 const init=()=>{renderAll();api.load();setInterval(api.load,30000);};
 if(adminAuthed)init();
 
-Object.assign(window,{set,setView,selBook,selStaff,tryPin,updBooking,closeModal,openPayModal,recPay,openStripeModal,saveStripeLink,openContractModal,openEditSvc,saveSvc,togSvc,openEditAo,saveAo,togAo,openEditStaff,openAddStaff,saveStaff,addStaff,doLogin,doLogout,renderMain});
+Object.assign(window,{set,setView,selBook,selStaff,tryPin,updBooking,closeModal,openPayModal,recPay,openStripeModal,genStripeLink,saveStripeLink,openContractModal,openEditSvc,saveSvc,togSvc,openEditAo,saveAo,togAo,openEditStaff,openAddStaff,saveStaff,addStaff,doLogin,doLogout,renderMain});
 </script>
 </body>
 </html>
