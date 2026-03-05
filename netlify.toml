@@ -10,6 +10,3 @@
   from = "/api/booking/:id"
   to = "/.netlify/functions/booking/:id"
   status = 200
-
-[build]
-  functions = "netlify/functions"
