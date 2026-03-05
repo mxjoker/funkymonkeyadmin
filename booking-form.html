@@ -265,8 +265,11 @@ window.addEventListener('DOMContentLoaded', () => {
 // ─── Load services from DB ────────────────────────────────────────────────────
 async function loadServices() {
   try {
-    const res = await fetch('/api/services');
-    if (!res.ok) throw new Error('Failed');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch('/.netlify/functions/services', { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     state.services = data.services || [];
     state.addons = data.addons || [];
@@ -427,7 +430,7 @@ function updNextBtn(step) {
         const diffDays = Math.ceil((sel - today) / 86400000);
         if (diffDays < 7) {
           dateNotice.style.display = 'block';
-          dateNotice.textContent = '⚠️ This date is less than 7 days away. We'll do our best but availability may be limited.';
+          dateNotice.textContent = '⚠️ This date is less than 7 days away. We will do our best but availability may be limited.';
         } else {
           dateNotice.style.display = 'none';
         }
