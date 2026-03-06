@@ -93,6 +93,13 @@ tr:hover td{background:#fafaf8}
 .staff-card{background:#fff;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-top:4px solid #7c3aed}
 .staff-card h3{font-size:1rem;font-weight:700;color:#1e1b4b}
 .staff-card .role{font-size:.8rem;color:#888;margin:4px 0 12px}
+/* ── Staff skills ── */
+.skill-tag{display:inline-flex;align-items:center;gap:4px;background:#ede9fe;color:#7c3aed;border-radius:20px;padding:3px 10px;font-size:.75rem;font-weight:700;margin:2px}
+.skill-tag .remove-tag{cursor:pointer;opacity:.6;font-size:.85rem;line-height:1}
+.skill-tag .remove-tag:hover{opacity:1}
+.add-skill-row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.skill-preset{padding:3px 10px;border-radius:20px;border:2px solid #e9d5ff;background:#fff;color:#7c3aed;font-size:.75rem;font-weight:600;cursor:pointer;transition:all .2s}
+.skill-preset:hover{background:#ede9fe}
 /* ── Catalogue ── */
 .cat-section{margin-bottom:28px}
 .cat-section h3{font-size:1rem;font-weight:700;color:#1e1b4b;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #e9d5ff}
@@ -449,8 +456,31 @@ function openBooking(id) {
       <textarea class="notes-area" id="admin-notes-${b.id}" placeholder="Internal notes (not visible to client)…">${b.admin_notes||''}</textarea>
       <button class="btn btn-outline btn-sm" style="margin-top:6px" onclick="saveAdminNotes('${b.id}')">Save Notes</button>
     </div>
+    <div style="background:#f9fafb;border-radius:10px;padding:14px;margin-bottom:16px">
+      <div style="font-size:.75rem;text-transform:uppercase;color:#888;font-weight:700;letter-spacing:.05em;margin-bottom:10px">💵 Record Payment</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div>
+          <label style="font-size:.75rem;color:#888;display:block;margin-bottom:3px">Amount</label>
+          <input id="pay-amount-${b.id}" type="number" placeholder="0.00" style="width:100px;padding:7px 10px;border:2px solid #e5e7eb;border-radius:6px;font-size:.875rem"/>
+        </div>
+        <div>
+          <label style="font-size:.75rem;color:#888;display:block;margin-bottom:3px">Method</label>
+          <select id="pay-method-${b.id}" style="padding:7px 10px;border:2px solid #e5e7eb;border-radius:6px;font-size:.875rem">
+            <option value="cash">Cash</option>
+            <option value="stripe">Stripe</option>
+            <option value="paypal">PayPal</option>
+            <option value="venmo">Venmo</option>
+            <option value="check">Check</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:120px">
+          <label style="font-size:.75rem;color:#888;display:block;margin-bottom:3px">Note (optional)</label>
+          <input id="pay-note-${b.id}" type="text" placeholder="e.g. deposit, full payment…" style="width:100%;padding:7px 10px;border:2px solid #e5e7eb;border-radius:6px;font-size:.875rem"/>
+        </div>
+        <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordPayment('${b.id}')">Save Payment</button>
+      </div>
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-outline btn-sm" onclick="recordPayment('${b.id}')">Record Payment</button>
       <button class="btn btn-outline btn-sm" onclick="toggleContract('${b.id}')">
         ${b.contract_signed ? '📝 Contract Signed ✓' : '📝 Mark Contract Signed'}
       </button>
@@ -523,12 +553,29 @@ async function toggleContract(id) {
   openBooking(id);
 }
 
-function recordPayment(id) {
-  const method = prompt('Payment method? (cash / stripe / paypal)');
-  if (!method) return;
-  const amount = prompt('Amount paid?');
-  if (!amount) return;
-  alert(`Recorded $${amount} via ${method}. (Payment tracking UI coming in Rev 7)`);
+async function recordPayment(id) {
+  const amount = document.getElementById('pay-amount-' + id).value;
+  const method = document.getElementById('pay-method-' + id).value;
+  const note = document.getElementById('pay-note-' + id).value;
+  if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+    alert('Please enter a valid payment amount.');
+    return;
+  }
+  const btn = document.getElementById('pay-btn-' + id);
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const res = await fetch('/api/booking/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payment_amount: Number(amount), payment_method: method, payment_note: note, deposit_paid: true })
+    });
+    if (!res.ok) throw new Error('Save failed');
+    btn.textContent = '✅ Saved';
+    await loadBookings();
+  } catch(e) {
+    alert('Error saving payment: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Save Payment';
+  }
 }
 
 // ─── Calendar ─────────────────────────────────────────────────────────────────
@@ -576,15 +623,68 @@ function renderClients() {
 }
 
 // ─── Staff ────────────────────────────────────────────────────────────────────
+const SKILL_PRESETS = [
+  'Magic Show','Children's Magic','Corporate Magic','Balloon Sculpting',
+  'Face Painting','Glitter Tattoos','Juggling','Stilt Walking',
+  'Acrobatics','Fire Breathing','Foam Party','Snow Experience',
+  'DJ / Piñata','Game Show','Magic Camp','Photo Booth','Emcee'
+];
+
+function getStaff() {
+  return JSON.parse(localStorage.getItem('fm_staff') || 'null') || defaultStaff;
+}
+function saveStaffData(staff) {
+  localStorage.setItem('fm_staff', JSON.stringify(staff));
+}
+
 function renderStaff() {
-  const staff = JSON.parse(localStorage.getItem('fm_staff') || 'null') || defaultStaff;
-  document.getElementById('staff-grid').innerHTML = staff.map(s => `
-    <div class="staff-card" style="border-top-color:${s.color}">
+  const staff = getStaff();
+  document.getElementById('staff-grid').innerHTML = staff.map(s => {
+    const skills = s.skills || [];
+    const tagsHtml = skills.map(sk =>
+      `<span class="skill-tag">${sk}<span class="remove-tag" onclick="removeSkill(${s.id},'${sk.replace(/'/g,"\\'")}')">×</span></span>`
+    ).join('');
+    return `<div class="staff-card" style="border-top-color:${s.color}">
       <div style="width:44px;height:44px;border-radius:50%;background:${s.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.1rem;margin-bottom:10px">${s.name[0]}</div>
       <h3>${s.name}</h3>
       <div class="role">${s.role}</div>
-      <button class="btn btn-outline btn-sm" onclick="editStaff(${s.id})">Edit</button>
-    </div>`).join('');
+      <div style="margin:10px 0;min-height:28px">${tagsHtml || '<span style="color:#bbb;font-size:.78rem">No skills added yet</span>'}</div>
+      <div class="add-skill-row">
+        ${SKILL_PRESETS.filter(p => !skills.includes(p)).slice(0,4).map(p =>
+          `<button class="skill-preset" onclick="addSkill(${s.id},'${p.replace(/'/g,"\\'")}')">+ ${p}</button>`
+        ).join('')}
+        <button class="skill-preset" style="border-color:#a855f7" onclick="addCustomSkill(${s.id})">+ Custom…</button>
+      </div>
+      <div style="margin-top:10px">
+        <button class="btn btn-outline btn-sm" onclick="editStaff(${s.id})">Edit</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function addSkill(staffId, skill) {
+  const staff = getStaff();
+  const s = staff.find(x => x.id === staffId);
+  if (!s) return;
+  if (!s.skills) s.skills = [];
+  if (!s.skills.includes(skill)) s.skills.push(skill);
+  saveStaffData(staff);
+  renderStaff();
+}
+
+function removeSkill(staffId, skill) {
+  const staff = getStaff();
+  const s = staff.find(x => x.id === staffId);
+  if (!s || !s.skills) return;
+  s.skills = s.skills.filter(sk => sk !== skill);
+  saveStaffData(staff);
+  renderStaff();
+}
+
+function addCustomSkill(staffId) {
+  const skill = prompt('Enter skill name:');
+  if (!skill || !skill.trim()) return;
+  addSkill(staffId, skill.trim());
 }
 
 function openAddStaff() {
