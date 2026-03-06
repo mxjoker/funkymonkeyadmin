@@ -77,7 +77,10 @@ async function ensureTable(client) {
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS referral_source VARCHAR(100) DEFAULT ''",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS admin_notes TEXT DEFAULT ''",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS contract_signed BOOLEAN DEFAULT FALSE",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()"
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(10,2) DEFAULT 0",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_note TEXT DEFAULT ''"
   ];
   for (const sql of cols) {
     try { await client.query(sql); } catch (_) {}
