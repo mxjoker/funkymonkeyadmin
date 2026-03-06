@@ -47,23 +47,36 @@ async function ensureTable(client) {
     )
   `);
 
-  // Add any missing columns for backwards compat
+  // Add any missing columns for backwards compat (covers old tables missing Rev 6 cols)
   const cols = [
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS reference VARCHAR(20)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'review'",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS service_id VARCHAR(64)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS service_name VARCHAR(255)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS service_price NUMERIC(10,2) DEFAULT 0",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS addons JSONB DEFAULT '[]'",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS addon_total NUMERIC(10,2) DEFAULT 0",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mileage_cost NUMERIC(10,2) DEFAULT 0",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mileage_miles INTEGER DEFAULT 0",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS total_price NUMERIC(10,2) DEFAULT 0",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_amount NUMERIC(10,2) DEFAULT 100",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS balance_due NUMERIC(10,2)",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_location TEXT DEFAULT ''",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS admin_notes TEXT DEFAULT ''",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS referral_source VARCHAR(100) DEFAULT ''",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS contract_signed BOOLEAN DEFAULT FALSE",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS balance_due NUMERIC(10,2) DEFAULT 0",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_paid BOOLEAN DEFAULT FALSE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_paid_at TIMESTAMPTZ",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_date DATE",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_time VARCHAR(10)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_zip VARCHAR(10)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_location TEXT DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_type VARCHAR(100)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS guest_count INTEGER DEFAULT 0",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS client_name VARCHAR(255)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS client_phone VARCHAR(50)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS client_email VARCHAR(255)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS referral_source VARCHAR(100) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS admin_notes TEXT DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS contract_signed BOOLEAN DEFAULT FALSE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()"
   ];
   for (const sql of cols) {
