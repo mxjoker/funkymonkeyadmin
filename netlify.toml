@@ -28,5 +28,20 @@
   to = "/.netlify/functions/create-stripe-link"
   status = 200
 
+[[redirects]]
+  from = "/api/staff"
+  to = "/.netlify/functions/staff"
+  status = 200
+
+[[redirects]]
+  from = "/api/staff/:id"
+  to = "/.netlify/functions/staff/:id"
+  status = 200
+
+[[redirects]]
+  from = "/api/staff-assignments"
+  to = "/.netlify/functions/staff-assignments"
+  status = 200
+
 [functions]
   node_bundler = "esbuild"
