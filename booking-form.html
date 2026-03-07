@@ -5,75 +5,148 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Book Funky Monkey Events</title>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:'Segoe UI',sans-serif;background:#f0f4ff;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:20px}
-  .container{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.1);width:100%;max-width:680px;overflow:hidden}
-  .header{background:linear-gradient(135deg,#6c3fc5,#a855f7);color:#fff;padding:28px 32px}
-  .header h1{font-size:1.6rem;margin-bottom:4px}
-  .header p{opacity:.85;font-size:.95rem}
-  .progress{display:flex;gap:0;background:#e9d5ff}
-  .progress-step{flex:1;padding:10px;text-align:center;font-size:.78rem;font-weight:600;color:#7c3aed;opacity:.45;transition:all .3s;border-bottom:3px solid transparent}
-  .progress-step.active{opacity:1;border-bottom-color:#7c3aed;background:#f5f3ff}
-  .progress-step.done{opacity:.7;background:#ede9fe}
-  .body{padding:28px 32px}
-  .step{display:none}
-  .step.active{display:block}
-  h2{font-size:1.2rem;color:#1e1b4b;margin-bottom:18px}
-  .services-loading{text-align:center;padding:40px;color:#7c3aed;font-size:1rem}
-  .services-loading .spinner{width:36px;height:36px;border:3px solid #e9d5ff;border-top-color:#7c3aed;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .category-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
-  .cat-tab{padding:6px 14px;border-radius:20px;border:2px solid #e9d5ff;background:#fff;color:#7c3aed;font-size:.82rem;font-weight:600;cursor:pointer;transition:all .2s}
-  .cat-tab.active{background:#7c3aed;color:#fff;border-color:#7c3aed}
-  .services-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
-  @media(max-width:500px){.services-grid{grid-template-columns:1fr}}
-  .service-card{border:2px solid #e9d5ff;border-radius:12px;padding:14px;cursor:pointer;transition:all .2s;background:#fafaf8}
-  .service-card:hover{border-color:#a855f7;background:#faf5ff}
-  .service-card.selected{border-color:#7c3aed;background:#f5f3ff;box-shadow:0 0 0 3px rgba(124,58,237,.15)}
-  .service-card .icon{font-size:1.6rem;margin-bottom:6px}
-  .service-card .sname{font-weight:700;color:#1e1b4b;font-size:.92rem;margin-bottom:2px}
-  .service-card .sprice{color:#7c3aed;font-weight:600;font-size:.88rem}
-  .service-card .sduration{color:#888;font-size:.76rem;margin-top:2px}
-  .addons-section h3{font-size:1rem;color:#1e1b4b;margin-bottom:12px;font-weight:700}
-  .addons-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  @media(max-width:500px){.addons-grid{grid-template-columns:1fr}}
-  .addon-card{border:2px solid #e9d5ff;border-radius:10px;padding:10px 14px;cursor:pointer;transition:all .2s;display:flex;justify-content:space-between;align-items:center}
-  .addon-card:hover{border-color:#a855f7}
-  .addon-card.selected{border-color:#7c3aed;background:#f5f3ff}
-  .addon-card span{font-size:.85rem;font-weight:600;color:#1e1b4b}
-  .addon-card .addon-price{color:#7c3aed;font-weight:700;font-size:.85rem}
-  label{display:block;font-weight:600;color:#374151;margin-bottom:6px;font-size:.9rem}
-  input,select,textarea{width:100%;padding:10px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:.95rem;transition:border .2s;background:#fff;color:#111}
-  input:focus,select:focus,textarea:focus{outline:none;border-color:#7c3aed}
-  .form-row{margin-bottom:16px}
-  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-  @media(max-width:500px){.form-grid{grid-template-columns:1fr}}
-  .hint{font-size:.78rem;color:#888;margin-top:4px}
-  .notice{background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 14px;font-size:.84rem;color:#92400e;margin-bottom:16px}
-  .notice.error{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
-  .quote-box{background:#f5f3ff;border-radius:12px;padding:20px;margin-bottom:20px}
-  .quote-box h3{font-size:1rem;color:#1e1b4b;margin-bottom:14px;font-weight:700}
-  .quote-line{display:flex;justify-content:space-between;padding:5px 0;font-size:.9rem;color:#374151;border-bottom:1px solid #e9d5ff}
-  .quote-line:last-child{border-bottom:none}
-  .quote-line.total{font-weight:700;color:#1e1b4b;font-size:1rem;padding-top:10px}
-  .quote-line.deposit{color:#7c3aed;font-weight:700}
-  .quote-line.balance{color:#374151}
-  .summary-section{margin-bottom:16px}
-  .summary-section h4{font-size:.82rem;text-transform:uppercase;letter-spacing:.05em;color:#888;font-weight:700;margin-bottom:8px}
-  .summary-val{font-size:.95rem;color:#1e1b4b;font-weight:600}
-  .btn-row{display:flex;gap:12px;margin-top:24px}
-  .btn{padding:12px 24px;border-radius:8px;font-size:.95rem;font-weight:700;cursor:pointer;border:none;transition:all .2s}
-  .btn-primary{background:#7c3aed;color:#fff;flex:1}
-  .btn-primary:hover:not(:disabled){background:#6d28d9}
-  .btn-primary:disabled{background:#c4b5fd;cursor:not-allowed}
-  .btn-secondary{background:#f3f4f6;color:#374151}
-  .btn-secondary:hover{background:#e5e7eb}
-  .success-box{text-align:center;padding:32px 20px}
-  .success-box .check{font-size:3rem;margin-bottom:12px}
-  .success-box h2{color:#1e1b4b;margin-bottom:8px}
-  .success-box p{color:#666;font-size:.95rem;line-height:1.5}
-  .ref{display:inline-block;margin-top:12px;background:#f5f3ff;border-radius:8px;padding:8px 16px;font-weight:700;color:#7c3aed;font-size:1.1rem}
-  .err-msg{color:#dc2626;font-size:.8rem;margin-top:4px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#f0f4ff;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:20px}
+.container{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.1);width:100%;max-width:700px;overflow:hidden}
+
+/* ── Header ── */
+.header{background:linear-gradient(135deg,#6c3fc5,#a855f7);color:#fff;padding:28px 32px}
+.header h1{font-size:1.6rem;margin-bottom:4px}
+.header p{opacity:.85;font-size:.95rem}
+
+/* ── Progress ── */
+.progress{display:flex;background:#e9d5ff}
+.progress-step{flex:1;padding:10px 4px;text-align:center;font-size:.75rem;font-weight:600;color:#7c3aed;opacity:.45;transition:all .3s;border-bottom:3px solid transparent;cursor:default;white-space:nowrap}
+.progress-step.active{opacity:1;border-bottom-color:#7c3aed;background:#f5f3ff}
+.progress-step.done{opacity:.8;background:#ede9fe;cursor:pointer}
+.progress-step.done:hover{opacity:1}
+
+/* ── Body ── */
+.body{padding:28px 32px}
+@media(max-width:500px){.body{padding:20px 18px}}
+.step{display:none}
+.step.active{display:block}
+h2{font-size:1.2rem;color:#1e1b4b;margin-bottom:6px;font-weight:800}
+.step-sub{font-size:.88rem;color:#888;margin-bottom:22px;line-height:1.5}
+
+/* ── Event Type Grid ── */
+.event-type-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+@media(max-width:500px){.event-type-grid{grid-template-columns:1fr}}
+.et-card{border:2px solid #e9d5ff;border-radius:12px;padding:14px 16px;cursor:pointer;transition:all .2s;background:#fafaf8;display:flex;align-items:center;gap:12px}
+.et-card:hover{border-color:#a855f7;background:#faf5ff;transform:translateY(-1px)}
+.et-card.selected{border-color:#7c3aed;background:#f5f3ff;box-shadow:0 0 0 3px rgba(124,58,237,.15)}
+.et-icon{font-size:1.7rem;flex-shrink:0;line-height:1}
+.et-label{font-weight:700;color:#1e1b4b;font-size:.9rem;line-height:1.3}
+.et-sub{font-size:.73rem;color:#888;margin-top:2px}
+.see-all-link{text-align:center;margin-top:4px;margin-bottom:4px}
+.see-all-link a{color:#7c3aed;font-size:.85rem;font-weight:600;text-decoration:none;cursor:pointer}
+.see-all-link a:hover{text-decoration:underline}
+
+/* ── Service Cards ── */
+.services-grid{display:flex;flex-direction:column;gap:10px;margin-bottom:20px}
+.svc-card{border:2px solid #e9d5ff;border-radius:12px;overflow:hidden;transition:border-color .2s;background:#fff}
+.svc-card.selected{border-color:#7c3aed}
+.svc-card-header{padding:14px 16px;cursor:pointer;display:flex;align-items:center;gap:12px;background:#fafaf8;transition:background .2s}
+.svc-card.selected .svc-card-header{background:#f5f3ff}
+.svc-card-header:hover{background:#faf5ff}
+.svc-icon{font-size:1.5rem;flex-shrink:0}
+.svc-info{flex:1;min-width:0}
+.svc-name{font-weight:700;color:#1e1b4b;font-size:.92rem}
+.svc-price{color:#7c3aed;font-weight:700;font-size:.88rem;margin-top:1px}
+.svc-price .price-note{font-size:.72rem;font-weight:400;color:#888}
+.svc-desc{font-size:.76rem;color:#888;margin-top:3px;line-height:1.4}
+.svc-duration{font-size:.73rem;color:#aaa;margin-top:2px}
+.svc-select-indicator{width:20px;height:20px;border-radius:50%;border:2px solid #d1d5db;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .2s}
+.svc-card.selected .svc-select-indicator{background:#7c3aed;border-color:#7c3aed}
+.svc-select-indicator::after{content:'';width:8px;height:8px;border-radius:50%;background:#fff;opacity:0;transition:opacity .2s}
+.svc-card.selected .svc-select-indicator::after{opacity:1}
+
+/* ── Accordion / Add-ons ── */
+.svc-accordion{display:none;border-top:2px solid #e9d5ff;padding:16px;background:#fefefe}
+.svc-card.selected .svc-accordion{display:block}
+.addon-section-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#7c3aed;margin-bottom:10px}
+
+/* Duration picker */
+.duration-picker{margin-bottom:16px}
+.duration-label{font-size:.8rem;font-weight:700;color:#374151;margin-bottom:8px}
+.duration-options{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.dur-btn{padding:7px 14px;border-radius:8px;border:2px solid #e5e7eb;background:#fff;color:#374151;font-size:.82rem;font-weight:600;cursor:pointer;transition:all .2s}
+.dur-btn.active{background:#7c3aed;color:#fff;border-color:#7c3aed}
+.custom-dur-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+.custom-dur-row input{width:80px;padding:7px 10px;border:2px solid #e5e7eb;border-radius:8px;font-size:.85rem}
+.custom-dur-row input:focus{outline:none;border-color:#7c3aed}
+.custom-dur-row span{font-size:.82rem;color:#666}
+
+/* Tier picker (like balloon workshop) */
+.tier-picker{margin-bottom:16px}
+.tier-options{display:flex;flex-direction:column;gap:8px}
+.tier-btn{padding:10px 14px;border-radius:8px;border:2px solid #e5e7eb;background:#fff;cursor:pointer;transition:all .2s;display:flex;justify-content:space-between;align-items:center}
+.tier-btn:hover{border-color:#a855f7}
+.tier-btn.active{border-color:#7c3aed;background:#f5f3ff}
+.tier-btn .tier-name{font-weight:600;color:#1e1b4b;font-size:.88rem}
+.tier-btn .tier-price{color:#7c3aed;font-weight:700;font-size:.88rem}
+.tier-btn .tier-note{font-size:.73rem;color:#888;margin-top:2px}
+
+/* Add-on checkboxes */
+.addon-list{display:flex;flex-direction:column;gap:7px}
+.addon-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border:2px solid #e9d5ff;border-radius:8px;cursor:pointer;transition:all .2s}
+.addon-item:hover{border-color:#a855f7;background:#faf5ff}
+.addon-item.selected{border-color:#7c3aed;background:#f5f3ff}
+.addon-check{width:18px;height:18px;border-radius:4px;border:2px solid #d1d5db;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .2s;font-size:.7rem;color:#fff}
+.addon-item.selected .addon-check{background:#7c3aed;border-color:#7c3aed}
+.addon-item.selected .addon-check::after{content:'✓'}
+.addon-name{flex:1;font-size:.85rem;font-weight:600;color:#1e1b4b}
+.addon-price-tag{font-size:.83rem;font-weight:700;color:#7c3aed;white-space:nowrap}
+.addon-note{font-size:.72rem;color:#888;display:block;margin-top:1px}
+
+/* Quote request card */
+.quote-request-box{background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:14px;margin-top:4px}
+.quote-request-box p{font-size:.85rem;color:#78350f;line-height:1.5}
+.quote-request-box strong{color:#92400e}
+
+/* Photo booth section */
+.photo-booth-section{margin-top:12px;padding-top:12px;border-top:1px dashed #e9d5ff}
+
+/* ── Forms ── */
+label{display:block;font-weight:600;color:#374151;margin-bottom:6px;font-size:.88rem}
+input,select,textarea{width:100%;padding:10px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:.93rem;transition:border .2s;background:#fff;color:#111}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#7c3aed}
+.form-row{margin-bottom:16px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:500px){.form-grid{grid-template-columns:1fr}}
+.hint{font-size:.76rem;color:#888;margin-top:4px}
+.notice{background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 14px;font-size:.83rem;color:#92400e;margin-bottom:14px}
+.section-divider{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#a855f7;margin:22px 0 14px;padding-bottom:7px;border-bottom:2px solid #e9d5ff}
+.err-msg{color:#dc2626;font-size:.78rem;margin-top:4px}
+
+/* ── Quote / Review ── */
+.quote-box{background:#f5f3ff;border-radius:12px;padding:20px;margin-bottom:16px}
+.quote-box h3{font-size:.95rem;color:#1e1b4b;margin-bottom:14px;font-weight:800}
+.q-line{display:flex;justify-content:space-between;padding:5px 0;font-size:.88rem;color:#374151;border-bottom:1px solid #e9d5ff}
+.q-line:last-child{border-bottom:none}
+.q-line.total{font-weight:800;color:#1e1b4b;font-size:.98rem;padding-top:10px}
+.q-line.deposit{color:#7c3aed;font-weight:700}
+.q-line.sub{padding-left:12px;color:#888;font-size:.82rem}
+.q-line.quote-req{color:#d97706;font-weight:700}
+.review-chips{margin-bottom:14px;display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-block;background:#ede9fe;color:#7c3aed;border-radius:6px;padding:3px 10px;font-size:.78rem;font-weight:700}
+.custom-quote-note{background:#fef3c7;border-radius:8px;padding:12px 14px;font-size:.82rem;color:#78350f;margin-bottom:14px;line-height:1.5}
+
+/* ── Buttons ── */
+.btn-row{display:flex;gap:12px;margin-top:24px}
+.btn{padding:12px 24px;border-radius:8px;font-size:.93rem;font-weight:700;cursor:pointer;border:none;transition:all .2s}
+.btn-primary{background:#7c3aed;color:#fff;flex:1}
+.btn-primary:hover:not(:disabled){background:#6d28d9}
+.btn-primary:disabled{background:#c4b5fd;cursor:not-allowed}
+.btn-secondary{background:#f3f4f6;color:#374151;flex:none}
+.btn-secondary:hover{background:#e5e7eb}
+
+/* ── Success ── */
+.success-box{text-align:center;padding:32px 20px}
+.success-box .check{font-size:3rem;margin-bottom:12px}
+.success-box h2{color:#1e1b4b;margin-bottom:8px}
+.success-box p{color:#666;font-size:.93rem;line-height:1.6}
+.ref{display:inline-block;margin-top:14px;background:#f5f3ff;border-radius:8px;padding:8px 20px;font-weight:800;color:#7c3aed;font-size:1.1rem}
 </style>
 </head>
 <body>
@@ -82,124 +155,102 @@
     <h1>🐒 Funky Monkey Events</h1>
     <p>Book entertainment for your next event — OKC & surrounding areas</p>
   </div>
-  <div class="progress">
-    <div class="progress-step active" id="prog-1">1. Service</div>
-    <div class="progress-step" id="prog-2">2. Event Details</div>
-    <div class="progress-step" id="prog-3">3. Contact</div>
-    <div class="progress-step" id="prog-4">4. Review</div>
+
+  <div class="progress" id="progress-bar">
+    <div class="progress-step active" id="prog-1" onclick="navToStep(1)">1. Event Type</div>
+    <div class="progress-step" id="prog-2" onclick="navToStep(2)">2. Services</div>
+    <div class="progress-step" id="prog-3" onclick="navToStep(3)">3. Details</div>
+    <div class="progress-step" id="prog-4" onclick="navToStep(4)">4. Review</div>
   </div>
+
   <div class="body">
 
-    <!-- STEP 1: Service Selection -->
+    <!-- ══ STEP 1: Event Type ══ -->
     <div class="step active" id="step-1">
-      <h2>What are you looking for?</h2>
-      <div id="services-loading" class="services-loading">
-        <div class="spinner"></div>
-        Loading services…
-      </div>
-      <div id="services-content" style="display:none">
-        <div class="category-tabs" id="cat-tabs"></div>
-        <div class="services-grid" id="services-grid"></div>
-        <div class="addons-section">
-          <h3>Add-ons <span style="font-weight:400;color:#888;font-size:.85rem">(optional)</span></h3>
-          <div class="addons-grid" id="addons-grid"></div>
-        </div>
-      </div>
-      <div id="services-error" class="notice error" style="display:none">
-        Could not load services. Please refresh the page or call us at (405) 431-6625.
+      <h2>Who is this event for?</h2>
+      <p class="step-sub">Select what best describes your event — we'll show you the right entertainment options.</p>
+      <div class="event-type-grid" id="et-grid"></div>
+      <div class="see-all-link">
+        <a onclick="selectSeeAll()">🔍 Not sure? Browse all services →</a>
       </div>
       <div class="btn-row">
-        <button class="btn btn-primary" id="btn-1" disabled onclick="goTo(2)">Next: Event Details →</button>
+        <button class="btn btn-primary" id="btn-1" disabled onclick="goTo(2)">Next: Choose a Service →</button>
       </div>
     </div>
 
-    <!-- STEP 2: Event Details -->
+    <!-- ══ STEP 2: Services ══ -->
     <div class="step" id="step-2">
-      <h2>Tell us about your event</h2>
+      <h2 id="s2-heading">Choose your entertainment</h2>
+      <p class="step-sub" id="s2-sub"></p>
+      <div class="services-grid" id="svc-grid"></div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="goTo(1)">← Back</button>
+        <button class="btn btn-primary" id="btn-2" disabled onclick="goTo(3)">Next: Event Details →</button>
+      </div>
+    </div>
+
+    <!-- ══ STEP 3: Details + Contact ══ -->
+    <div class="step" id="step-3">
+      <h2>Event details & your info</h2>
+      <p class="step-sub">Tell us about the event and how to reach you.</p>
+
+      <div class="section-divider">📅 Event Details</div>
       <div class="form-grid">
         <div class="form-row">
-          <label for="event-date">Event Date *</label>
-          <input type="date" id="event-date" onchange="updNextBtn(2)"/>
+          <label>Event Date *</label>
+          <input type="date" id="ev-date" oninput="chk3()"/>
           <div id="date-err" class="err-msg"></div>
-          <div id="date-notice" class="notice" style="display:none;margin-top:8px"></div>
+          <div id="date-warn" class="notice" style="display:none;margin-top:8px"></div>
         </div>
         <div class="form-row">
-          <label for="event-time">Start Time *</label>
-          <select id="event-time" onchange="updNextBtn(2)">
-            <option value="">Select time…</option>
-          </select>
+          <label>Start Time *</label>
+          <select id="ev-time" onchange="chk3()"><option value="">Select time…</option></select>
         </div>
       </div>
       <div class="form-grid">
         <div class="form-row">
-          <label for="event-zip">Event ZIP Code *</label>
-          <input type="text" id="event-zip" maxlength="5" placeholder="e.g. 73118" oninput="updNextBtn(2)"/>
-          <div class="hint">Used to calculate travel</div>
+          <label>Event ZIP Code *</label>
+          <input type="text" id="ev-zip" maxlength="5" placeholder="e.g. 73118" oninput="chk3()"/>
+          <div class="hint">Used to calculate travel fee</div>
           <div id="zip-err" class="err-msg"></div>
         </div>
         <div class="form-row">
-          <label for="event-guests">Number of Guests *</label>
-          <input type="number" id="event-guests" min="1" placeholder="e.g. 50" oninput="updNextBtn(2)"/>
+          <label>Number of Guests *</label>
+          <input type="number" id="ev-guests" min="1" placeholder="e.g. 50" oninput="chk3()"/>
           <div id="guest-hint" class="hint"></div>
         </div>
       </div>
       <div class="form-row">
-        <label for="event-location">Event Location / Address <span style="font-weight:400;color:#888">(optional)</span></label>
-        <input type="text" id="event-location" placeholder="Approximate address or area is fine"/>
-        <div class="hint">Backyard, park, venue name — anything helpful</div>
+        <label>Venue / Address <span style="font-weight:400;color:#aaa">(optional)</span></label>
+        <input type="text" id="ev-loc" placeholder="Backyard, park, venue name…"/>
       </div>
       <div class="form-row">
-        <label for="event-type">Type of Event *</label>
-        <select id="event-type" onchange="updNextBtn(2)">
-          <option value="">Select…</option>
-          <option>Birthday Party</option>
-          <option>Corporate Event</option>
-          <option>School Event</option>
-          <option>Community Event</option>
-          <option>Wedding / Reception</option>
-          <option>Church / Religious Event</option>
-          <option>Festival / Fair</option>
-          <option>Other</option>
-        </select>
+        <label>Additional Notes <span style="font-weight:400;color:#aaa">(optional)</span></label>
+        <textarea id="ev-notes" rows="3" placeholder="Special requests, theme, setup needs…"></textarea>
       </div>
-      <div class="form-row">
-        <label for="event-notes">Additional Notes <span style="font-weight:400;color:#888">(optional)</span></label>
-        <textarea id="event-notes" rows="3" placeholder="Any special requests, theme, venue details…"></textarea>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-secondary" onclick="goTo(1)">← Back</button>
-        <button class="btn btn-primary" id="btn-2" disabled onclick="goTo(3)">Next: Contact Info →</button>
-      </div>
-    </div>
 
-    <!-- STEP 3: Contact Info -->
-    <div class="step" id="step-3">
-      <h2>Your contact information</h2>
+      <div class="section-divider">👤 Your Contact Info</div>
       <div class="form-row">
-        <label for="c-name">Full Name *</label>
-        <input type="text" id="c-name" placeholder="Jane Smith" oninput="updNextBtn(3)"/>
+        <label>Full Name *</label>
+        <input type="text" id="c-name" placeholder="Jane Smith" oninput="chk3()"/>
       </div>
       <div class="form-grid">
         <div class="form-row">
-          <label for="c-phone">Phone Number *</label>
-          <input type="tel" id="c-phone" placeholder="(405) 555-1234" oninput="updNextBtn(3)"/>
+          <label>Phone Number *</label>
+          <input type="tel" id="c-phone" placeholder="(405) 555-1234" oninput="chk3()"/>
         </div>
         <div class="form-row">
-          <label for="c-email">Email Address *</label>
-          <input type="email" id="c-email" placeholder="jane@example.com" oninput="updNextBtn(3)"/>
+          <label>Email Address *</label>
+          <input type="email" id="c-email" placeholder="jane@example.com" oninput="chk3()"/>
         </div>
       </div>
       <div class="form-row">
-        <label for="c-referral">How did you hear about us? <span style="font-weight:400;color:#888">(optional)</span></label>
-        <select id="c-referral">
+        <label>How did you hear about us? <span style="font-weight:400;color:#aaa">(optional)</span></label>
+        <select id="c-ref">
           <option value="">Select…</option>
-          <option>Google Search</option>
-          <option>Facebook</option>
-          <option>Instagram</option>
-          <option>Friend / Word of Mouth</option>
-          <option>Nextdoor</option>
-          <option>Repeat Customer</option>
-          <option>Other</option>
+          <option>Google Search</option><option>Facebook</option><option>Instagram</option>
+          <option>Friend / Word of Mouth</option><option>Nextdoor</option>
+          <option>Repeat Customer</option><option>Other</option>
         </select>
       </div>
       <div class="btn-row">
@@ -208,319 +259,626 @@
       </div>
     </div>
 
-    <!-- STEP 4: Review & Submit -->
+    <!-- ══ STEP 4: Review ══ -->
     <div class="step" id="step-4">
       <h2>Review your booking</h2>
-      <div class="summary-section">
-        <h4>Event Summary</h4>
-        <div id="summary-text" class="summary-val"></div>
-      </div>
+      <p class="step-sub">Double-check everything before submitting your request.</p>
+      <div class="review-chips" id="review-chips"></div>
       <div class="quote-box">
         <h3>💰 Your Quote</h3>
         <div id="quote-lines"></div>
       </div>
+      <div class="custom-quote-note" id="custom-note" style="display:none"></div>
       <div class="notice" id="mileage-notice" style="display:none"></div>
-      <p style="font-size:.82rem;color:#888;margin-bottom:20px">
-        Submitting this form is a <strong>booking request</strong>. Joe will review and confirm within 24 hours. A $100 deposit is due to secure your date.
+      <p style="font-size:.8rem;color:#999;margin-bottom:20px;line-height:1.6">
+        Submitting this form is a <strong style="color:#374151">booking request</strong>. We'll review and get back to you within 24 hours to confirm availability. A <strong style="color:#374151">$100 deposit</strong> secures your date.
       </p>
       <div class="btn-row">
         <button class="btn btn-secondary" onclick="goTo(3)">← Back</button>
-        <button class="btn btn-primary" id="btn-submit" onclick="submitBooking()">Submit Booking Request</button>
+        <button class="btn btn-primary" id="btn-submit" onclick="submitBooking()">Submit Booking Request 🎉</button>
       </div>
     </div>
 
-    <!-- SUCCESS -->
+    <!-- ══ SUCCESS ══ -->
     <div class="step" id="step-success">
       <div class="success-box">
         <div class="check">🎉</div>
         <h2>Booking Request Received!</h2>
-        <p>Thanks! Joe will review your request and get back to you within 24 hours to confirm.</p>
-        <p style="margin-top:10px">Check your email for a confirmation and next steps.</p>
+        <p>We've received your request and will get back to you within 24 hours to confirm availability and next steps.</p>
+        <p style="margin-top:10px">Check your email for a confirmation summary.</p>
         <div class="ref" id="booking-ref"></div>
       </div>
     </div>
 
-  </div><!-- /body -->
-</div><!-- /container -->
+  </div>
+</div>
 
 <script>
-// ─── State ───────────────────────────────────────────────────────────────────
-const state = {
-  services: [],
-  addons: [],
-  selectedService: null,
-  selectedAddons: [],
-  activeCat: 'all',
-  mileageCost: 0,
-  mileageChecked: false
+// ══════════════════════════════════════════════════
+// CATALOGUE DATA
+// ══════════════════════════════════════════════════
+
+const PHOTO_BOOTH_ADDONS = [
+  { id:'pb_kiosk',  name:'Digital Kiosk Photo Booth', price:150, note:'Standalone: $385' },
+  { id:'pb_360',   name:'360 Video Booth',            price:150, note:'Standalone: $385' },
+];
+
+const SERVICES = {
+  deluxe_magic: {
+    id:'deluxe_magic', icon:'🎩', name:'Deluxe Birthday Magic Show', price:385, duration:'45 min',
+    desc:'Award-winning interactive magic with audience participation, monkey puppet, and a special magical gift for the birthday child.',
+    addons:[
+      { id:'carnival_games', name:'Carnival Games', price:75 },
+      { id:'cotton_candy',   name:'Cotton Candy',   price:75 },
+      { id:'face_paint_ao',  name:'Face Painting',  price:150 },
+      { id:'mini_donuts',    name:'Hot & Fresh Mini Donuts', price:'per_child', rate:5, note:'$5 per guest' },
+      { id:'goodie_bag',     name:'Magic Goodie-Bag',        price:'per_child', rate:10, note:'$10 per guest' },
+      { id:'balloon_twist',  name:'Balloon Twisting', price:75 },
+    ]
+  },
+  basic_magic: {
+    id:'basic_magic', icon:'🎩', name:'Basic Birthday Magic Show', price:345, duration:'30 min',
+    desc:'Fun, interactive magic show packed with laughs and surprises. Perfect for shorter party slots.',
+    addons:[
+      { id:'carnival_games', name:'Carnival Games', price:75 },
+      { id:'cotton_candy',   name:'Cotton Candy',   price:75 },
+      { id:'face_paint_ao',  name:'Face Painting',  price:150 },
+      { id:'mini_donuts',    name:'Hot & Fresh Mini Donuts', price:'per_child', rate:5, note:'$5 per guest' },
+      { id:'goodie_bag',     name:'Magic Goodie-Bag',        price:'per_child', rate:10, note:'$10 per guest' },
+      { id:'balloon_twist',  name:'Balloon Twisting', price:75 },
+    ]
+  },
+  foam_single: {
+    id:'foam_single', icon:'🫧', name:'Foam Party — Single Cannon', price:385, duration:'45 min',
+    desc:'High-energy foam party with one cannon. Recommended for up to 30 kids.',
+    addons:[
+      { id:'glow_foam',    name:'Glow Foam',               price:150 },
+      { id:'cotton_candy_f', name:'Fresh Spun Cotton Candy', price:100 },
+      { id:'bubble_sta',   name:'Bubble Stations',         price:75 },
+      { id:'stilt_walker', name:'Stilt Walker',            price:400 },
+      { id:'bubble_mach',  name:'Bubble Machine',          price:75 },
+    ]
+  },
+  foam_double: {
+    id:'foam_double', icon:'🫧🫧', name:'Foam Party — Double Cannon', price:730, duration:'45 min',
+    desc:'Maximum foam with two cannons. Recommended for 30+ kids for the full foam experience.',
+    addons:[
+      { id:'glow_foam',    name:'Glow Foam',               price:150 },
+      { id:'cotton_candy_f', name:'Fresh Spun Cotton Candy', price:100 },
+      { id:'bubble_sta',   name:'Bubble Stations',         price:75 },
+      { id:'stilt_walker', name:'Stilt Walker',            price:400 },
+      { id:'bubble_mach',  name:'Bubble Machine',          price:75 },
+    ]
+  },
+  snow_45: {
+    id:'snow_45', icon:'❄️', name:'Snow Party — 45 Minutes', price:385, duration:'45 min',
+    desc:'Real snow machine fun — not cold at all! Perfect for winter-themed or frozen parties any time of year.',
+    extraHourRate: 140,
+    addons:[
+      { id:'ice_princess',  name:'Ice Princess Character', price:150 },
+      { id:'santa_visit',   name:'Visit from Santa',       price:250 },
+      { id:'magic_elf',     name:'Magic Elf Show (20 min)',price:150 },
+      { id:'reindeer_games',name:'Reindeer Games',         price:75  },
+      { id:'sensory_snow',  name:'Sensory Snow Table',     price:75  },
+    ]
+  },
+  snow_90: {
+    id:'snow_90', icon:'❄️', name:'Snow Party — 90 Minutes', price:525, duration:'90 min',
+    desc:'Extended snow party experience with more time for games, photos, and memories.',
+    extraHourRate: 140,
+    addons:[
+      { id:'ice_princess',  name:'Ice Princess Character', price:150 },
+      { id:'santa_visit',   name:'Visit from Santa',       price:250 },
+      { id:'magic_elf',     name:'Magic Elf Show (20 min)',price:150 },
+      { id:'reindeer_games',name:'Reindeer Games',         price:75  },
+      { id:'sensory_snow',  name:'Sensory Snow Table',     price:75  },
+    ]
+  },
+  cotton_candy: {
+    id:'cotton_candy', icon:'🍭', name:'Live Spun Cotton Candy', price:385, duration:'2 hrs',
+    desc:'Fresh-spun cotton candy made live at your event. A guaranteed crowd pleaser.',
+    addons:[
+      { id:'mini_donuts_ss', name:'Hot & Fresh Mini Donuts', price:100 },
+      { id:'hot_cider',      name:'Hot Apple Cider',         price:75  },
+      { id:'hot_choc',       name:'Hot Chocolate',           price:75  },
+      { id:'party_punch',    name:'Party Punch',             price:75  },
+    ]
+  },
+  mini_donuts: {
+    id:'mini_donuts', icon:'🍩', name:'Hot & Fresh Mini Donuts', price:385, duration:'2 hrs',
+    desc:'Freshly made mini donuts served hot at your event. Everyone loves them!',
+    addons:[
+      { id:'cotton_candy_ss', name:'Live Spun Cotton Candy', price:100 },
+      { id:'hot_cider',       name:'Hot Apple Cider',        price:75  },
+      { id:'hot_choc',        name:'Hot Chocolate',          price:75  },
+      { id:'party_punch',     name:'Party Punch',            price:75  },
+    ]
+  },
+  balloon_40: {
+    id:'balloon_40', icon:'🎈', name:'Balloon Workshop — Up to 40 Kids', price:345, duration:'30 min',
+    desc:'Every child learns to make and keep three classic balloon sculptures. We bring everything needed.',
+    addons:[]
+  },
+  balloon_60: {
+    id:'balloon_60', icon:'🎈', name:'Balloon Workshop — 40–60 Kids', price:385, duration:'30 min',
+    desc:'Larger group balloon workshop — same fun, bigger crowd handled with ease.',
+    addons:[]
+  },
+  face_paint: {
+    id:'face_paint', icon:'🎨', name:'Face Painting', price:200, duration:'1 hr',
+    desc:'Professional face painting for all ages. Approx. 30 guests per hour.',
+    extraHourRate:150, addons:[]
+  },
+  airbrush: {
+    id:'airbrush', icon:'💨', name:'Airbrush Tattoos', price:200, duration:'1 hr',
+    desc:'Custom airbrush tattoo designs. Approx. 30 tattoos per hour.',
+    extraHourRate:150, addons:[]
+  },
+  glitter: {
+    id:'glitter', icon:'💫', name:'Glitter Tattoos', price:200, duration:'1 hr',
+    desc:'Long-lasting glitter tattoos loved by kids and adults. Approx. 20–25 per hour.',
+    extraHourRate:150, addons:[]
+  },
+  bubble_show: {
+    id:'bubble_show', icon:'🫧', name:"Prof. Bucket's Bubble Show", price:385, duration:'45 min',
+    desc:'Giant bubbles, bubble science, and bubbly fun for all ages.',
+    addons:[
+      { id:'bubble_goodie', name:'Bubble Goodie Bag', price:'per_child', rate:10, note:'$10 per guest' },
+      { id:'atmos_bubble',  name:'Atmospheric Bubble Machine', price:50  },
+      { id:'giant_bubbles', name:'Outdoor Giant Bubble Stations', price:75 },
+      { id:'invis_bubble',  name:'Indoor/Outdoor Invisible Water Bubble Station', price:75 },
+      { id:'face_paint_b',  name:'1 Hour of Face Painting', price:250 },
+    ]
+  },
+  corporate_magic: {
+    id:'corporate_magic', icon:'✨', name:'Corporate Magic Show', price:875, priceNote:'Starting at',
+    duration:'45 min', isQuote:true,
+    desc:'Close-up and stage magic tailored for professional events and corporate audiences.',
+    addons:[]
+  },
+  game_show: {
+    id:'game_show', icon:'🏆', name:'Game Show Champions', price:3500, priceNote:'Starting at',
+    duration:'90 min', isQuote:true,
+    desc:'Live interactive game show with prizes and high-energy audience participation.',
+    addons:[]
+  },
+  school_asm: {
+    id:'school_asm', icon:'🏫', name:'Magic School Assembly', price:385, duration:'45 min',
+    desc:'High-energy assembly for your entire school. Engages up to 500 students.',
+    addons:[]
+  },
+  dj_pinata: {
+    id:'dj_pinata', icon:'🎵', name:'DJ Piñata', price:385, duration:'2 hrs',
+    desc:'The ultimate school fundraiser experience — interactive DJ meets piñata party.',
+    addons:[]
+  },
+  wedding_magic: {
+    id:'wedding_magic', icon:'🪄', name:'Walk-Around Cocktail Hour Magic', price:900, priceNote:'Starting at',
+    duration:'90 min', isQuote:true,
+    desc:'Elegant close-up sleight of hand performed table-to-table during cocktail hour.',
+    addons:[
+      { id:'kids_show_dinner', name:"Children's Show During Dinner", price:385 },
+      { id:'kids_fun_night',   name:'Kids Fun Night (babysitting + games)', price:585, priceNote:'Starting at', isQuote:true },
+    ]
+  },
+  // Library shows
+  lib_magic:   { id:'lib_magic',   icon:'🎩', name:'Magic Show',              price:345, duration:'45 min', desc:'Engaging magic show tailored for library audiences and summer reading programs.', addons:[{ id:'extra_show', name:'Additional Show Same Day', price:345, note:'Per show' }] },
+  lib_balloon: { id:'lib_balloon', icon:'🎈', name:'Balloon Workshop',        price:345, duration:'30 min', desc:'Hands-on balloon sculpting workshop. Every child makes and keeps their creations.', addons:[{ id:'extra_show', name:'Additional Show Same Day', price:345, note:'Per show' }] },
+  lib_bubble:  { id:'lib_bubble',  icon:'🫧', name:"Prof. Bucket's Bubble Show", price:345, duration:'45 min', desc:'The science and wonder of bubbles — a perfect library STEM program.', addons:[{ id:'extra_show', name:'Additional Show Same Day', price:345, note:'Per show' }] },
+  lib_doodles: { id:'lib_doodles', icon:'✏️', name:'Story-Doodles',           price:345, duration:'45 min', desc:'Interactive storytelling with live drawing and imagination. Kids love participating.', addons:[{ id:'extra_show', name:'Additional Show Same Day', price:345, note:'Per show' }] },
+  lib_foam:    { id:'lib_foam',    icon:'🫧', name:'Foam Party',              price:385, duration:'45 min', desc:'45 minutes of foam and fun — a summer reading favorite!', addons:[{ id:'extra_show', name:'Additional Show Same Day', price:345, note:'Per show' }] },
+  lib_workshop:{ id:'lib_workshop',icon:'🪄', name:'Magic Workshop',          price:345, duration:'45 min', desc:'Interactive magic workshop where kids learn real magic tricks to take home.', addons:[{ id:'extra_show', name:'Additional Show Same Day', price:345, note:'Per show' }] },
+  // Standalone Photo Booths
+  pb_kiosk_svc: { id:'pb_kiosk_svc', icon:'📸', name:'Digital Kiosk Photo Booth', price:385, duration:'2 hrs', desc:'Automated digital photo kiosk with instant prints and digital sharing.', addons:[{ id:'pb_360_ao', name:'Add 360 Video Booth', price:385 }] },
+  pb_360_svc:   { id:'pb_360_svc',   icon:'🎥', name:'360 Video Booth',           price:385, duration:'2 hrs', desc:'Immersive 360-degree slow-motion video booth — the ultimate party wow moment.', addons:[{ id:'pb_kiosk_ao', name:'Add Digital Kiosk Photo Booth', price:385 }] },
 };
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
+// Event type → service IDs + photo booth always available as add-on
+const EVENT_TYPES = [
+  { id:'kids_bday',    icon:'🎂', label:'Kids Birthday Party',        sub:'Ages 1–12',
+    svcs:['deluxe_magic','basic_magic','foam_single','foam_double','snow_45','snow_90','cotton_candy','mini_donuts','face_paint','airbrush','glitter','bubble_show','pb_kiosk_svc','pb_360_svc'] },
+  { id:'family',       icon:'👨‍👩‍👧‍👦', label:'Family Gathering',              sub:'Reunions, cookouts, block parties',
+    svcs:['deluxe_magic','basic_magic','foam_single','foam_double','snow_45','snow_90','cotton_candy','mini_donuts','face_paint','airbrush','glitter','bubble_show','game_show','pb_kiosk_svc','pb_360_svc'] },
+  { id:'school_asm',   icon:'🏫', label:'School Assembly',             sub:'K–12 in-school programs',
+    svcs:['school_asm'] },
+  { id:'school_fund',  icon:'🎟️', label:'School Fundraiser',           sub:'PTA events & fundraisers',
+    svcs:['dj_pinata'] },
+  { id:'corporate',    icon:'🏢', label:'Corporate Event',             sub:'Team events, parties, meetings',
+    svcs:['corporate_magic','game_show','pb_kiosk_svc','pb_360_svc'] },
+  { id:'community',    icon:'🏘️', label:'Community Event',             sub:'Festivals, fairs, neighborhood events',
+    svcs:['deluxe_magic','basic_magic','foam_single','foam_double','snow_45','snow_90','cotton_candy','mini_donuts','face_paint','airbrush','glitter','bubble_show','school_asm','game_show','pb_kiosk_svc','pb_360_svc'] },
+  { id:'wedding',      icon:'💍', label:'Wedding',                      sub:'Cocktail hour & receptions',
+    svcs:['wedding_magic','pb_kiosk_svc','pb_360_svc'] },
+  { id:'library',      icon:'📚', label:'Library Summer Reading',       sub:'Public library programs',
+    svcs:['lib_magic','lib_balloon','lib_bubble','lib_doodles','lib_foam','lib_workshop'] },
+];
+
+const ALL_SVC_IDS = Object.keys(SERVICES);
+
+// ══════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════
+const S = {
+  eventType: null,       // selected EVENT_TYPES entry
+  svcId: null,           // selected service id
+  addons: [],            // selected addon ids
+  extraHours: 0,         // extra hours for face paint / snow
+  mileageCost: 0,
+  mileageMiles: 0,
+  mileageChecked: false,
+  lastZip: null,
+  currentStep: 1,
+  seeAll: false,
+};
+
+// ══════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════
 window.addEventListener('DOMContentLoaded', () => {
-  populateTimeDropdown();
+  renderEtGrid();
+  populateTimes();
   setMinDate();
-  loadServices();
 });
 
-// ─── Load services from DB ────────────────────────────────────────────────────
-async function loadServices() {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    const res = await fetch('/.netlify/functions/services', { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    state.services = data.services || [];
-    state.addons = data.addons || [];
-    renderStep1();
-    document.getElementById('services-loading').style.display = 'none';
-    document.getElementById('services-content').style.display = 'block';
-  } catch (e) {
-    document.getElementById('services-loading').style.display = 'none';
-    document.getElementById('services-error').style.display = 'block';
-  }
-}
-
-function renderStep1() {
-  // Build category tabs
-  const catOrder = ['shows', 'performers', 'experiences', 'camps'];
-  const catLabels = { shows: '🎭 Shows', performers: '🤹 Performers', experiences: '🎊 Experiences', camps: '🏕 Camps' };
-  const usedCats = catOrder.filter(c => state.services.some(s => s.category === c));
-
-  const tabsEl = document.getElementById('cat-tabs');
-  tabsEl.innerHTML = '';
-  const allTab = document.createElement('button');
-  allTab.className = 'cat-tab' + (state.activeCat === 'all' ? ' active' : '');
-  allTab.textContent = '⭐ All';
-  allTab.onclick = () => { state.activeCat = 'all'; renderServices(); updateCatTabs(); };
-  tabsEl.appendChild(allTab);
-
-  usedCats.forEach(cat => {
-    const btn = document.createElement('button');
-    btn.className = 'cat-tab' + (state.activeCat === cat ? ' active' : '');
-    btn.textContent = catLabels[cat] || cat;
-    btn.dataset.cat = cat;
-    btn.onclick = () => { state.activeCat = cat; renderServices(); updateCatTabs(); };
-    tabsEl.appendChild(btn);
-  });
-
-  renderServices();
-  renderAddons();
-}
-
-function updateCatTabs() {
-  document.querySelectorAll('.cat-tab').forEach(btn => {
-    btn.classList.toggle('active',
-      (btn.dataset.cat || 'all') === state.activeCat
-    );
-  });
-}
-
-function renderServices() {
-  const grid = document.getElementById('services-grid');
-  const visible = state.activeCat === 'all'
-    ? state.services
-    : state.services.filter(s => s.category === state.activeCat);
-
+// ══════════════════════════════════════════════════
+// STEP 1 — Event Type
+// ══════════════════════════════════════════════════
+function renderEtGrid() {
+  const grid = document.getElementById('et-grid');
   grid.innerHTML = '';
-  visible.forEach(svc => {
+  EVENT_TYPES.forEach(et => {
+    const d = document.createElement('div');
+    d.className = 'et-card' + (S.eventType && S.eventType.id === et.id ? ' selected' : '');
+    d.innerHTML = `<div class="et-icon">${et.icon}</div><div><div class="et-label">${et.label}</div><div class="et-sub">${et.sub}</div></div>`;
+    d.onclick = () => { S.eventType = et; S.seeAll = false; S.svcId = null; S.addons = []; renderEtGrid(); document.getElementById('btn-1').disabled = false; };
+    grid.appendChild(d);
+  });
+}
+
+function selectSeeAll() {
+  S.eventType = { id:'all', icon:'🔍', label:'All Services', sub:'Browse everything' };
+  S.seeAll = true; S.svcId = null; S.addons = [];
+  renderEtGrid();
+  document.getElementById('btn-1').disabled = false;
+  // Deselect all cards visually
+  document.querySelectorAll('.et-card').forEach(c => c.classList.remove('selected'));
+}
+
+// ══════════════════════════════════════════════════
+// STEP 2 — Services
+// ══════════════════════════════════════════════════
+function buildStep2() {
+  const ids = S.seeAll ? ALL_SVC_IDS : (S.eventType ? S.eventType.svcs : []);
+  document.getElementById('s2-heading').textContent = 'Choose your entertainment';
+  document.getElementById('s2-sub').textContent = S.seeAll
+    ? 'Showing all available services'
+    : `Showing options for: ${S.eventType.label}`;
+
+  const grid = document.getElementById('svc-grid');
+  grid.innerHTML = '';
+
+  ids.forEach(id => {
+    const svc = SERVICES[id];
+    if (!svc) return;
+    const isSelected = S.svcId === id;
+
     const card = document.createElement('div');
-    card.className = 'service-card' + (state.selectedService && state.selectedService.service_id === svc.service_id ? ' selected' : '');
+    card.className = 'svc-card' + (isSelected ? ' selected' : '');
+    card.id = 'svc-card-' + id;
+
+    const priceStr = svc.priceNote
+      ? `<span class="price-note">${svc.priceNote} </span>$${svc.price.toLocaleString()}`
+      : `$${svc.price.toLocaleString()}`;
+
     card.innerHTML = `
-      <div class="icon">${svc.icon || '🎪'}</div>
-      <div class="sname">${svc.name}</div>
-      <div class="sprice">$${Number(svc.price).toFixed(0)}</div>
-      ${svc.duration_minutes ? `<div class="sduration">~${formatDuration(svc.duration_minutes)}</div>` : ''}
-      ${svc.guest_suggestion ? `<div class="hint" style="margin-top:4px">${svc.guest_suggestion}</div>` : ''}
-    `;
-    card.onclick = () => {
-      state.selectedService = svc;
-      renderServices();
-      // Update guest hint
-      const gh = document.getElementById('guest-hint');
-      if (gh && svc.guest_suggestion) gh.textContent = svc.guest_suggestion;
-      updNextBtn(1);
-    };
+      <div class="svc-card-header" onclick="selectService('${id}')">
+        <div class="svc-icon">${svc.icon}</div>
+        <div class="svc-info">
+          <div class="svc-name">${svc.name}</div>
+          <div class="svc-price">${priceStr}</div>
+          ${svc.desc ? `<div class="svc-desc">${svc.desc}</div>` : ''}
+          ${svc.duration ? `<div class="svc-duration">⏱ ${svc.duration}</div>` : ''}
+        </div>
+        <div class="svc-select-indicator"></div>
+      </div>
+      <div class="svc-accordion" id="acc-${id}">
+        ${buildAccordion(svc)}
+      </div>`;
+
     grid.appendChild(card);
   });
 }
 
-function renderAddons() {
-  const grid = document.getElementById('addons-grid');
-  grid.innerHTML = '';
-  state.addons.forEach(addon => {
-    const card = document.createElement('div');
-    card.className = 'addon-card' + (state.selectedAddons.includes(addon.addon_id) ? ' selected' : '');
-    card.innerHTML = `<span>${addon.name}</span><span class="addon-price">+$${Number(addon.price).toFixed(0)}</span>`;
-    card.onclick = () => {
-      const idx = state.selectedAddons.indexOf(addon.addon_id);
-      if (idx === -1) state.selectedAddons.push(addon.addon_id);
-      else state.selectedAddons.splice(idx, 1);
-      renderAddons();
-    };
-    grid.appendChild(card);
-  });
-}
+function buildAccordion(svc) {
+  let html = '';
 
-function formatDuration(mins) {
-  if (mins < 60) return `${mins} min`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m ? `${h}h ${m}m` : `${h} hour${h > 1 ? 's' : ''}`;
-}
-
-// ─── Time dropdown ────────────────────────────────────────────────────────────
-function populateTimeDropdown() {
-  const sel = document.getElementById('event-time');
-  for (let h = 8; h <= 22; h++) {
-    [0, 15, 30, 45].forEach(m => {
-      if (h === 22 && m > 0) return;
-      const hh = h % 12 || 12;
-      const ampm = h < 12 ? 'AM' : 'PM';
-      const mm = m.toString().padStart(2, '0');
-      const val = `${h.toString().padStart(2,'0')}:${mm}`;
-      const label = `${hh}:${mm} ${ampm}`;
-      sel.innerHTML += `<option value="${val}">${label}</option>`;
-    });
+  // Quote-only services
+  if (svc.isQuote) {
+    html += `<div class="quote-request-box">
+      <p>💬 <strong>Custom quote required.</strong> Pricing starts at $${svc.price.toLocaleString()}. We'll review your request and follow up with a personalized quote within 24 hours.</p>
+    </div>`;
   }
+
+  // Extra hour picker for face paint / airbrush / glitter
+  if (svc.extraHourRate && !svc.id.startsWith('snow')) {
+    html += `<div class="duration-picker" style="margin-top:${svc.isQuote?'12px':'0'}">
+      <div class="addon-section-label">How Many Hours?</div>
+      <div class="duration-options">
+        ${[1,2,3,4].map(h => `<button class="dur-btn${getExtraHours(svc.id)===h-1?' active':''}" onclick="setExtraHours('${svc.id}',${h-1})">${h} hr${h>1?'s':''}${h===1?'':' (+$'+(svc.extraHourRate*(h-1))+')'}</button>`).join('')}
+      </div>
+      <div class="hint">1st hour $${svc.price} · Each additional hour +$${svc.extraHourRate}</div>
+    </div>`;
+  }
+
+  // Extra time for snow
+  if (svc.extraHourRate && svc.id.startsWith('snow')) {
+    html += `<div class="duration-picker">
+      <div class="addon-section-label">Need More Time?</div>
+      <div class="custom-dur-row">
+        <input type="number" min="0" max="4" placeholder="0" value="${getExtraHours(svc.id)||''}"
+          oninput="setExtraHours('${svc.id}',parseInt(this.value)||0)" id="snow-extra-${svc.id}"/>
+        <span>extra hours at +$${svc.extraHourRate}/hr each</span>
+      </div>
+    </div>`;
+  }
+
+  // Add-ons
+  if (svc.addons && svc.addons.length > 0) {
+    html += `<div class="addon-section-label" style="margin-top:12px">Add-Ons</div>
+    <div class="addon-list">`;
+    svc.addons.forEach(a => {
+      const isSelected = S.addons.includes(a.id);
+      const priceLabel = a.price === 'per_child'
+        ? a.note
+        : (a.priceNote ? `${a.priceNote} +$${a.price}` : `+$${a.price}`);
+      const noteStr = a.note && a.price !== 'per_child' ? `<span class="addon-note">${a.note}</span>` : '';
+      html += `<div class="addon-item${isSelected?' selected':''}" id="addon-${a.id}" onclick="toggleAddon('${svc.id}','${a.id}')">
+        <div class="addon-check"></div>
+        <div class="addon-name">${a.name}${noteStr}</div>
+        <div class="addon-price-tag">${priceLabel}</div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  // Photo booth add-ons for non-photo-booth services
+  if (!svc.id.startsWith('pb_')) {
+    html += `<div class="photo-booth-section">
+      <div class="addon-section-label">📸 Photo Booth Add-Ons</div>
+      <div class="addon-list">`;
+    PHOTO_BOOTH_ADDONS.forEach(a => {
+      const isSelected = S.addons.includes(a.id);
+      html += `<div class="addon-item${isSelected?' selected':''}" id="addon-${a.id}" onclick="toggleAddon('${svc.id}','${a.id}')">
+        <div class="addon-check"></div>
+        <div class="addon-name">${a.name}<span class="addon-note">${a.note}</span></div>
+        <div class="addon-price-tag">+$${a.price}</div>
+      </div>`;
+    });
+    html += `</div></div>`;
+  }
+
+  return html;
 }
 
-function setMinDate() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  document.getElementById('event-date').min = d.toISOString().split('T')[0];
+// Per-service extra hours storage
+const extraHoursMap = {};
+function getExtraHours(svcId) { return extraHoursMap[svcId] || 0; }
+function setExtraHours(svcId, val) {
+  extraHoursMap[svcId] = Math.max(0, val);
+  // Re-render accordion to update button states
+  const acc = document.getElementById('acc-' + svcId);
+  if (acc) acc.innerHTML = buildAccordion(SERVICES[svcId]);
+  updateStep2Btn();
 }
 
-// ─── Navigation ───────────────────────────────────────────────────────────────
+function selectService(id) {
+  const prev = S.svcId;
+  S.svcId = id;
+  S.addons = []; // clear addons when switching service
+
+  // Update card classes
+  document.querySelectorAll('.svc-card').forEach(c => c.classList.remove('selected'));
+  const card = document.getElementById('svc-card-' + id);
+  if (card) {
+    card.classList.add('selected');
+    // Rebuild accordion for fresh state
+    const acc = document.getElementById('acc-' + id);
+    if (acc) acc.innerHTML = buildAccordion(SERVICES[id]);
+    // Scroll card into view
+    setTimeout(() => card.scrollIntoView({ behavior:'smooth', block:'nearest' }), 50);
+  }
+  updateStep2Btn();
+}
+
+function toggleAddon(svcId, addonId) {
+  const idx = S.addons.indexOf(addonId);
+  if (idx === -1) S.addons.push(addonId);
+  else S.addons.splice(idx, 1);
+
+  // Update UI
+  const el = document.getElementById('addon-' + addonId);
+  if (el) el.classList.toggle('selected', S.addons.includes(addonId));
+  const check = el ? el.querySelector('.addon-check') : null;
+  if (check) check.style.background = S.addons.includes(addonId) ? '#7c3aed' : '';
+}
+
+function updateStep2Btn() {
+  document.getElementById('btn-2').disabled = !S.svcId;
+}
+
+// ══════════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════════
 function goTo(n) {
+  if (n === 2) buildStep2();
+  if (n === 4) buildQuote();
+
+  S.currentStep = n;
   document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
   document.getElementById('step-' + n).classList.add('active');
+
   document.querySelectorAll('.progress-step').forEach((p, i) => {
     p.classList.remove('active', 'done');
     if (i + 1 === n) p.classList.add('active');
     else if (i + 1 < n) p.classList.add('done');
   });
-  if (n === 4) buildQuote();
   window.scrollTo(0, 0);
 }
 
-// ─── Next button enablement ───────────────────────────────────────────────────
-function updNextBtn(step) {
-  if (step === 1) {
-    document.getElementById('btn-1').disabled = !state.selectedService;
-  }
-  if (step === 2) {
-    const date = document.getElementById('event-date').value;
-    const time = document.getElementById('event-time').value;
-    const zip = document.getElementById('event-zip').value.trim();
-    const guests = document.getElementById('event-guests').value.trim();
-    const type = document.getElementById('event-type').value;
-
-    // Date validation
-    const dateErr = document.getElementById('date-err');
-    const dateNotice = document.getElementById('date-notice');
-    if (date) {
-      const today = new Date(); today.setHours(0,0,0,0);
-      const sel = new Date(date + 'T00:00:00');
-      if (sel <= today) {
-        dateErr.textContent = 'Please select a future date.';
-      } else {
-        dateErr.textContent = '';
-        const diffDays = Math.ceil((sel - today) / 86400000);
-        if (diffDays < 7) {
-          dateNotice.style.display = 'block';
-          dateNotice.textContent = '⚠️ This date is less than 7 days away. We will do our best but availability may be limited.';
-        } else {
-          dateNotice.style.display = 'none';
-        }
-      }
-    }
-
-    // ZIP validation
-    const zipErr = document.getElementById('zip-err');
-    if (zip && zip.length === 5 && /^\d{5}$/.test(zip)) {
-      zipErr.textContent = '';
-    } else if (zip.length > 0) {
-      zipErr.textContent = 'Enter a valid 5-digit ZIP code.';
-    }
-
-    const valid = date && time && zip.length === 5 && /^\d{5}$/.test(zip)
-      && guests && parseInt(guests) > 0 && type
-      && !dateErr.textContent;
-    document.getElementById('btn-2').disabled = !valid;
-  }
-  if (step === 3) {
-    const name = document.getElementById('c-name').value.trim();
-    const phone = document.getElementById('c-phone').value.trim();
-    const email = document.getElementById('c-email').value.trim();
-    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-    document.getElementById('btn-3').disabled = !(name && phone && emailOk);
-  }
+function navToStep(n) {
+  // Only allow going back via progress tabs
+  if (n >= S.currentStep) return;
+  goTo(n);
 }
 
-// ─── Quote builder ────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════
+// STEP 3 — Validation
+// ══════════════════════════════════════════════════
+function chk3() {
+  const date = document.getElementById('ev-date').value;
+  const time = document.getElementById('ev-time').value;
+  const zip  = document.getElementById('ev-zip').value.trim();
+  const guests = document.getElementById('ev-guests').value.trim();
+  const name = document.getElementById('c-name').value.trim();
+  const phone = document.getElementById('c-phone').value.trim();
+  const email = document.getElementById('c-email').value.trim();
+
+  const dateErr = document.getElementById('date-err');
+  const dateWarn = document.getElementById('date-warn');
+  if (date) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const sel = new Date(date + 'T00:00:00');
+    if (sel <= today) { dateErr.textContent = 'Please select a future date.'; }
+    else {
+      dateErr.textContent = '';
+      const diff = Math.ceil((sel - today) / 86400000);
+      if (diff < 7) { dateWarn.style.display='block'; dateWarn.textContent='⚠️ This date is less than 7 days away — availability may be limited.'; }
+      else dateWarn.style.display = 'none';
+    }
+  }
+
+  const zipErr = document.getElementById('zip-err');
+  if (zip.length > 0 && zip.length < 5) zipErr.textContent = 'Enter a valid 5-digit ZIP code.';
+  else zipErr.textContent = '';
+
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const ok = date && !dateErr.textContent && time
+    && zip.length === 5 && /^\d{5}$/.test(zip)
+    && guests && parseInt(guests) > 0
+    && name && phone && emailOk;
+
+  document.getElementById('btn-3').disabled = !ok;
+}
+
+// ══════════════════════════════════════════════════
+// STEP 4 — Quote Builder
+// ══════════════════════════════════════════════════
 async function buildQuote() {
-  const svc = state.selectedService;
-  const zip = document.getElementById('event-zip').value.trim();
-  const date = document.getElementById('event-date').value;
-  const time = document.getElementById('event-time').value;
-  const type = document.getElementById('event-type').value;
-  const guests = document.getElementById('event-guests').value;
-  const location = document.getElementById('event-location').value.trim();
+  const svc = SERVICES[S.svcId];
+  if (!svc) return;
 
-  // Summary
+  const guests = parseInt(document.getElementById('ev-guests').value) || 0;
+  const zip    = document.getElementById('ev-zip').value.trim();
+  const date   = document.getElementById('ev-date').value;
+  const time   = document.getElementById('ev-time').value;
+  const loc    = document.getElementById('ev-loc').value.trim();
+  const name   = document.getElementById('c-name').value.trim();
+  const phone  = document.getElementById('c-phone').value.trim();
+  const email  = document.getElementById('c-email').value.trim();
+
+  // Chips
   const dateObj = new Date(date + 'T00:00:00');
-  const dateStr = dateObj.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
-  const [hh, mm] = time.split(':');
-  const h = parseInt(hh); const ampm = h < 12 ? 'AM' : 'PM';
-  const timeStr = `${h % 12 || 12}:${mm} ${ampm}`;
-  document.getElementById('summary-text').innerHTML =
-    `${svc.name}<br>${dateStr} at ${timeStr}<br>ZIP: ${zip}${location ? '<br>' + location : ''}<br>${type} · ${guests} guests`;
+  const dateStr = dateObj.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  const [hh,mm] = time.split(':'); const h = parseInt(hh);
+  const timeStr = `${h%12||12}:${mm} ${h<12?'AM':'PM'}`;
 
-  // Lines
-  let total = Number(svc.price);
-  const lines = [{ label: svc.name, amount: svc.price }];
+  document.getElementById('review-chips').innerHTML = `
+    <span class="chip">${S.eventType.icon} ${S.eventType.label}</span>
+    <span class="chip">${svc.icon} ${svc.name}</span>
+    <span class="chip">📅 ${dateStr} at ${timeStr}</span>
+    <span class="chip">📍 ZIP ${zip}${loc?' · '+loc:''}</span>
+    <span class="chip">👥 ${guests} guests</span>
+    <span class="chip">👤 ${name}</span>`;
+
+  const lines = [];
+  let total = 0;
+  let hasCustomQuote = false;
+  let hasPerChild = false;
+
+  // Base service
+  if (svc.isQuote) {
+    hasCustomQuote = true;
+    lines.push({ label: svc.name, val: `Starting at $${svc.price.toLocaleString()}`, cls:'quote-req' });
+  } else {
+    lines.push({ label: svc.name, val: `$${svc.price.toFixed(2)}` });
+    total += svc.price;
+  }
+
+  // Extra hours (face paint etc)
+  const extraH = getExtraHours(S.svcId);
+  if (svc.extraHourRate && extraH > 0) {
+    const extraCost = svc.extraHourRate * extraH;
+    lines.push({ label: `+ ${extraH} extra hour${extraH>1?'s':''} @ $${svc.extraHourRate}/hr`, val:`$${extraCost.toFixed(2)}`, cls:'sub' });
+    total += extraCost;
+  }
 
   // Addons
-  state.selectedAddons.forEach(aid => {
-    const addon = state.addons.find(a => a.addon_id === aid);
-    if (addon) {
-      lines.push({ label: addon.name, amount: Number(addon.price) });
+  const allAddons = [...(svc.addons||[]), ...PHOTO_BOOTH_ADDONS.map(a=>({...a, fromPB:true}))];
+  S.addons.forEach(aid => {
+    // Check in service addons first
+    let addon = (svc.addons||[]).find(a=>a.id===aid);
+    // Then photo booth addons
+    if (!addon) addon = PHOTO_BOOTH_ADDONS.find(a=>a.id===aid);
+    if (!addon) return;
+
+    if (addon.isQuote) {
+      hasCustomQuote = true;
+      lines.push({ label: addon.name, val: `Starting at $${addon.price}`, cls:'quote-req' });
+    } else if (addon.price === 'per_child') {
+      const est = addon.rate * guests;
+      hasPerChild = true;
+      lines.push({ label: `${addon.name} (${guests} guests × $${addon.rate})`, val: `~$${est.toFixed(2)}`, cls:'sub' });
+      total += est;
+    } else {
+      lines.push({ label: addon.name, val: `+$${Number(addon.price).toFixed(2)}`, cls:'sub' });
       total += Number(addon.price);
     }
   });
 
   // Mileage
-  if (!state.mileageChecked || state.lastZip !== zip) {
-    state.lastZip = zip;
-    state.mileageChecked = true;
-    state.mileageCost = await calcMileage(zip);
+  if (!S.mileageChecked || S.lastZip !== zip) {
+    S.lastZip = zip; S.mileageChecked = true;
+    S.mileageCost = await calcMileage(zip);
   }
-  if (state.mileageCost > 0) {
-    lines.push({ label: `Travel (${state.mileageMiles} mi round trip)`, amount: state.mileageCost });
-    total += state.mileageCost;
+  if (S.mileageCost > 0) {
+    lines.push({ label: `Travel fee (${S.mileageMiles} mi round trip)`, val:`$${S.mileageCost.toFixed(2)}`, cls:'sub' });
+    total += S.mileageCost;
     document.getElementById('mileage-notice').style.display = 'block';
-    document.getElementById('mileage-notice').textContent =
-      `🚗 Travel fee applies — estimated ${state.mileageMiles} miles round trip from OKC at $0.70/mile.`;
+    document.getElementById('mileage-notice').textContent = `🚗 Travel fee applies — approx. ${S.mileageMiles} miles round trip from OKC.`;
   } else {
     document.getElementById('mileage-notice').style.display = 'none';
   }
 
-  const deposit = 100;
-  const balance = total - deposit;
+  // Totals
+  if (!svc.isQuote) {
+    const deposit = 100;
+    lines.push({ label: 'Estimated Total', val: `$${total.toFixed(2)}`, cls:'total' });
+    lines.push({ label: 'Deposit to Confirm', val: `$${deposit.toFixed(2)}`, cls:'deposit' });
+    lines.push({ label: 'Balance Due at Event', val: `$${(total - deposit).toFixed(2)}` });
+  }
 
-  lines.push({ label: 'Total', amount: total, cls: 'total' });
-  lines.push({ label: 'Deposit Due Today', amount: deposit, cls: 'deposit' });
-  lines.push({ label: 'Balance Due at Event', amount: balance, cls: 'balance' });
-
-  const el = document.getElementById('quote-lines');
-  el.innerHTML = lines.map(l =>
-    `<div class="quote-line ${l.cls || ''}">
-      <span>${l.label}</span>
-      <span>$${Number(l.amount).toFixed(2)}</span>
-    </div>`
+  document.getElementById('quote-lines').innerHTML = lines.map(l =>
+    `<div class="q-line ${l.cls||''}"><span>${l.label}</span><span>${l.val}</span></div>`
   ).join('');
+
+  // Custom quote / per child notes
+  const noteEl = document.getElementById('custom-note');
+  const notes = [];
+  if (hasCustomQuote) notes.push("Items marked as custom quotes will be confirmed by our team. We'll follow up within 24 hours with final pricing.");
+  if (hasPerChild) notes.push(`Per-guest items are estimated based on ${guests} guests. Final totals confirmed after booking.`);
+  notes.push("All quotes are estimates. We're always happy to work with your budget — custom quotes available on request.");
+  noteEl.innerHTML = '💬 ' + notes.join(' ');
+  noteEl.style.display = 'block';
 }
 
 async function calcMileage(zip) {
@@ -530,75 +888,102 @@ async function calcMileage(zip) {
     const data = await res.json();
     const lat2 = parseFloat(data.places[0].latitude);
     const lon2 = parseFloat(data.places[0].longitude);
-    const baseLat = 35.5514, baseLon = -97.4075;
-    const R = 3958.8;
-    const dLat = (lat2 - baseLat) * Math.PI / 180;
-    const dLon = (lon2 - baseLon) * Math.PI / 180;
-    const a = Math.sin(dLat/2)**2 + Math.cos(baseLat*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+    const R = 3958.8, bLat = 35.5514, bLon = -97.4075;
+    const dLat = (lat2-bLat)*Math.PI/180;
+    const dLon = (lon2-bLon)*Math.PI/180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(bLat*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
     const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     const roundTrip = Math.round(dist * 2 * 1.25);
-    state.mileageMiles = roundTrip;
-    const cost = roundTrip > 20 ? Math.round(roundTrip * 0.70) : 0;
-    return cost;
+    S.mileageMiles = roundTrip;
+    return roundTrip > 20 ? Math.round(roundTrip * 0.70) : 0;
   } catch { return 0; }
 }
 
-// ─── Submit ───────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════
+// SUBMIT
+// ══════════════════════════════════════════════════
 async function submitBooking() {
   const btn = document.getElementById('btn-submit');
-  btn.disabled = true;
-  btn.textContent = 'Submitting…';
+  btn.disabled = true; btn.textContent = 'Submitting…';
 
-  const svc = state.selectedService;
-  const servicePrice = Number(svc.price);
-  const addonDetails = state.selectedAddons.map(aid => {
-    const a = state.addons.find(x => x.addon_id === aid);
-    return a ? { id: aid, name: a.name, price: Number(a.price) } : null;
+  const svc = SERVICES[S.svcId];
+  const guests = parseInt(document.getElementById('ev-guests').value) || 0;
+  const extraH = getExtraHours(S.svcId);
+  const svcPrice = svc.isQuote ? 0 : svc.price;
+  const extraCost = (svc.extraHourRate && extraH > 0) ? svc.extraHourRate * extraH : 0;
+
+  const addonDetails = S.addons.map(aid => {
+    let a = (svc.addons||[]).find(x=>x.id===aid) || PHOTO_BOOTH_ADDONS.find(x=>x.id===aid);
+    if (!a) return null;
+    const price = a.price === 'per_child' ? a.rate * guests : (a.isQuote ? 0 : Number(a.price));
+    return { id: aid, name: a.name, price };
   }).filter(Boolean);
-  const addonTotal = addonDetails.reduce((s, a) => s + a.price, 0);
-  const total = servicePrice + addonTotal + state.mileageCost;
+
+  const addonTotal = addonDetails.reduce((s,a) => s + a.price, 0);
+  const total = svcPrice + extraCost + addonTotal + S.mileageCost;
   const deposit = 100;
-  const balance = total - deposit;
 
   const payload = {
-    service_id: svc.service_id,
+    service_id: svc.id,
     service_name: svc.name,
-    service_price: servicePrice,
+    service_price: svcPrice,
+    is_custom_quote: !!svc.isQuote,
+    extra_hours: extraH,
+    extra_hours_cost: extraCost,
     addons: addonDetails,
     addon_total: addonTotal,
-    mileage_cost: state.mileageCost,
-    mileage_miles: state.mileageMiles || 0,
+    mileage_cost: S.mileageCost,
+    mileage_miles: S.mileageMiles || 0,
     total_price: total,
     deposit_amount: deposit,
-    balance_due: balance,
-    event_date: document.getElementById('event-date').value,
-    event_time: document.getElementById('event-time').value,
-    event_zip: document.getElementById('event-zip').value.trim(),
-    event_location: document.getElementById('event-location').value.trim(),
-    event_type: document.getElementById('event-type').value,
-    guest_count: parseInt(document.getElementById('event-guests').value),
-    notes: document.getElementById('event-notes').value.trim(),
+    balance_due: total - deposit,
+    event_type: S.eventType ? S.eventType.label : '',
+    event_type_id: S.eventType ? S.eventType.id : '',
+    event_date: document.getElementById('ev-date').value,
+    event_time: document.getElementById('ev-time').value,
+    event_zip: document.getElementById('ev-zip').value.trim(),
+    event_location: document.getElementById('ev-loc').value.trim(),
+    guest_count: guests,
+    notes: document.getElementById('ev-notes').value.trim(),
     client_name: document.getElementById('c-name').value.trim(),
     client_phone: document.getElementById('c-phone').value.trim(),
     client_email: document.getElementById('c-email').value.trim(),
-    referral_source: document.getElementById('c-referral').value
+    referral_source: document.getElementById('c-ref').value,
   };
 
   try {
     const res = await fetch('/api/bookings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Submission failed');
     document.getElementById('booking-ref').textContent = data.reference || 'Submitted!';
-    goTo('success');
-  } catch (e) {
-    btn.disabled = false;
-    btn.textContent = 'Submit Booking Request';
-    alert('Something went wrong: ' + e.message + '\n\nPlease try again or call (405) 431-6625.');
+    document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+    document.getElementById('step-success').classList.add('active');
+    window.scrollTo(0,0);
+  } catch(e) {
+    btn.disabled = false; btn.textContent = 'Submit Booking Request 🎉';
+    alert('Something went wrong: ' + e.message + '\n\nPlease try again or call us at (405) 431-6625.');
   }
+}
+
+// ══════════════════════════════════════════════════
+// HELPERS
+// ══════════════════════════════════════════════════
+function populateTimes() {
+  const sel = document.getElementById('ev-time');
+  for (let h=8;h<=22;h++) {
+    [0,15,30,45].forEach(m => {
+      if (h===22&&m>0) return;
+      const hh=h%12||12, ampm=h<12?'AM':'PM', mm=m.toString().padStart(2,'0');
+      sel.innerHTML += `<option value="${h.toString().padStart(2,'0')}:${mm}">${hh}:${mm} ${ampm}</option>`;
+    });
+  }
+}
+
+function setMinDate() {
+  const d = new Date(); d.setDate(d.getDate()+1);
+  document.getElementById('ev-date').min = d.toISOString().split('T')[0];
 }
 </script>
 </body>

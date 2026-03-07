@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -218,24 +217,22 @@ input,select,textarea{font-family:inherit}
 .nav-overlay.open{display:block}
 
 @media(max-width:768px){
-.mobile-topbar{display:flex}
-.sidebar{transform:translateX(-100%);transition:transform .25s ease;top:0;z-index:56}
-.sidebar.open{transform:translateX(0)}
-.main{margin-left:0;padding:72px 16px 24px}
-.detail-grid{grid-template-columns:1fr}
-.analytics-cols{grid-template-columns:1fr!important}
-.stats-grid{grid-template-columns:1fr 1fr}
-.page-hdr{flex-direction:column;align-items:flex-start}
-.filter-bar{width:100%}
-.filter-bar input{flex:1}
+  .mobile-topbar{display:flex}
+  .sidebar{transform:translateX(-100%);transition:transform .25s ease;top:0;z-index:56}
+  .sidebar.open{transform:translateX(0)}
+  .main{margin-left:0;padding:72px 16px 24px}
+  .detail-grid{grid-template-columns:1fr}
+  .analytics-cols{grid-template-columns:1fr!important}
+  .stats-grid{grid-template-columns:1fr 1fr}
+  .page-hdr{flex-direction:column;align-items:flex-start}
+  .filter-bar{width:100%}
+  .filter-bar input{flex:1}
 }
 </style>
-
 </head>
 <body>
 
 <!-- ══ AUTH ══ -->
-
 <div id="auth-screen">
   <div id="auth-box">
     <div class="logo">🐒</div>
@@ -248,7 +245,6 @@ input,select,textarea{font-family:inherit}
 </div>
 
 <!-- ══ MOBILE TOPBAR ══ -->
-
 <div class="mobile-topbar">
   <div class="m-logo"><span>🐒</span>Funky Monkey</div>
   <button class="hamburger" id="hamburger" onclick="toggleNav()" aria-label="Menu">
@@ -258,7 +254,6 @@ input,select,textarea{font-family:inherit}
 <div class="nav-overlay" id="nav-overlay" onclick="closeNav()"></div>
 
 <!-- ══ APP ══ -->
-
 <div id="app">
   <div class="sidebar">
     <div class="sidebar-logo">
@@ -283,169 +278,166 @@ input,select,textarea{font-family:inherit}
 
   <div class="main">
 
-```
-<!-- ══ DASHBOARD ══ -->
-<div class="page" id="page-dashboard">
-  <div class="page-hdr">
-    <h1>Dashboard</h1>
-    <span class="text-muted" id="dash-date"></span>
-  </div>
-  <div class="stats-grid">
-    <div class="stat-card accent">
-      <div class="s-label">Total Bookings</div>
-      <div class="s-val" id="st-total">—</div>
-    </div>
-    <div class="stat-card amber">
-      <div class="s-label">Needs Review</div>
-      <div class="s-val" id="st-review">—</div>
-      <div class="s-sub">Awaiting your response</div>
-    </div>
-    <div class="stat-card green">
-      <div class="s-label">Confirmed</div>
-      <div class="s-val" id="st-confirmed">—</div>
-    </div>
-    <div class="stat-card blue">
-      <div class="s-label">Revenue (Confirmed)</div>
-      <div class="s-val" id="st-revenue">—</div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-hdr">
-      <h2>Recent Bookings</h2>
-      <button class="btn btn-primary btn-sm" onclick="showPage('bookings')">View All</button>
-    </div>
-    <table>
-      <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th></tr></thead>
-      <tbody id="dash-tbody"></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- ══ BOOKINGS ══ -->
-<div class="page" id="page-bookings">
-  <div class="page-hdr">
-    <h1>All Bookings</h1>
-    <div class="filter-bar">
-      <select id="filter-status" onchange="renderBookingsTable()">
-        <option value="">All Statuses</option>
-        <option value="review">Review</option>
-        <option value="pending">Pending</option>
-        <option value="confirmed">Confirmed</option>
-        <option value="completed">Completed</option>
-        <option value="cancelled">Cancelled</option>
-      </select>
-      <input type="text" id="filter-search" placeholder="Search name, ref…" oninput="renderBookingsTable()" style="width:180px"/>
-    </div>
-  </div>
-  <div class="card">
-    <table>
-      <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th><th></th></tr></thead>
-      <tbody id="bookings-tbody"></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- ══ CALENDAR ══ -->
-<div class="page" id="page-calendar">
-  <div class="page-hdr">
-    <h1>Calendar</h1>
-    <div class="cal-nav">
-      <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">← Prev</button>
-      <span class="cal-month-label" id="cal-month-label"></span>
-      <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Next →</button>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-body">
-      <div class="cal-day-labels">
-        <div class="cal-day-label">Sun</div><div class="cal-day-label">Mon</div>
-        <div class="cal-day-label">Tue</div><div class="cal-day-label">Wed</div>
-        <div class="cal-day-label">Thu</div><div class="cal-day-label">Fri</div>
-        <div class="cal-day-label">Sat</div>
+    <!-- ══ DASHBOARD ══ -->
+    <div class="page" id="page-dashboard">
+      <div class="page-hdr">
+        <h1>Dashboard</h1>
+        <span class="text-muted" id="dash-date"></span>
       </div>
-      <div class="cal-grid" id="cal-grid"></div>
+      <div class="stats-grid">
+        <div class="stat-card accent">
+          <div class="s-label">Total Bookings</div>
+          <div class="s-val" id="st-total">—</div>
+        </div>
+        <div class="stat-card amber">
+          <div class="s-label">Needs Review</div>
+          <div class="s-val" id="st-review">—</div>
+          <div class="s-sub">Awaiting your response</div>
+        </div>
+        <div class="stat-card green">
+          <div class="s-label">Confirmed</div>
+          <div class="s-val" id="st-confirmed">—</div>
+        </div>
+        <div class="stat-card blue">
+          <div class="s-label">Revenue (Confirmed)</div>
+          <div class="s-val" id="st-revenue">—</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hdr">
+          <h2>Recent Bookings</h2>
+          <button class="btn btn-primary btn-sm" onclick="showPage('bookings')">View All</button>
+        </div>
+        <table>
+          <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th></tr></thead>
+          <tbody id="dash-tbody"></tbody>
+        </table>
+      </div>
     </div>
-  </div>
-</div>
 
-<!-- ══ CLIENTS ══ -->
-<div class="page" id="page-clients">
-  <div class="page-hdr"><h1>Clients</h1></div>
-  <div class="card">
-    <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Bookings</th><th>Total Spent</th><th>Last Event</th></tr></thead>
-      <tbody id="clients-tbody"></tbody>
-    </table>
-  </div>
-</div>
+    <!-- ══ BOOKINGS ══ -->
+    <div class="page" id="page-bookings">
+      <div class="page-hdr">
+        <h1>All Bookings</h1>
+        <div class="filter-bar">
+          <select id="filter-status" onchange="renderBookingsTable()">
+            <option value="">All Statuses</option>
+            <option value="review">Review</option>
+            <option value="pending">Pending</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <input type="text" id="filter-search" placeholder="Search name, ref…" oninput="renderBookingsTable()" style="width:180px"/>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th><th></th></tr></thead>
+          <tbody id="bookings-tbody"></tbody>
+        </table>
+      </div>
+    </div>
 
-<!-- ══ STAFF ══ -->
-<div class="page" id="page-staff">
-  <div class="page-hdr">
-    <h1>Staff Portal</h1>
-    <button class="btn btn-primary btn-sm" onclick="openAddStaff()">+ Add Staff</button>
-  </div>
-  <div class="staff-grid" id="staff-grid"></div>
-</div>
+    <!-- ══ CALENDAR ══ -->
+    <div class="page" id="page-calendar">
+      <div class="page-hdr">
+        <h1>Calendar</h1>
+        <div class="cal-nav">
+          <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">← Prev</button>
+          <span class="cal-month-label" id="cal-month-label"></span>
+          <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Next →</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body">
+          <div class="cal-day-labels">
+            <div class="cal-day-label">Sun</div><div class="cal-day-label">Mon</div>
+            <div class="cal-day-label">Tue</div><div class="cal-day-label">Wed</div>
+            <div class="cal-day-label">Thu</div><div class="cal-day-label">Fri</div>
+            <div class="cal-day-label">Sat</div>
+          </div>
+          <div class="cal-grid" id="cal-grid"></div>
+        </div>
+      </div>
+    </div>
 
-<!-- ══ STAFF PORTAL (staff login view) ══ -->
-<div class="page" id="page-portal">
-  <div class="page-hdr" style="flex-wrap:wrap;gap:10px">
-    <div>
-      <h1 id="portal-greeting">Hey! 👋</h1>
-      <div class="text-muted" style="font-size:.85rem;margin-top:2px">Staff Portal — Funky Monkey Events</div>
+    <!-- ══ CLIENTS ══ -->
+    <div class="page" id="page-clients">
+      <div class="page-hdr"><h1>Clients</h1></div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Bookings</th><th>Total Spent</th><th>Last Event</th></tr></thead>
+          <tbody id="clients-tbody"></tbody>
+        </table>
+      </div>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-outline btn-sm" onclick="openStaffPreferences()">⚙️ My Preferences</button>
-      <button class="btn btn-outline btn-sm" onclick="sessionStorage.clear();location.reload()">Sign Out</button>
-    </div>
-  </div>
-  <div id="portal-gigs"></div>
-</div>
 
-<!-- ══ CATALOGUE ══ -->
-<div class="page" id="page-catalogue">
-  <div class="page-hdr">
-    <h1>Service Catalogue</h1>
-    <div class="page-hdr-actions">
-      <span id="cat-saved" class="save-flash">✓ Saved</span>
-      <button class="btn btn-primary btn-sm" onclick="saveCatalogue()">Save Changes</button>
+    <!-- ══ STAFF ══ -->
+    <div class="page" id="page-staff">
+      <div class="page-hdr">
+        <h1>Staff Portal</h1>
+        <button class="btn btn-primary btn-sm" onclick="openAddStaff()">+ Add Staff</button>
+      </div>
+      <div class="staff-grid" id="staff-grid"></div>
     </div>
-  </div>
-  <p class="text-muted" style="margin-bottom:20px">Changes save to the database and immediately appear in the booking form.</p>
-  <div id="cat-loading" class="cat-loading"><div class="cat-spinner"></div>Loading…</div>
-  <div id="cat-content" style="display:none"></div>
-</div>
 
-<!-- ══ ANALYTICS ══ -->
-<div class="page" id="page-analytics">
-  <div class="page-hdr"><h1>Analytics</h1></div>
-  <div class="stats-grid">
-    <div class="stat-card accent"><div class="s-label">This Month Revenue</div><div class="s-val" id="an-mrev">—</div></div>
-    <div class="stat-card blue"><div class="s-label">Bookings This Month</div><div class="s-val" id="an-mcnt">—</div></div>
-    <div class="stat-card green"><div class="s-label">Avg Booking Value</div><div class="s-val" id="an-avg">—</div></div>
-    <div class="stat-card amber"><div class="s-label">Completion Rate</div><div class="s-val" id="an-rate">—</div></div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;flex-wrap:wrap">
-    <div class="card">
-      <div class="card-hdr"><h2>Top Services</h2></div>
-      <table><thead><tr><th>Service</th><th>Bookings</th><th>Revenue</th></tr></thead>
-      <tbody id="an-svcs"></tbody></table>
+    <!-- ══ STAFF PORTAL (staff login view) ══ -->
+    <div class="page" id="page-portal">
+      <div class="page-hdr" style="flex-wrap:wrap;gap:10px">
+        <div>
+          <h1 id="portal-greeting">Hey! 👋</h1>
+          <div class="text-muted" style="font-size:.85rem;margin-top:2px">Staff Portal — Funky Monkey Events</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="openStaffPreferences()">⚙️ My Preferences</button>
+          <button class="btn btn-outline btn-sm" onclick="sessionStorage.clear();location.reload()">Sign Out</button>
+        </div>
+      </div>
+      <div id="portal-gigs"></div>
     </div>
-    <div class="card">
-      <div class="card-hdr"><h2>Referral Sources</h2></div>
-      <table><thead><tr><th>Source</th><th>Count</th><th>%</th></tr></thead>
-      <tbody id="an-refs"></tbody></table>
+
+    <!-- ══ CATALOGUE ══ -->
+    <div class="page" id="page-catalogue">
+      <div class="page-hdr">
+        <h1>Service Catalogue</h1>
+        <div class="page-hdr-actions">
+          <span id="cat-saved" class="save-flash">✓ Saved</span>
+          <button class="btn btn-primary btn-sm" onclick="saveCatalogue()">Save Changes</button>
+        </div>
+      </div>
+      <p class="text-muted" style="margin-bottom:20px">Changes save to the database and immediately appear in the booking form.</p>
+      <div id="cat-loading" class="cat-loading"><div class="cat-spinner"></div>Loading…</div>
+      <div id="cat-content" style="display:none"></div>
     </div>
-  </div>
-</div>
-```
+
+    <!-- ══ ANALYTICS ══ -->
+    <div class="page" id="page-analytics">
+      <div class="page-hdr"><h1>Analytics</h1></div>
+      <div class="stats-grid">
+        <div class="stat-card accent"><div class="s-label">This Month Revenue</div><div class="s-val" id="an-mrev">—</div></div>
+        <div class="stat-card blue"><div class="s-label">Bookings This Month</div><div class="s-val" id="an-mcnt">—</div></div>
+        <div class="stat-card green"><div class="s-label">Avg Booking Value</div><div class="s-val" id="an-avg">—</div></div>
+        <div class="stat-card amber"><div class="s-label">Completion Rate</div><div class="s-val" id="an-rate">—</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;flex-wrap:wrap">
+        <div class="card">
+          <div class="card-hdr"><h2>Top Services</h2></div>
+          <table><thead><tr><th>Service</th><th>Bookings</th><th>Revenue</th></tr></thead>
+          <tbody id="an-svcs"></tbody></table>
+        </div>
+        <div class="card">
+          <div class="card-hdr"><h2>Referral Sources</h2></div>
+          <table><thead><tr><th>Source</th><th>Count</th><th>%</th></tr></thead>
+          <tbody id="an-refs"></tbody></table>
+        </div>
+      </div>
+    </div>
 
   </div><!-- /main -->
 </div><!-- /app -->
 
 <!-- ══ BOOKING MODAL ══ -->
-
 <div class="modal-overlay" id="booking-modal" onclick="if(event.target===this)closeModal()">
   <div class="modal">
     <div class="modal-hdr">
@@ -705,406 +697,513 @@ function openBooking(id) {
     <div class="notes-block">
       <span class="section-label">Admin Notes <span class="text-muted">(internal only)</span></span>
       <textarea class="notes-area" id="admin-notes-${b.id}" placeholder="Internal notes not visible to the client…">${esc(b.admin_notes||'')}</textarea>
-
-```
-  <div class="notes-actions">
-    <button class="btn btn-outline btn-sm" onclick="saveAdminNotes('${b.id}')">Save Notes</button>
-    <span class="save-flash" id="notes-flash-${b.id}">✓ Saved</span>
-  </div>
-</div>
-
-<!-- Record payment -->
-<div class="payment-block">
-  <span class="section-label">💵 Record Payment</span>
-  <div class="pay-row">
-    <div class="pay-field">
-      <label>Amount ($)</label>
-      <input type="number" id="pay-amt-${b.id}" placeholder="0.00" step="0.01" style="width:100px"/>
+      <div class="notes-actions">
+        <button class="btn btn-outline btn-sm" onclick="saveAdminNotes('${b.id}')">Save Notes</button>
+        <span class="save-flash" id="notes-flash-${b.id}">✓ Saved</span>
+      </div>
     </div>
-    <div class="pay-field">
-      <label>Method</label>
-      <select id="pay-meth-${b.id}">
-        <option value="cash">Cash</option>
-        <option value="stripe">Stripe</option>
-        <option value="venmo">Venmo</option>
-        <option value="paypal">PayPal</option>
-        <option value="check">Check</option>
-        <option value="zelle">Zelle</option>
-      </select>
+
+    <!-- Record payment -->
+    <div class="payment-block">
+      <span class="section-label">💵 Record Payment</span>
+      <div class="pay-row">
+        <div class="pay-field">
+          <label>Amount ($)</label>
+          <input type="number" id="pay-amt-${b.id}" placeholder="0.00" step="0.01" style="width:100px"/>
+        </div>
+        <div class="pay-field">
+          <label>Method</label>
+          <select id="pay-meth-${b.id}">
+            <option value="cash">Cash</option>
+            <option value="stripe">Stripe</option>
+            <option value="venmo">Venmo</option>
+            <option value="paypal">PayPal</option>
+            <option value="check">Check</option>
+            <option value="zelle">Zelle</option>
+          </select>
+        </div>
+        <div class="pay-field" style="flex:1;min-width:120px">
+          <label>Note (optional)</label>
+          <input type="text" id="pay-note-${b.id}" placeholder="e.g. deposit, balance…" style="width:100%"/>
+        </div>
+        <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordPayment('${b.id}')">Save Payment</button>
+        <span class="save-flash" id="pay-flash-${b.id}">✓ Saved</span>
+      </div>
     </div>
-    <div class="pay-field" style="flex:1;min-width:120px">
-      <label>Note (optional)</label>
-      <input type="text" id="pay-note-${b.id}" placeholder="e.g. deposit, balance…" style="width:100%"/>
+
+    <!-- Action strip -->
+    <div class="action-strip">
+      <button class="btn btn-outline btn-sm" onclick="toggleContract('${b.id}')">
+        ${b.contract_signed?'📝 Contract Signed ✓':'📝 Mark Contract Signed'}
+      </button>
+      <button class="btn btn-danger btn-sm" onclick="confirmDelete('${b.id}')">🗑 Delete</button>
     </div>
-    <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordPayment('${b.id}')">Save Payment</button>
-    <span class="save-flash" id="pay-flash-${b.id}">✓ Saved</span>
-  </div>
-</div>
+  `;
 
-<!-- Action strip -->
-<div class="action-strip">
-  <button class="btn btn-outline btn-sm" onclick="toggleContract('${b.id}')">
-    ${b.contract_signed?'📝 Contract Signed ✓':'📝 Mark Contract Signed'}
-  </button>
-  <button class="btn btn-danger btn-sm" onclick="confirmDelete('${b.id}')">🗑 Delete</button>
-</div>
-```
-
-`;
-
-document.getElementById(‘booking-modal’).classList.add(‘open’);
+  document.getElementById('booking-modal').classList.add('open');
 }
 
 function closeModal() {
-document.getElementById(‘booking-modal’).classList.remove(‘open’);
+  document.getElementById('booking-modal').classList.remove('open');
 }
 
 // ── Status ──
 async function setStatus(id, status) {
-try {
-await patch(id, { status });
-await loadBookings();
-openBooking(id);
-} catch(e) { alert(’Failed to update status: ’ + e.message); }
+  try {
+    await patch(id, { status });
+    await loadBookings();
+    openBooking(id);
+  } catch(e) { alert('Failed to update status: ' + e.message); }
 }
 
 // ── Admin notes — inline save feedback, no alert ──
 async function saveAdminNotes(id) {
-const notes = document.getElementById(‘admin-notes-’ + id).value;
-try {
-await patch(id, { admin_notes: notes });
-// Update local state so re-opening reflects the change
-const b = allBookings.find(x => String(x.id) === String(id));
-if (b) b.admin_notes = notes;
-flash(‘notes-flash-’ + id);
-} catch(e) { alert(’Failed to save notes: ’ + e.message); }
+  const notes = document.getElementById('admin-notes-' + id).value;
+  try {
+    await patch(id, { admin_notes: notes });
+    // Update local state so re-opening reflects the change
+    const b = allBookings.find(x => String(x.id) === String(id));
+    if (b) b.admin_notes = notes;
+    flash('notes-flash-' + id);
+  } catch(e) { alert('Failed to save notes: ' + e.message); }
 }
 
 // ── Stripe link — pulls all required fields from booking object ──
 async function sendStripeLink(id) {
-const b = allBookings.find(x => String(x.id) === String(id));
-if (!b) return;
-const el = document.getElementById(‘stripe-msg-’ + id);
-el.textContent = ‘Generating…’;
+  const b = allBookings.find(x => String(x.id) === String(id));
+  if (!b) return;
+  const el = document.getElementById('stripe-msg-' + id);
+  el.textContent = 'Generating…';
 
-const depositAmount = Number(b.deposit_amount) || 100;
+  const depositAmount = Number(b.deposit_amount) || 100;
 
-try {
-const res = await fetch(’/api/create-stripe-link’, {
-method: ‘POST’,
-headers: { ‘Content-Type’: ‘application/json’ },
-body: JSON.stringify({
-bookingId:  b.id,
-bookingRef: b.reference,
-client:     b.client_name,
-email:      b.client_email,
-service:    b.service_name,
-amount:     depositAmount,
-})
-});
-const data = await res.json();
-if (data.url) {
-el.innerHTML = `✅ Link sent. <a href="${data.url}" target="_blank" style="color:#7c3aed">Open →</a>`;
-const bk = allBookings.find(x => String(x.id) === String(id));
-if (bk) bk.stripe_payment_link = data.url;
-} else {
-el.textContent = ’❌ ’ + (data.error || ‘Unknown error’);
-}
-} catch(e) { el.textContent = ’❌ ’ + e.message; }
+  try {
+    const res = await fetch('/api/create-stripe-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bookingId:  b.id,
+        bookingRef: b.reference,
+        client:     b.client_name,
+        email:      b.client_email,
+        service:    b.service_name,
+        amount:     depositAmount,
+      })
+    });
+    const data = await res.json();
+    if (data.url) {
+      el.innerHTML = `✅ Link sent. <a href="${data.url}" target="_blank" style="color:#7c3aed">Open →</a>`;
+      const bk = allBookings.find(x => String(x.id) === String(id));
+      if (bk) bk.stripe_payment_link = data.url;
+    } else {
+      el.textContent = '❌ ' + (data.error || 'Unknown error');
+    }
+  } catch(e) { el.textContent = '❌ ' + e.message; }
 }
 
 // ── Record payment — inline feedback, reopens modal to show updated deposit status ──
 async function recordPayment(id) {
-const amt = document.getElementById(‘pay-amt-’ + id).value;
-const method = document.getElementById(‘pay-meth-’ + id).value;
-const note = document.getElementById(‘pay-note-’ + id).value;
+  const amt = document.getElementById('pay-amt-' + id).value;
+  const method = document.getElementById('pay-meth-' + id).value;
+  const note = document.getElementById('pay-note-' + id).value;
 
-if (!amt || isNaN(Number(amt)) || Number(amt) <= 0) {
-document.getElementById(‘pay-amt-’ + id).style.borderColor = ‘#dc2626’;
-setTimeout(() => document.getElementById(‘pay-amt-’ + id).style.borderColor = ‘’, 1500);
-return;
-}
+  if (!amt || isNaN(Number(amt)) || Number(amt) <= 0) {
+    document.getElementById('pay-amt-' + id).style.borderColor = '#dc2626';
+    setTimeout(() => document.getElementById('pay-amt-' + id).style.borderColor = '', 1500);
+    return;
+  }
 
-const btn = document.getElementById(‘pay-btn-’ + id);
-btn.disabled = true; btn.textContent = ‘Saving…’;
+  const btn = document.getElementById('pay-btn-' + id);
+  btn.disabled = true; btn.textContent = 'Saving…';
 
-try {
-await patch(id, {
-payment_amount: Number(amt),
-payment_method: method,
-payment_note: note,
-deposit_paid: true
-});
-await loadBookings();
-flash(‘pay-flash-’ + id);
-btn.textContent = ‘Save Payment’;
-btn.disabled = false;
-// Reopen to reflect updated deposit_paid status
-openBooking(id);
-} catch(e) {
-alert(’Error saving payment: ’ + e.message);
-btn.disabled = false; btn.textContent = ‘Save Payment’;
-}
+  try {
+    await patch(id, {
+      payment_amount: Number(amt),
+      payment_method: method,
+      payment_note: note,
+      deposit_paid: true
+    });
+    await loadBookings();
+    flash('pay-flash-' + id);
+    btn.textContent = 'Save Payment';
+    btn.disabled = false;
+    // Reopen to reflect updated deposit_paid status
+    openBooking(id);
+  } catch(e) {
+    alert('Error saving payment: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Save Payment';
+  }
 }
 
 // ── Toggle contract — optimistic UI ──
 async function toggleContract(id) {
-const b = allBookings.find(x => String(x.id) === String(id));
-if (!b) return;
-const newVal = !b.contract_signed;
-try {
-await patch(id, { contract_signed: newVal });
-b.contract_signed = newVal;
-openBooking(id); // re-render modal with updated state
-} catch(e) { alert(’Failed to update contract: ’ + e.message); }
+  const b = allBookings.find(x => String(x.id) === String(id));
+  if (!b) return;
+  const newVal = !b.contract_signed;
+  try {
+    await patch(id, { contract_signed: newVal });
+    b.contract_signed = newVal;
+    openBooking(id); // re-render modal with updated state
+  } catch(e) { alert('Failed to update contract: ' + e.message); }
 }
 
 async function confirmDelete(id) {
-if (!confirm(‘Delete this booking? This cannot be undone.’)) return;
-await fetch(’/api/booking/’ + id, { method: ‘DELETE’ });
-closeModal();
-await loadBookings();
+  if (!confirm('Delete this booking? This cannot be undone.')) return;
+  await fetch('/api/booking/' + id, { method: 'DELETE' });
+  closeModal();
+  await loadBookings();
 }
 
 // ── Shared PATCH helper ──
 async function patch(id, payload) {
-const res = await fetch(’/api/booking/’ + id, {
-method: ‘PATCH’,
-headers: { ‘Content-Type’: ‘application/json’ },
-body: JSON.stringify(payload)
-});
-if (!res.ok) {
-const err = await res.json().catch(() => ({}));
-throw new Error(err.error || ‘Request failed’);
-}
-return res.json();
+  const res = await fetch('/api/booking/' + id, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Request failed');
+  }
+  return res.json();
 }
 
 // ══════════════════════════════════════════════════
 // CALENDAR
 // ══════════════════════════════════════════════════
 function changeMonth(dir) {
-calMonth += dir;
-if (calMonth > 11) { calMonth = 0; calYear++; }
-else if (calMonth < 0) { calMonth = 11; calYear–; }
-renderCalendar();
+  calMonth += dir;
+  if (calMonth > 11) { calMonth = 0; calYear++; }
+  else if (calMonth < 0) { calMonth = 11; calYear--; }
+  renderCalendar();
 }
 
 function renderCalendar() {
-document.getElementById(‘cal-month-label’).textContent =
-new Date(calYear, calMonth, 1).toLocaleDateString(‘en-US’,{month:‘long’,year:‘numeric’});
+  document.getElementById('cal-month-label').textContent =
+    new Date(calYear, calMonth, 1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
 
-const firstDay = new Date(calYear, calMonth, 1).getDay();
-const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
-const today = new Date();
-let html = ‘’;
+  const firstDay = new Date(calYear, calMonth, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+  const today = new Date();
+  let html = '';
 
-for (let i=0;i<firstDay;i++) html += `<div class="cal-cell other"></div>`;
-for (let d=1;d<=daysInMonth;d++) {
-const isToday = d===today.getDate()&&calMonth===today.getMonth()&&calYear===today.getFullYear();
-const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-const dayBkgs = allBookings.filter(b => b.event_date && b.event_date.startsWith(dateStr) && b.status !== ‘cancelled’);
-const evts = dayBkgs.map(b =>
-`<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${b.client_name} — ${b.service_name}">${b.service_name||b.client_name}</div>`
-).join(’’);
-html += `<div class="cal-cell${isToday?' today':''}"><div class="cn">${d}</div>${evts}</div>`;
-}
-document.getElementById(‘cal-grid’).innerHTML = html;
+  for (let i=0;i<firstDay;i++) html += `<div class="cal-cell other"></div>`;
+  for (let d=1;d<=daysInMonth;d++) {
+    const isToday = d===today.getDate()&&calMonth===today.getMonth()&&calYear===today.getFullYear();
+    const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dayBkgs = allBookings.filter(b => b.event_date && b.event_date.startsWith(dateStr) && b.status !== 'cancelled');
+    const evts = dayBkgs.map(b =>
+      `<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${b.client_name} — ${b.service_name}">${b.service_name||b.client_name}</div>`
+    ).join('');
+    html += `<div class="cal-cell${isToday?' today':''}"><div class="cn">${d}</div>${evts}</div>`;
+  }
+  document.getElementById('cal-grid').innerHTML = html;
 }
 
 // ══════════════════════════════════════════════════
 // CLIENTS
 // ══════════════════════════════════════════════════
 function renderClients() {
-const map = {};
-allBookings.forEach(b => {
-const k = b.client_email || b.client_name;
-if (!map[k]) map[k] = { name:b.client_name, email:b.client_email, phone:b.client_phone, count:0, total:0, last:null };
-map[k].count++;
-map[k].total += Number(b.total_price||0);
-if (!map[k].last || b.event_date > map[k].last) map[k].last = b.event_date;
-});
-const clients = Object.values(map).sort((a,b) => b.total - a.total);
-document.getElementById(‘clients-tbody’).innerHTML = clients.length
-? clients.map(c => ` <tr> <td style="font-weight:600">${esc(c.name)}</td> <td><a href="mailto:${c.email||''}" style="color:#7c3aed">${esc(c.email||'—')}</a></td> <td><a href="tel:${c.phone||''}" style="color:#374151">${esc(c.phone||'—')}</a></td> <td>${c.count}</td> <td>$${c.total.toFixed(0)}</td> <td>${fmtDate(c.last)}</td> </tr>`).join(’’)
-: `<tr><td colspan="6" class="table-empty">No clients yet</td></tr>`;
+  const map = {};
+  allBookings.forEach(b => {
+    const k = b.client_email || b.client_name;
+    if (!map[k]) map[k] = { name:b.client_name, email:b.client_email, phone:b.client_phone, count:0, total:0, last:null };
+    map[k].count++;
+    map[k].total += Number(b.total_price||0);
+    if (!map[k].last || b.event_date > map[k].last) map[k].last = b.event_date;
+  });
+  const clients = Object.values(map).sort((a,b) => b.total - a.total);
+  document.getElementById('clients-tbody').innerHTML = clients.length
+    ? clients.map(c => `
+      <tr>
+        <td style="font-weight:600">${esc(c.name)}</td>
+        <td><a href="mailto:${c.email||''}" style="color:#7c3aed">${esc(c.email||'—')}</a></td>
+        <td><a href="tel:${c.phone||''}" style="color:#374151">${esc(c.phone||'—')}</a></td>
+        <td>${c.count}</td>
+        <td>$${c.total.toFixed(0)}</td>
+        <td>${fmtDate(c.last)}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="6" class="table-empty">No clients yet</td></tr>`;
 }
 
 // ══════════════════════════════════════════════════
 // STAFF (DB-backed)
 // ══════════════════════════════════════════════════
 function parseSkills(raw) {
-if (Array.isArray(raw)) return raw;
-try { return JSON.parse(raw || ‘[]’); } catch { return []; }
+  if (Array.isArray(raw)) return raw;
+  try { return JSON.parse(raw || '[]'); } catch { return []; }
 }
 
 async function renderStaff() {
-const grid = document.getElementById(‘staff-grid’);
-grid.innerHTML = ‘<div style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af">Loading…</div>’;
-try {
-const res = await fetch(’/api/staff’);
-allStaff = await res.json();
-} catch(e) {
-grid.innerHTML = ‘<div style="grid-column:1/-1;text-align:center;padding:40px;color:#dc2626">Failed to load staff.</div>’;
-return;
-}
-if (!allStaff.length) {
-grid.innerHTML = ‘<div style="grid-column:1/-1;text-align:center;padding:48px;color:#9ca3af">No staff yet. Add your first team member.</div>’;
-return;
-}
-grid.innerHTML = allStaff.map(s => {
-const skills = parseSkills(s.skills);
-const tags = skills.map(sk => {
-const excl = EXCLUSIVE_TAGS.has(sk.name);
-return `<span class="skill-tag" style="${excl?'':'background:#f0fdf4;color:#059669;border-color:#a7f3d0'}" title="${excl?'Exclusive — one per gig':'Stackable — can combine'}">${esc(sk.name)}<span class="skill-rm" onclick="removeSkill(${s.id},'${sk.name.replace(/'/g,"\\'")}')">×</span></span>`;
-}).join(’’);
-const existingNames = skills.map(sk => sk.name);
-const presets = SKILL_PRESETS.filter(p => !existingNames.includes(p)).slice(0,4).map(p =>
-`<button class="skill-preset-btn" onclick="addSkill(${s.id},'${p.replace(/'/g,"\\'")}')">+ ${p}</button>`
-).join(’’);
-return ` <div class="staff-card" style="border-top-color:${s.color}"> <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"> <div class="staff-avatar" style="background:${s.color}">${(s.preferred_name||s.name)[0]}</div> <div style="flex:1;min-width:0"> <div style="font-weight:700;color:#1e1b4b;font-size:.95rem">${esc(s.preferred_name||s.name)}${s.name!==s.preferred_name&&s.preferred_name?'<span style="font-weight:400;color:#9ca3af;font-size:.78rem"> ('+esc(s.name)+')</span>':''}</div> <div class="staff-role">${esc(s.role)}${s.pronouns?' &middot; <em style="font-weight:400">'+esc(s.pronouns)+'</em>':''}</div> </div> </div> <div style="font-size:.76rem;color:#6b7280;margin-bottom:10px;display:flex;flex-direction:column;gap:3px"> <div><a href="tel:${s.phone||''}" style="color:#374151;text-decoration:none">📞 ${esc(s.phone||'—')}</a></div> <div><a href="mailto:${s.email||''}" style="color:#7c3aed;text-decoration:none">✉️ ${esc(s.email||'—')}</a></div> <div style="display:flex;justify-content:space-between;align-items:center"> <span>🔑 PIN: <code style="background:#f3f4f6;padding:1px 6px;border-radius:4px">${esc(s.pin||'—')}</code></span> <span style="color:#9ca3af;font-size:.72rem">${s.comms_preference||'email'}</span> </div> </div> <div class="skills-wrap" style="margin-bottom:4px">${tags||'<span style="color:#bbb;font-size:.75rem">No skills yet</span>'}</div> <div style="font-size:.67rem;color:#9ca3af;margin-bottom:8px"> <span style="background:#ede9fe;color:#7c3aed;border-radius:3px;padding:1px 5px;font-weight:700">Purple</span> exclusive &nbsp; <span style="background:#f0fdf4;color:#059669;border-radius:3px;padding:1px 5px;font-weight:700">Green</span> stackable </div> <div class="skill-presets">${presets} <button class="skill-preset-btn" style="border-color:#a855f7;color:#7c3aed" onclick="addCustomSkill(${s.id})">+ Custom…</button> </div> <div class="staff-card-actions"> <button class="btn btn-primary btn-sm" onclick="openStaffModal(${s.id})">Edit</button> <button class="btn btn-danger btn-sm" onclick="archiveStaff(${s.id})">Remove</button> </div> </div>`;
-}).join(’’);
+  const grid = document.getElementById('staff-grid');
+  grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af">Loading…</div>';
+  try {
+    const res = await fetch('/api/staff');
+    allStaff = await res.json();
+  } catch(e) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#dc2626">Failed to load staff.</div>';
+    return;
+  }
+  if (!allStaff.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:48px;color:#9ca3af">No staff yet. Add your first team member.</div>';
+    return;
+  }
+  grid.innerHTML = allStaff.map(s => {
+    const skills = parseSkills(s.skills);
+    const tags = skills.map(sk => {
+      const excl = EXCLUSIVE_TAGS.has(sk.name);
+      return `<span class="skill-tag" style="${excl?'':'background:#f0fdf4;color:#059669;border-color:#a7f3d0'}" title="${excl?'Exclusive — one per gig':'Stackable — can combine'}">${esc(sk.name)}<span class="skill-rm" onclick="removeSkill(${s.id},'${sk.name.replace(/'/g,"\\'")}')">×</span></span>`;
+    }).join('');
+    const existingNames = skills.map(sk => sk.name);
+    const presets = SKILL_PRESETS.filter(p => !existingNames.includes(p)).slice(0,4).map(p =>
+      `<button class="skill-preset-btn" onclick="addSkill(${s.id},'${p.replace(/'/g,"\\'")}')">+ ${p}</button>`
+    ).join('');
+    return `
+    <div class="staff-card" style="border-top-color:${s.color}">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div class="staff-avatar" style="background:${s.color}">${(s.preferred_name||s.name)[0]}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;color:#1e1b4b;font-size:.95rem">${esc(s.preferred_name||s.name)}${s.name!==s.preferred_name&&s.preferred_name?'<span style="font-weight:400;color:#9ca3af;font-size:.78rem"> ('+esc(s.name)+')</span>':''}</div>
+          <div class="staff-role">${esc(s.role)}${s.pronouns?' &middot; <em style="font-weight:400">'+esc(s.pronouns)+'</em>':''}</div>
+        </div>
+      </div>
+      <div style="font-size:.76rem;color:#6b7280;margin-bottom:10px;display:flex;flex-direction:column;gap:3px">
+        <div><a href="tel:${s.phone||''}" style="color:#374151;text-decoration:none">📞 ${esc(s.phone||'—')}</a></div>
+        <div><a href="mailto:${s.email||''}" style="color:#7c3aed;text-decoration:none">✉️ ${esc(s.email||'—')}</a></div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>🔑 PIN: <code style="background:#f3f4f6;padding:1px 6px;border-radius:4px">${esc(s.pin||'—')}</code></span>
+          <span style="color:#9ca3af;font-size:.72rem">${s.comms_preference||'email'}</span>
+        </div>
+      </div>
+      <div class="skills-wrap" style="margin-bottom:4px">${tags||'<span style="color:#bbb;font-size:.75rem">No skills yet</span>'}</div>
+      <div style="font-size:.67rem;color:#9ca3af;margin-bottom:8px">
+        <span style="background:#ede9fe;color:#7c3aed;border-radius:3px;padding:1px 5px;font-weight:700">Purple</span> exclusive &nbsp;
+        <span style="background:#f0fdf4;color:#059669;border-radius:3px;padding:1px 5px;font-weight:700">Green</span> stackable
+      </div>
+      <div class="skill-presets">${presets}
+        <button class="skill-preset-btn" style="border-color:#a855f7;color:#7c3aed" onclick="addCustomSkill(${s.id})">+ Custom…</button>
+      </div>
+      <div class="staff-card-actions">
+        <button class="btn btn-primary btn-sm" onclick="openStaffModal(${s.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="archiveStaff(${s.id})">Remove</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 async function addSkill(id, skillName) {
-const s = allStaff.find(x => x.id === id); if (!s) return;
-const skills = parseSkills(s.skills);
-if (skills.find(sk => sk.name === skillName)) return;
-skills.push({ name: skillName, exclusive: EXCLUSIVE_TAGS.has(skillName) });
-await patchStaff(id, { skills });
-renderStaff();
+  const s = allStaff.find(x => x.id === id); if (!s) return;
+  const skills = parseSkills(s.skills);
+  if (skills.find(sk => sk.name === skillName)) return;
+  skills.push({ name: skillName, exclusive: EXCLUSIVE_TAGS.has(skillName) });
+  await patchStaff(id, { skills });
+  renderStaff();
 }
 
 async function removeSkill(id, skillName) {
-const s = allStaff.find(x => x.id === id); if (!s) return;
-const skills = parseSkills(s.skills).filter(sk => sk.name !== skillName);
-await patchStaff(id, { skills });
-renderStaff();
+  const s = allStaff.find(x => x.id === id); if (!s) return;
+  const skills = parseSkills(s.skills).filter(sk => sk.name !== skillName);
+  await patchStaff(id, { skills });
+  renderStaff();
 }
 
 function addCustomSkill(id) {
-const skillName = prompt(‘Enter skill name:’);
-if (skillName?.trim()) addSkill(id, skillName.trim());
+  const skillName = prompt('Enter skill name:');
+  if (skillName?.trim()) addSkill(id, skillName.trim());
 }
 
 async function archiveStaff(id) {
-if (!confirm(‘Remove this staff member? Their history is preserved.’)) return;
-await fetch(’/api/staff/’ + id, { method: ‘DELETE’ });
-renderStaff();
+  if (!confirm('Remove this staff member? Their history is preserved.')) return;
+  await fetch('/api/staff/' + id, { method: 'DELETE' });
+  renderStaff();
 }
 
 async function patchStaff(id, payload) {
-const res = await fetch(’/api/staff/’ + id, {
-method: ‘PATCH’,
-headers: { ‘Content-Type’: ‘application/json’ },
-body: JSON.stringify(payload)
-});
-if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error||‘Save failed’); }
-const updated = await res.json();
-const idx = allStaff.findIndex(x => x.id === id);
-if (idx !== -1) allStaff[idx] = updated;
-return updated;
+  const res = await fetch('/api/staff/' + id, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error||'Save failed'); }
+  const updated = await res.json();
+  const idx = allStaff.findIndex(x => x.id === id);
+  if (idx !== -1) allStaff[idx] = updated;
+  return updated;
 }
 
 // ── Add / Edit Staff Modal ───────────────────────────────────────────────────
 function openAddStaff() { openStaffModal(null); }
 
 function openStaffModal(id) {
-const s = id ? allStaff.find(x => x.id === id) : null;
-document.getElementById(‘modal-title’).textContent = s ? ’Edit: ’ + (s.preferred_name||s.name) : ‘Add Staff Member’;
-document.getElementById(‘modal-body’).innerHTML = ` <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px"> <div class="detail-field" style="grid-column:1/-1"> <label>Full Name *</label> <input id="sf-name" type="text" value="${esc(s?.name||'')}" placeholder="Jane Smith" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Preferred Name</label> <input id="sf-pname" type="text" value="${esc(s?.preferred_name||'')}" placeholder="Jane" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Pronouns</label> <input id="sf-pronouns" type="text" value="${esc(s?.pronouns||'')}" placeholder="she/her" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Role</label> <input id="sf-role" type="text" value="${esc(s?.role||'Performer')}" placeholder="Performer" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Card Color</label> <input id="sf-color" type="color" value="${s?.color||'#7c3aed'}" style="width:100%;height:38px;border:1.5px solid #e5e7eb;border-radius:7px;cursor:pointer;padding:2px"/> </div> <div class="detail-field"> <label>Phone * <span style="color:#9ca3af;font-weight:400">(required)</span></label> <input id="sf-phone" type="tel" value="${esc(s?.phone||'')}" placeholder="(405) 555-1234" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Email * <span style="color:#9ca3af;font-weight:400">(required)</span></label> <input id="sf-email" type="email" value="${esc(s?.email||'')}" placeholder="jane@email.com" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Login PIN</label> <input id="sf-pin" type="text" value="${esc(s?.pin||'0000')}" maxlength="10" placeholder="e.g. 1234" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;font-family:monospace;letter-spacing:.1em"/> <div style="font-size:.72rem;color:#9ca3af;margin-top:3px">Staff use this PIN to log in</div> </div> <div class="detail-field"> <label>Comms Preference</label> <select id="sf-comms" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="email" ${(s?.comms_preference||'email')==='email'?'selected':''}>Email</option> <option value="sms"   ${s?.comms_preference==='sms'  ?'selected':''}>SMS (future)</option> <option value="call"  ${s?.comms_preference==='call' ?'selected':''}>Phone Call</option> </select> </div> </div> <div style="margin-bottom:14px"> <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:5px">Admin Notes <span style="font-weight:400">(internal only)</span></label> <textarea id="sf-anotes" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit" placeholder="Internal notes about this person…">${esc(s?.admin_notes||'')}</textarea> </div> <div style="display:flex;gap:10px;flex-wrap:wrap"> <button class="btn btn-primary" onclick="saveStaffModal(${id||'null'})">${s?'Save Changes':'Add Staff Member'}</button> <button class="btn btn-outline" onclick="closeModal()">Cancel</button> </div>`;
-document.getElementById(‘booking-modal’).classList.add(‘open’);
+  const s = id ? allStaff.find(x => x.id === id) : null;
+  document.getElementById('modal-title').textContent = s ? 'Edit: ' + (s.preferred_name||s.name) : 'Add Staff Member';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+      <div class="detail-field" style="grid-column:1/-1">
+        <label>Full Name *</label>
+        <input id="sf-name" type="text" value="${esc(s?.name||'')}" placeholder="Jane Smith"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
+      </div>
+      <div class="detail-field">
+        <label>Preferred Name</label>
+        <input id="sf-pname" type="text" value="${esc(s?.preferred_name||'')}" placeholder="Jane"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
+      </div>
+      <div class="detail-field">
+        <label>Pronouns</label>
+        <input id="sf-pronouns" type="text" value="${esc(s?.pronouns||'')}" placeholder="she/her"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
+      </div>
+      <div class="detail-field">
+        <label>Role</label>
+        <input id="sf-role" type="text" value="${esc(s?.role||'Performer')}" placeholder="Performer"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
+      </div>
+      <div class="detail-field">
+        <label>Card Color</label>
+        <input id="sf-color" type="color" value="${s?.color||'#7c3aed'}"
+          style="width:100%;height:38px;border:1.5px solid #e5e7eb;border-radius:7px;cursor:pointer;padding:2px"/>
+      </div>
+      <div class="detail-field">
+        <label>Phone * <span style="color:#9ca3af;font-weight:400">(required)</span></label>
+        <input id="sf-phone" type="tel" value="${esc(s?.phone||'')}" placeholder="(405) 555-1234"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
+      </div>
+      <div class="detail-field">
+        <label>Email * <span style="color:#9ca3af;font-weight:400">(required)</span></label>
+        <input id="sf-email" type="email" value="${esc(s?.email||'')}" placeholder="jane@email.com"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
+      </div>
+      <div class="detail-field">
+        <label>Login PIN</label>
+        <input id="sf-pin" type="text" value="${esc(s?.pin||'0000')}" maxlength="10" placeholder="e.g. 1234"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;font-family:monospace;letter-spacing:.1em"/>
+        <div style="font-size:.72rem;color:#9ca3af;margin-top:3px">Staff use this PIN to log in</div>
+      </div>
+      <div class="detail-field">
+        <label>Comms Preference</label>
+        <select id="sf-comms" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem">
+          <option value="email" ${(s?.comms_preference||'email')==='email'?'selected':''}>Email</option>
+          <option value="sms"   ${s?.comms_preference==='sms'  ?'selected':''}>SMS (future)</option>
+          <option value="call"  ${s?.comms_preference==='call' ?'selected':''}>Phone Call</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:14px">
+      <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:5px">Admin Notes <span style="font-weight:400">(internal only)</span></label>
+      <textarea id="sf-anotes" rows="3"
+        style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit"
+        placeholder="Internal notes about this person…">${esc(s?.admin_notes||'')}</textarea>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="saveStaffModal(${id||'null'})">${s?'Save Changes':'Add Staff Member'}</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>`;
+  document.getElementById('booking-modal').classList.add('open');
 }
 
 async function saveStaffModal(id) {
-const name  = document.getElementById(‘sf-name’).value.trim();
-const phone = document.getElementById(‘sf-phone’).value.trim();
-const email = document.getElementById(‘sf-email’).value.trim();
-if (!name)  { alert(‘Name is required.’); return; }
-if (!phone) { alert(‘Phone number is required.’); return; }
-if (!email) { alert(‘Email is required.’); return; }
-const payload = {
-name,
-preferred_name:   document.getElementById(‘sf-pname’).value.trim() || name,
-pronouns:         document.getElementById(‘sf-pronouns’).value.trim(),
-role:             document.getElementById(‘sf-role’).value.trim() || ‘Performer’,
-color:            document.getElementById(‘sf-color’).value,
-phone, email,
-pin:              document.getElementById(‘sf-pin’).value.trim() || ‘0000’,
-comms_preference: document.getElementById(‘sf-comms’).value,
-admin_notes:      document.getElementById(‘sf-anotes’).value.trim(),
-};
-try {
-if (id) {
-await patchStaff(id, payload);
-} else {
-const res = await fetch(’/api/staff’, {
-method: ‘POST’, headers: { ‘Content-Type’: ‘application/json’ }, body: JSON.stringify(payload)
-});
-if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error||‘Create failed’); }
-}
-closeModal();
-renderStaff();
-} catch(e) { alert(’Save failed: ’ + e.message); }
+  const name  = document.getElementById('sf-name').value.trim();
+  const phone = document.getElementById('sf-phone').value.trim();
+  const email = document.getElementById('sf-email').value.trim();
+  if (!name)  { alert('Name is required.'); return; }
+  if (!phone) { alert('Phone number is required.'); return; }
+  if (!email) { alert('Email is required.'); return; }
+  const payload = {
+    name,
+    preferred_name:   document.getElementById('sf-pname').value.trim() || name,
+    pronouns:         document.getElementById('sf-pronouns').value.trim(),
+    role:             document.getElementById('sf-role').value.trim() || 'Performer',
+    color:            document.getElementById('sf-color').value,
+    phone, email,
+    pin:              document.getElementById('sf-pin').value.trim() || '0000',
+    comms_preference: document.getElementById('sf-comms').value,
+    admin_notes:      document.getElementById('sf-anotes').value.trim(),
+  };
+  try {
+    if (id) {
+      await patchStaff(id, payload);
+    } else {
+      const res = await fetch('/api/staff', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error||'Create failed'); }
+    }
+    closeModal();
+    renderStaff();
+  } catch(e) { alert('Save failed: ' + e.message); }
 }
 
 // ══════════════════════════════════════════════════
 // STAFF PORTAL (staff role — their own view)
 // ══════════════════════════════════════════════════
 async function loadStaffPortal() {
-const grid = document.getElementById(‘portal-gigs’);
-if (!grid) return;
-grid.innerHTML = ‘<div style="text-align:center;padding:40px;color:#9ca3af">Loading your gigs…</div>’;
-try {
-const res = await fetch(’/api/staff-assignments?staff_id=’ + currentUser.staffId);
-const data = await res.json();
-renderPortalGigs(data.myGigs || [], data.openGigs || []);
-} catch(e) {
-grid.innerHTML = ‘<div style="text-align:center;padding:40px;color:#dc2626">Failed to load. Try refreshing.</div>’;
-}
+  const grid = document.getElementById('portal-gigs');
+  if (!grid) return;
+  grid.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af">Loading your gigs…</div>';
+  try {
+    const res = await fetch('/api/staff-assignments?staff_id=' + currentUser.staffId);
+    const data = await res.json();
+    renderPortalGigs(data.myGigs || [], data.openGigs || []);
+  } catch(e) {
+    grid.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626">Failed to load. Try refreshing.</div>';
+  }
 }
 
 function renderPortalGigs(myGigs, openGigs) {
-const grid = document.getElementById(‘portal-gigs’);
-let html = ‘’;
+  const grid = document.getElementById('portal-gigs');
+  let html = '';
 
-const assigned   = myGigs.filter(g => g.status === ‘assigned’);
-const interested = myGigs.filter(g => g.status === ‘interested’ || g.status === ‘backup’);
+  const assigned   = myGigs.filter(g => g.status === 'assigned');
+  const interested = myGigs.filter(g => g.status === 'interested' || g.status === 'backup');
 
-if (assigned.length) {
-html += ‘<h3 style="font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:#059669;font-weight:700;margin-bottom:10px">✅ My Confirmed Gigs</h3>’;
-html += assigned.map(g => gigCard(g, true)).join(’’);
-}
-if (interested.length) {
-html += ‘<h3 style="font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:#f59e0b;font-weight:700;margin:20px 0 10px">👋 Expressed Interest</h3>’;
-html += interested.map(g => gigCard(g, false)).join(’’);
-}
-if (openGigs.length) {
-html += ‘<h3 style="font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;font-weight:700;margin:20px 0 10px">📋 Open Gigs Matching My Skills</h3>’;
-html += openGigs.map(g => openGigCard(g)).join(’’);
-}
-if (!html) {
-html = ‘<div style="text-align:center;padding:48px;color:#9ca3af"><div style="font-size:3rem;margin-bottom:12px">🎪</div><p>No upcoming gigs right now.<br>Check back soon!</p></div>’;
-}
-grid.innerHTML = html;
+  if (assigned.length) {
+    html += '<h3 style="font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:#059669;font-weight:700;margin-bottom:10px">✅ My Confirmed Gigs</h3>';
+    html += assigned.map(g => gigCard(g, true)).join('');
+  }
+  if (interested.length) {
+    html += '<h3 style="font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:#f59e0b;font-weight:700;margin:20px 0 10px">👋 Expressed Interest</h3>';
+    html += interested.map(g => gigCard(g, false)).join('');
+  }
+  if (openGigs.length) {
+    html += '<h3 style="font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;font-weight:700;margin:20px 0 10px">📋 Open Gigs Matching My Skills</h3>';
+    html += openGigs.map(g => openGigCard(g)).join('');
+  }
+  if (!html) {
+    html = '<div style="text-align:center;padding:48px;color:#9ca3af"><div style="font-size:3rem;margin-bottom:12px">🎪</div><p>No upcoming gigs right now.<br>Check back soon!</p></div>';
+  }
+  grid.innerHTML = html;
 }
 
 function gigCard(g, isAssigned) {
-const dateStr = g.event_date
-? new Date(g.event_date+‘T00:00:00’).toLocaleDateString(‘en-US’,{weekday:‘long’,month:‘long’,day:‘numeric’,year:‘numeric’})
-: ‘TBD’;
-const checklistStatuses = [‘upcoming’,‘on_my_way’,‘arrived’,‘completed’];
-const checklistLabels   = { upcoming:‘📅 Upcoming’, on_my_way:‘🚗 On My Way’, arrived:‘📍 Arrived’, completed:‘✅ Done’ };
-const curStatus = g.checklist_status || ‘upcoming’;
-const curIdx    = checklistStatuses.indexOf(curStatus);
+  const dateStr = g.event_date
+    ? new Date(g.event_date+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})
+    : 'TBD';
+  const checklistStatuses = ['upcoming','on_my_way','arrived','completed'];
+  const checklistLabels   = { upcoming:'📅 Upcoming', on_my_way:'🚗 On My Way', arrived:'📍 Arrived', completed:'✅ Done' };
+  const curStatus = g.checklist_status || 'upcoming';
+  const curIdx    = checklistStatuses.indexOf(curStatus);
 
-const checklistHtml = isAssigned ? `<div style="margin-top:14px;padding-top:14px;border-top:1px solid #f3f4f6"> <div style="font-size:.72rem;text-transform:uppercase;color:#9ca3af;font-weight:700;margin-bottom:8px">Day-of Checklist</div> <div style="display:flex;gap:6px;flex-wrap:wrap"> ${checklistStatuses.map((s, i) => { const isActive = s === curStatus; const isPast   = i < curIdx; const isNext   = i === curIdx + 1; return`<button class=“btn btn-sm ${isActive?‘btn-primary’:isPast?‘btn-success’:‘btn-outline’}”
-onclick=“updateChecklist(’${g.log_id||’’}’,’${g.id}’,’${g.booking_id}’,${currentUser.staffId},’${s}’)”
-${isActive||isPast?‘disabled’:’’}>${checklistLabels[s]}</button>`; }).join('')} </div> ${curStatus === 'completed' ? `<button class="btn btn-outline btn-sm" style="margin-top:8px;border-color:#7c3aed;color:#7c3aed"
-onclick="openSurvey('${g.log_id}','${g.booking_id}')">📋 Submit Post-Gig Report</button>` : ''} </div>` : ‘’;
+  const checklistHtml = isAssigned ? `
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f3f4f6">
+      <div style="font-size:.72rem;text-transform:uppercase;color:#9ca3af;font-weight:700;margin-bottom:8px">Day-of Checklist</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${checklistStatuses.map((s, i) => {
+          const isActive = s === curStatus;
+          const isPast   = i < curIdx;
+          const isNext   = i === curIdx + 1;
+          return `<button class="btn btn-sm ${isActive?'btn-primary':isPast?'btn-success':'btn-outline'}"
+            onclick="updateChecklist('${g.log_id||''}','${g.id}','${g.booking_id}',${currentUser.staffId},'${s}')"
+            ${isActive||isPast?'disabled':''}>${checklistLabels[s]}</button>`;
+        }).join('')}
+      </div>
+      ${curStatus === 'completed'
+        ? `<button class="btn btn-outline btn-sm" style="margin-top:8px;border-color:#7c3aed;color:#7c3aed"
+             onclick="openSurvey('${g.log_id}','${g.booking_id}')">📋 Submit Post-Gig Report</button>`
+        : ''}
+    </div>` : '';
 
-return `
-
+  return `
   <div style="background:#fff;border-radius:12px;padding:18px;box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:14px;border-left:4px solid ${isAssigned?'#10b981':'#f59e0b'}">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px">
       <div>
@@ -1128,11 +1227,10 @@ return `
 }
 
 function openGigCard(g) {
-const dateStr = g.event_date
-? new Date(g.event_date+‘T00:00:00’).toLocaleDateString(‘en-US’,{weekday:‘short’,month:‘short’,day:‘numeric’,year:‘numeric’})
-: ‘TBD’;
-return `
-
+  const dateStr = g.event_date
+    ? new Date(g.event_date+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})
+    : 'TBD';
+  return `
   <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:12px;border-left:4px solid #e5e7eb">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
       <div>
@@ -1149,121 +1247,239 @@ return `
 }
 
 async function updateChecklist(logId, assignmentId, bookingId, staffId, status) {
-try {
-await fetch(’/api/staff-assignments’, {
-method:‘POST’, headers:{‘Content-Type’:‘application/json’},
-body: JSON.stringify({ action:‘update_checklist’, log_id:logId||undefined, assignment_id:assignmentId, booking_id:bookingId, staff_id:staffId, status })
-});
-loadStaffPortal();
-} catch(e) { alert(’Update failed: ’ + e.message); }
+  try {
+    await fetch('/api/staff-assignments', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:'update_checklist', log_id:logId||undefined, assignment_id:assignmentId, booking_id:bookingId, staff_id:staffId, status })
+    });
+    loadStaffPortal();
+  } catch(e) { alert('Update failed: ' + e.message); }
 }
 
 async function expressInterest(bookingId, tagFilled, status) {
-try {
-await fetch(’/api/staff-assignments’, {
-method:‘POST’, headers:{‘Content-Type’:‘application/json’},
-body: JSON.stringify({ action:‘express_interest’, booking_id:bookingId, staff_id:currentUser.staffId, tag_filled:tagFilled, status })
-});
-loadStaffPortal();
-} catch(e) { alert(’Failed: ’ + e.message); }
+  try {
+    await fetch('/api/staff-assignments', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:'express_interest', booking_id:bookingId, staff_id:currentUser.staffId, tag_filled:tagFilled, status })
+    });
+    loadStaffPortal();
+  } catch(e) { alert('Failed: ' + e.message); }
 }
 
 function openSurvey(logId) {
-document.getElementById(‘modal-title’).textContent = ‘📋 Post-Gig Report’;
-document.getElementById(‘modal-body’).innerHTML = ` <p style="color:#6b7280;font-size:.875rem;margin-bottom:18px">Joe reviews all reports. Fill in what's relevant.</p> <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px"> <div class="detail-field"> <label>Actual Guest Count</label> <input id="sv-guests" type="number" placeholder="e.g. 45" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Event Rating</label> <select id="sv-rating" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="">Select…</option> <option value="5">⭐⭐⭐⭐⭐ Amazing</option> <option value="4">⭐⭐⭐⭐ Great</option> <option value="3">⭐⭐⭐ Good</option> <option value="2">⭐⭐ Rough</option> <option value="1">⭐ Difficult</option> </select> </div> <div class="detail-field"> <label>Balance Collected?</label> <select id="sv-balcollect" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="">Select…</option> <option value="true">✅ Yes</option> <option value="false">❌ No</option> </select> </div> <div class="detail-field"> <label>Amount Collected ($)</label> <input id="sv-balamount" type="number" step="0.01" placeholder="0.00" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Gas Level After</label> <select id="sv-gas" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="">N/A</option> <option>Full</option><option>3/4</option><option>1/2</option><option>1/4</option> <option value="Low">Low — needs fill</option> </select> </div> <div class="detail-field"> <label>Foam Fluid Needed?</label> <select id="sv-foam" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="">N/A</option> <option value="true">⚠️ Yes — needs refill</option> <option value="false">✅ No — still good</option> </select> </div> <div class="detail-field"> <label>Empty Jugs Refilled?</label> <select id="sv-jugs" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="">N/A</option> <option value="true">✅ Yes</option> <option value="false">❌ No</option> </select> </div> </div> <div style="margin-bottom:12px"> <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:5px">Notes / Highlights</label> <textarea id="sv-notes" rows="3" placeholder="How'd it go? Anything worth sharing…" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit"></textarea> </div> <div style="margin-bottom:16px"> <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:5px">Issues / Problems</label> <textarea id="sv-issues" rows="3" placeholder="Anything to flag or fix next time…" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit"></textarea> </div> <div style="display:flex;gap:10px;flex-wrap:wrap"> <button class="btn btn-primary" onclick="submitSurvey('${logId}')">Submit Report</button> <button class="btn btn-outline" onclick="closeModal()">Cancel</button> </div>`;
-document.getElementById(‘booking-modal’).classList.add(‘open’);
+  document.getElementById('modal-title').textContent = '📋 Post-Gig Report';
+  document.getElementById('modal-body').innerHTML = `
+    <p style="color:#6b7280;font-size:.875rem;margin-bottom:18px">Joe reviews all reports. Fill in what's relevant.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+      <div class="detail-field">
+        <label>Actual Guest Count</label>
+        <input id="sv-guests" type="number" placeholder="e.g. 45"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
+      </div>
+      <div class="detail-field">
+        <label>Event Rating</label>
+        <select id="sv-rating" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem">
+          <option value="">Select…</option>
+          <option value="5">⭐⭐⭐⭐⭐ Amazing</option>
+          <option value="4">⭐⭐⭐⭐ Great</option>
+          <option value="3">⭐⭐⭐ Good</option>
+          <option value="2">⭐⭐ Rough</option>
+          <option value="1">⭐ Difficult</option>
+        </select>
+      </div>
+      <div class="detail-field">
+        <label>Balance Collected?</label>
+        <select id="sv-balcollect" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem">
+          <option value="">Select…</option>
+          <option value="true">✅ Yes</option>
+          <option value="false">❌ No</option>
+        </select>
+      </div>
+      <div class="detail-field">
+        <label>Amount Collected ($)</label>
+        <input id="sv-balamount" type="number" step="0.01" placeholder="0.00"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
+      </div>
+      <div class="detail-field">
+        <label>Gas Level After</label>
+        <select id="sv-gas" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem">
+          <option value="">N/A</option>
+          <option>Full</option><option>3/4</option><option>1/2</option><option>1/4</option>
+          <option value="Low">Low — needs fill</option>
+        </select>
+      </div>
+      <div class="detail-field">
+        <label>Foam Fluid Needed?</label>
+        <select id="sv-foam" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem">
+          <option value="">N/A</option>
+          <option value="true">⚠️ Yes — needs refill</option>
+          <option value="false">✅ No — still good</option>
+        </select>
+      </div>
+      <div class="detail-field">
+        <label>Empty Jugs Refilled?</label>
+        <select id="sv-jugs" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem">
+          <option value="">N/A</option>
+          <option value="true">✅ Yes</option>
+          <option value="false">❌ No</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:5px">Notes / Highlights</label>
+      <textarea id="sv-notes" rows="3" placeholder="How'd it go? Anything worth sharing…"
+        style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit"></textarea>
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:5px">Issues / Problems</label>
+      <textarea id="sv-issues" rows="3" placeholder="Anything to flag or fix next time…"
+        style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit"></textarea>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="submitSurvey('${logId}')">Submit Report</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>`;
+  document.getElementById('booking-modal').classList.add('open');
 }
 
 async function submitSurvey(logId) {
-const boolVal = id => { const v = document.getElementById(id).value; return v===’’?undefined:v===‘true’; };
-const payload = {
-action: ‘submit_survey’, log_id: logId,
-guest_count_actual: document.getElementById(‘sv-guests’).value    || undefined,
-event_rating:       document.getElementById(‘sv-rating’).value    || undefined,
-balance_collected:  boolVal(‘sv-balcollect’),
-balance_amount:     document.getElementById(‘sv-balamount’).value || undefined,
-gas_level:          document.getElementById(‘sv-gas’).value       || undefined,
-foam_fluid_needed:  boolVal(‘sv-foam’),
-empty_jugs_refilled:boolVal(‘sv-jugs’),
-notes:              document.getElementById(‘sv-notes’).value.trim()  || undefined,
-issues:             document.getElementById(‘sv-issues’).value.trim() || undefined,
-};
-Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
-try {
-await fetch(’/api/staff-assignments’, {
-method:‘POST’, headers:{‘Content-Type’:‘application/json’}, body: JSON.stringify(payload)
-});
-closeModal();
-alert(‘Report submitted! Thanks 🎉’);
-loadStaffPortal();
-} catch(e) { alert(’Submit failed: ’ + e.message); }
+  const boolVal = id => { const v = document.getElementById(id).value; return v===''?undefined:v==='true'; };
+  const payload = {
+    action: 'submit_survey', log_id: logId,
+    guest_count_actual: document.getElementById('sv-guests').value    || undefined,
+    event_rating:       document.getElementById('sv-rating').value    || undefined,
+    balance_collected:  boolVal('sv-balcollect'),
+    balance_amount:     document.getElementById('sv-balamount').value || undefined,
+    gas_level:          document.getElementById('sv-gas').value       || undefined,
+    foam_fluid_needed:  boolVal('sv-foam'),
+    empty_jugs_refilled:boolVal('sv-jugs'),
+    notes:              document.getElementById('sv-notes').value.trim()  || undefined,
+    issues:             document.getElementById('sv-issues').value.trim() || undefined,
+  };
+  Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
+  try {
+    await fetch('/api/staff-assignments', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    });
+    closeModal();
+    alert('Report submitted! Thanks 🎉');
+    loadStaffPortal();
+  } catch(e) { alert('Submit failed: ' + e.message); }
 }
 
 // Staff can edit their own preferences from portal
 function openStaffPreferences() {
-const s = allStaff.find(x => x.id === currentUser.staffId) || {};
-document.getElementById(‘modal-title’).textContent = ‘My Preferences’;
-document.getElementById(‘modal-body’).innerHTML = ` <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px"> <div class="detail-field"> <label>Preferred Name</label> <input id="pref-name" type="text" value="${esc(s.preferred_name||s.name||'')}" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Pronouns</label> <input id="pref-pronouns" type="text" value="${esc(s.pronouns||'')}" placeholder="she/her" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Phone *</label> <input id="pref-phone" type="tel" value="${esc(s.phone||'')}" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Email *</label> <input id="pref-email" type="email" value="${esc(s.email||'')}" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field" style="grid-column:1/-1"> <label>Communication Preference</label> <select id="pref-comms" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="email" ${(s.comms_preference||'email')==='email'?'selected':''}>Email</option> <option value="sms"   ${s.comms_preference==='sms'  ?'selected':''}>SMS (coming soon)</option> <option value="call"  ${s.comms_preference==='call' ?'selected':''}>Phone Call</option> </select> </div> </div> <div style="margin-bottom:16px"> <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:5px">Notes to Joe</label> <textarea id="pref-notes" rows="4" placeholder="Availability constraints, preferences, questions for Joe…" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit">${esc(s.staff_notes||'')}</textarea> </div> <div style="display:flex;gap:10px;flex-wrap:wrap"> <button class="btn btn-primary" onclick="saveStaffPreferences()">Save</button> <button class="btn btn-outline" onclick="closeModal()">Cancel</button> </div>`;
-document.getElementById(‘booking-modal’).classList.add(‘open’);
+  const s = allStaff.find(x => x.id === currentUser.staffId) || {};
+  document.getElementById('modal-title').textContent = 'My Preferences';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+      <div class="detail-field">
+        <label>Preferred Name</label>
+        <input id="pref-name" type="text" value="${esc(s.preferred_name||s.name||'')}"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
+      </div>
+      <div class="detail-field">
+        <label>Pronouns</label>
+        <input id="pref-pronouns" type="text" value="${esc(s.pronouns||'')}" placeholder="she/her"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
+      </div>
+      <div class="detail-field">
+        <label>Phone *</label>
+        <input id="pref-phone" type="tel" value="${esc(s.phone||'')}"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
+      </div>
+      <div class="detail-field">
+        <label>Email *</label>
+        <input id="pref-email" type="email" value="${esc(s.email||'')}"
+          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
+      </div>
+      <div class="detail-field" style="grid-column:1/-1">
+        <label>Communication Preference</label>
+        <select id="pref-comms" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem">
+          <option value="email" ${(s.comms_preference||'email')==='email'?'selected':''}>Email</option>
+          <option value="sms"   ${s.comms_preference==='sms'  ?'selected':''}>SMS (coming soon)</option>
+          <option value="call"  ${s.comms_preference==='call' ?'selected':''}>Phone Call</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:5px">Notes to Joe</label>
+      <textarea id="pref-notes" rows="4" placeholder="Availability constraints, preferences, questions for Joe…"
+        style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit">${esc(s.staff_notes||'')}</textarea>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="saveStaffPreferences()">Save</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>`;
+  document.getElementById('booking-modal').classList.add('open');
 }
 
 async function saveStaffPreferences() {
-const phone = document.getElementById(‘pref-phone’).value.trim();
-const email = document.getElementById(‘pref-email’).value.trim();
-if (!phone || !email) { alert(‘Phone and email are required.’); return; }
-const payload = {
-preferred_name:   document.getElementById(‘pref-name’).value.trim(),
-pronouns:         document.getElementById(‘pref-pronouns’).value.trim(),
-phone, email,
-comms_preference: document.getElementById(‘pref-comms’).value,
-staff_notes:      document.getElementById(‘pref-notes’).value.trim(),
-};
-try {
-const updated = await patchStaff(currentUser.staffId, payload);
-currentUser.staffName = updated.preferred_name || updated.name;
-sessionStorage.setItem(‘fm_auth’, JSON.stringify(currentUser));
-const el = document.getElementById(‘portal-greeting’);
-if (el) el.textContent = ’Hey, ’ + currentUser.staffName + ‘! 👋’;
-closeModal();
-} catch(e) { alert(’Save failed: ’ + e.message); }
+  const phone = document.getElementById('pref-phone').value.trim();
+  const email = document.getElementById('pref-email').value.trim();
+  if (!phone || !email) { alert('Phone and email are required.'); return; }
+  const payload = {
+    preferred_name:   document.getElementById('pref-name').value.trim(),
+    pronouns:         document.getElementById('pref-pronouns').value.trim(),
+    phone, email,
+    comms_preference: document.getElementById('pref-comms').value,
+    staff_notes:      document.getElementById('pref-notes').value.trim(),
+  };
+  try {
+    const updated = await patchStaff(currentUser.staffId, payload);
+    currentUser.staffName = updated.preferred_name || updated.name;
+    sessionStorage.setItem('fm_auth', JSON.stringify(currentUser));
+    const el = document.getElementById('portal-greeting');
+    if (el) el.textContent = 'Hey, ' + currentUser.staffName + '! 👋';
+    closeModal();
+  } catch(e) { alert('Save failed: ' + e.message); }
 }
 
 // ══════════════════════════════════════════════════
 // CATALOGUE
 // ══════════════════════════════════════════════════
 async function loadCatalogue() {
-document.getElementById(‘cat-loading’).style.display = ‘block’;
-document.getElementById(‘cat-content’).style.display = ‘none’;
-try {
-const res = await fetch(’/api/services’);
-const data = await res.json();
-catServices = data.services || [];
-catAddons = data.addons || [];
-renderCatalogue();
-document.getElementById(‘cat-loading’).style.display = ‘none’;
-document.getElementById(‘cat-content’).style.display = ‘block’;
-} catch(e) {
-document.getElementById(‘cat-loading’).innerHTML = ‘<p style="color:#dc2626;text-align:center">Failed to load. Check API connection.</p>’;
-}
+  document.getElementById('cat-loading').style.display = 'block';
+  document.getElementById('cat-content').style.display = 'none';
+  try {
+    const res = await fetch('/api/services');
+    const data = await res.json();
+    catServices = data.services || [];
+    catAddons = data.addons || [];
+    renderCatalogue();
+    document.getElementById('cat-loading').style.display = 'none';
+    document.getElementById('cat-content').style.display = 'block';
+  } catch(e) {
+    document.getElementById('cat-loading').innerHTML = '<p style="color:#dc2626;text-align:center">Failed to load. Check API connection.</p>';
+  }
 }
 
 function renderCatalogue() {
-const catOrder = [‘shows’,‘performers’,‘experiences’,‘camps’];
-const catLabels = { shows:‘🎭 Shows’, performers:‘🤹 Performers’, experiences:‘🎊 Experiences’, camps:‘🏕 Camps’ };
-let html = ‘’;
+  const catOrder = ['shows','performers','experiences','camps'];
+  const catLabels = { shows:'🎭 Shows', performers:'🤹 Performers', experiences:'🎊 Experiences', camps:'🏕 Camps' };
+  let html = '';
 
-catOrder.forEach(cat => {
-const svcs = catServices.filter(s => s.category === cat);
-if (!svcs.length) return;
-html += `<div class="cat-section"><h3>${catLabels[cat]||cat}</h3> <table class="cat-table"> <thead><tr><th style="width:52px">Icon</th><th>Name</th><th style="width:90px">Price $</th><th style="width:80px">Mins</th><th>Guest Note</th><th style="width:60px;text-align:center">Active</th></tr></thead> <tbody>`;
-svcs.forEach(s => {
-html += `<tr data-service-id="${s.service_id}" data-category="${s.category}"> <td><input type="text" value="${esc(s.icon||'🎪')}" style="width:46px;text-align:center" data-field="icon"/></td> <td><input type="text" value="${esc(s.name)}" data-field="name"/></td> <td><input type="number" value="${Number(s.price).toFixed(0)}" data-field="price"/></td> <td><input type="number" value="${s.duration_minutes||120}" data-field="duration_minutes"/></td> <td><input type="text" value="${esc(s.guest_suggestion||'')}" data-field="guest_suggestion"/></td> <td style="text-align:center"><input type="checkbox" ${s.active?'checked':''} data-field="active"/></td> </tr>`;
-});
-html += `</tbody></table></div>`;
-});
+  catOrder.forEach(cat => {
+    const svcs = catServices.filter(s => s.category === cat);
+    if (!svcs.length) return;
+    html += `<div class="cat-section"><h3>${catLabels[cat]||cat}</h3>
+    <table class="cat-table">
+      <thead><tr><th style="width:52px">Icon</th><th>Name</th><th style="width:90px">Price $</th><th style="width:80px">Mins</th><th>Guest Note</th><th style="width:60px;text-align:center">Active</th></tr></thead>
+      <tbody>`;
+    svcs.forEach(s => {
+      html += `<tr data-service-id="${s.service_id}" data-category="${s.category}">
+        <td><input type="text" value="${esc(s.icon||'🎪')}" style="width:46px;text-align:center" data-field="icon"/></td>
+        <td><input type="text" value="${esc(s.name)}" data-field="name"/></td>
+        <td><input type="number" value="${Number(s.price).toFixed(0)}" data-field="price"/></td>
+        <td><input type="number" value="${s.duration_minutes||120}" data-field="duration_minutes"/></td>
+        <td><input type="text" value="${esc(s.guest_suggestion||'')}" data-field="guest_suggestion"/></td>
+        <td style="text-align:center"><input type="checkbox" ${s.active?'checked':''} data-field="active"/></td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
+  });
 
-html += `<div class="cat-section"><h3>➕ Add-ons</h3>
-
+  html += `<div class="cat-section"><h3>➕ Add-ons</h3>
   <table class="cat-table">
     <thead><tr><th>Name</th><th style="width:90px">Price $</th><th style="width:60px;text-align:center">Active</th></tr></thead>
     <tbody>`;
@@ -1276,113 +1492,121 @@ html += `<div class="cat-section"><h3>➕ Add-ons</h3>
   });
   html += `</tbody></table></div>`;
 
-document.getElementById(‘cat-content’).innerHTML = html;
+  document.getElementById('cat-content').innerHTML = html;
 }
 
 async function saveCatalogue() {
-const btn = document.querySelector(’[onclick=“saveCatalogue()”]’);
-btn.disabled = true; btn.textContent = ‘Saving…’;
+  const btn = document.querySelector('[onclick="saveCatalogue()"]');
+  btn.disabled = true; btn.textContent = 'Saving…';
 
-try {
-for (const row of document.querySelectorAll(’#cat-content tr[data-service-id]’)) {
-const payload = { service_id: row.dataset.serviceId, category: row.dataset.category };
-row.querySelectorAll(’[data-field]’).forEach(f => {
-const field = f.dataset.field;
-if (f.type === ‘checkbox’) payload[field] = f.checked;
-else if (field === ‘price’ || field === ‘duration_minutes’) payload[field] = Number(f.value);
-else payload[field] = f.value;
-});
-await fetch(’/api/services’, { method:‘POST’, headers:{‘Content-Type’:‘application/json’}, body:JSON.stringify(payload) });
-}
-for (const row of document.querySelectorAll(’#cat-content tr[data-addon-id]’)) {
-const payload = { type:‘addon’, addon_id: row.dataset.addonId };
-row.querySelectorAll(’[data-field]’).forEach(f => {
-const field = f.dataset.field;
-if (f.type === ‘checkbox’) payload[field] = f.checked;
-else if (field === ‘price’) payload[field] = Number(f.value);
-else payload[field] = f.value;
-});
-await fetch(’/api/services’, { method:‘POST’, headers:{‘Content-Type’:‘application/json’}, body:JSON.stringify(payload) });
-}
-flash(‘cat-saved’);
-} catch(e) { alert(’Save failed: ’ + e.message); }
+  try {
+    for (const row of document.querySelectorAll('#cat-content tr[data-service-id]')) {
+      const payload = { service_id: row.dataset.serviceId, category: row.dataset.category };
+      row.querySelectorAll('[data-field]').forEach(f => {
+        const field = f.dataset.field;
+        if (f.type === 'checkbox') payload[field] = f.checked;
+        else if (field === 'price' || field === 'duration_minutes') payload[field] = Number(f.value);
+        else payload[field] = f.value;
+      });
+      await fetch('/api/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    }
+    for (const row of document.querySelectorAll('#cat-content tr[data-addon-id]')) {
+      const payload = { type:'addon', addon_id: row.dataset.addonId };
+      row.querySelectorAll('[data-field]').forEach(f => {
+        const field = f.dataset.field;
+        if (f.type === 'checkbox') payload[field] = f.checked;
+        else if (field === 'price') payload[field] = Number(f.value);
+        else payload[field] = f.value;
+      });
+      await fetch('/api/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    }
+    flash('cat-saved');
+  } catch(e) { alert('Save failed: ' + e.message); }
 
-btn.disabled = false; btn.textContent = ‘Save Changes’;
+  btn.disabled = false; btn.textContent = 'Save Changes';
 }
 
 // ══════════════════════════════════════════════════
 // ANALYTICS
 // ══════════════════════════════════════════════════
 function renderAnalytics() {
-const now = new Date();
-const thisMonth = allBookings.filter(b => {
-if (!b.event_date) return false;
-const d = new Date(b.event_date + ‘T00:00:00’);
-return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
-});
-const confirmed = allBookings.filter(b => [‘confirmed’,‘completed’].includes(b.status));
-const mRev = thisMonth.filter(b => [‘confirmed’,‘completed’].includes(b.status))
-.reduce((s,b) => s+Number(b.total_price||0), 0);
-const avg = confirmed.length ? confirmed.reduce((s,b)=>s+Number(b.total_price||0),0)/confirmed.length : 0;
-const rate = allBookings.length ? Math.round(allBookings.filter(b=>b.status===‘completed’).length/allBookings.length*100) : 0;
+  const now = new Date();
+  const thisMonth = allBookings.filter(b => {
+    if (!b.event_date) return false;
+    const d = new Date(b.event_date + 'T00:00:00');
+    return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
+  });
+  const confirmed = allBookings.filter(b => ['confirmed','completed'].includes(b.status));
+  const mRev = thisMonth.filter(b => ['confirmed','completed'].includes(b.status))
+    .reduce((s,b) => s+Number(b.total_price||0), 0);
+  const avg = confirmed.length ? confirmed.reduce((s,b)=>s+Number(b.total_price||0),0)/confirmed.length : 0;
+  const rate = allBookings.length ? Math.round(allBookings.filter(b=>b.status==='completed').length/allBookings.length*100) : 0;
 
-document.getElementById(‘an-mrev’).textContent = ‘$’ + mRev.toLocaleString(‘en-US’,{maximumFractionDigits:0});
-document.getElementById(‘an-mcnt’).textContent = thisMonth.length;
-document.getElementById(‘an-avg’).textContent = ‘$’ + avg.toFixed(0);
-document.getElementById(‘an-rate’).textContent = rate + ‘%’;
+  document.getElementById('an-mrev').textContent = '$' + mRev.toLocaleString('en-US',{maximumFractionDigits:0});
+  document.getElementById('an-mcnt').textContent = thisMonth.length;
+  document.getElementById('an-avg').textContent = '$' + avg.toFixed(0);
+  document.getElementById('an-rate').textContent = rate + '%';
 
-// Top services
-const svcMap = {};
-allBookings.forEach(b => {
-const k = b.service_name||‘Unknown’;
-if (!svcMap[k]) svcMap[k] = { count:0, rev:0 };
-svcMap[k].count++; svcMap[k].rev += Number(b.total_price||0);
-});
-document.getElementById(‘an-svcs’).innerHTML = Object.entries(svcMap)
-.sort((a,b)=>b[1].count-a[1].count)
-.map(([k,v]) => `<tr><td>${esc(k)}</td><td>${v.count}</td><td>$${v.rev.toFixed(0)}</td></tr>`).join(’’);
+  // Top services
+  const svcMap = {};
+  allBookings.forEach(b => {
+    const k = b.service_name||'Unknown';
+    if (!svcMap[k]) svcMap[k] = { count:0, rev:0 };
+    svcMap[k].count++; svcMap[k].rev += Number(b.total_price||0);
+  });
+  document.getElementById('an-svcs').innerHTML = Object.entries(svcMap)
+    .sort((a,b)=>b[1].count-a[1].count)
+    .map(([k,v]) => `<tr><td>${esc(k)}</td><td>${v.count}</td><td>$${v.rev.toFixed(0)}</td></tr>`).join('');
 
-// Referrals
-const refMap = {};
-allBookings.forEach(b => { const k = b.referral_source||‘Unknown’; refMap[k]=(refMap[k]||0)+1; });
-const refs = Object.entries(refMap).sort((a,b)=>b[1]-a[1]);
-const total = refs.reduce((s,r)=>s+r[1],0);
-document.getElementById(‘an-refs’).innerHTML = refs.map(([k,v]) => ` <tr> <td>${esc(k)}</td><td>${v}</td> <td> <div style="display:flex;align-items:center;gap:6px"> <span>${total?Math.round(v/total*100):0}%</span> <div class="referral-bar" style="flex:1"><div class="referral-fill" style="width:${total?Math.round(v/total*100):0}%"></div></div> </div> </td> </tr>`).join(’’);
+  // Referrals
+  const refMap = {};
+  allBookings.forEach(b => { const k = b.referral_source||'Unknown'; refMap[k]=(refMap[k]||0)+1; });
+  const refs = Object.entries(refMap).sort((a,b)=>b[1]-a[1]);
+  const total = refs.reduce((s,r)=>s+r[1],0);
+  document.getElementById('an-refs').innerHTML = refs.map(([k,v]) => `
+    <tr>
+      <td>${esc(k)}</td><td>${v}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span>${total?Math.round(v/total*100):0}%</span>
+          <div class="referral-bar" style="flex:1"><div class="referral-fill" style="width:${total?Math.round(v/total*100):0}%"></div></div>
+        </div>
+      </td>
+    </tr>`).join('');
 }
 
 // ══════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════
 function fmtDate(d) {
-if (!d) return ‘—’;
-return new Date(d + (d.includes(‘T’)?’’:‘T00:00:00’))
-.toLocaleDateString(‘en-US’,{month:‘short’,day:‘numeric’,year:‘numeric’});
+  if (!d) return '—';
+  return new Date(d + (d.includes('T')?'':'T00:00:00'))
+    .toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 }
 
 function fmtTime(t) {
-if (!t) return ‘’;
-const [hh,mm] = t.split(’:’);
-const h = parseInt(hh);
-return `${h%12||12}:${mm} ${h<12?'AM':'PM'}`;
+  if (!t) return '';
+  const [hh,mm] = t.split(':');
+  const h = parseInt(hh);
+  return `${h%12||12}:${mm} ${h<12?'AM':'PM'}`;
 }
 
 function esc(str) {
-return String(str||’’).replace(/&/g,’&’).replace(/</g,’<’).replace(/>/g,’>’).replace(/”/g,’"’);
+  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function parseAddons(raw) {
-if (Array.isArray(raw)) return raw;
-if (typeof raw === ‘string’) { try { return JSON.parse(raw); } catch { return []; } }
-return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return []; } }
+  return [];
 }
 
 function flash(id) {
-const el = document.getElementById(id);
-if (!el) return;
-el.classList.add(‘show’);
-setTimeout(() => el.classList.remove(‘show’), 2500);
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
 }
 </script>
-
 </body>
 </html>
