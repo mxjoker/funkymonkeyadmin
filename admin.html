@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -7,317 +8,494 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',sans-serif;background:#f0f4ff;min-height:100vh}
-/* ── Auth overlay ── */
+
+/* ── Auth ── */
 #auth-screen{position:fixed;inset:0;background:linear-gradient(135deg,#6c3fc5,#a855f7);display:flex;align-items:center;justify-content:center;z-index:999}
-#auth-box{background:#fff;border-radius:16px;padding:36px 32px;width:100%;max-width:360px;text-align:center}
-#auth-box h1{font-size:1.5rem;color:#1e1b4b;margin-bottom:6px}
-#auth-box p{color:#888;font-size:.9rem;margin-bottom:20px}
-#auth-box input{width:100%;padding:10px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:1rem;margin-bottom:12px}
-#auth-box button{width:100%;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:12px;font-size:1rem;font-weight:700;cursor:pointer}
-#auth-err{color:#dc2626;font-size:.85rem;margin-top:8px;display:none}
-/* ── Layout ── */
+#auth-box{background:#fff;border-radius:16px;padding:36px 32px;width:100%;max-width:360px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+#auth-box .logo{font-size:2.8rem;margin-bottom:8px}
+#auth-box h1{font-size:1.4rem;color:#1e1b4b;margin-bottom:4px;font-weight:800}
+#auth-box p{color:#888;font-size:.88rem;margin-bottom:22px}
+#auth-box input{width:100%;padding:11px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:1rem;margin-bottom:12px;transition:border .2s}
+#auth-box input:focus{outline:none;border-color:#7c3aed}
+#auth-box button{width:100%;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:12px;font-size:1rem;font-weight:700;cursor:pointer;transition:background .2s}
+#auth-box button:hover{background:#6d28d9}
+#auth-err{color:#dc2626;font-size:.82rem;margin-top:8px;display:none}
+
+/* ── App shell ── */
 #app{display:none;min-height:100vh}
-.sidebar{position:fixed;top:0;left:0;bottom:0;width:220px;background:#1e1b4b;color:#fff;padding:0;display:flex;flex-direction:column}
-.sidebar-logo{padding:20px 18px;font-size:1.1rem;font-weight:800;border-bottom:1px solid rgba(255,255,255,.1)}
-.sidebar-logo span{opacity:.6;font-size:.75rem;display:block;font-weight:400;margin-top:2px}
-nav a{display:flex;align-items:center;gap:10px;padding:11px 18px;color:rgba(255,255,255,.7);text-decoration:none;font-size:.9rem;font-weight:500;transition:all .2s;cursor:pointer;border-left:3px solid transparent}
-nav a:hover,nav a.active{color:#fff;background:rgba(255,255,255,.08);border-left-color:#a855f7}
-.sidebar-footer{margin-top:auto;padding:16px 18px;font-size:.75rem;color:rgba(255,255,255,.35);border-top:1px solid rgba(255,255,255,.08)}
-.main{margin-left:220px;padding:28px;min-height:100vh}
+.sidebar{position:fixed;top:0;left:0;bottom:0;width:224px;background:#1e1b4b;display:flex;flex-direction:column;z-index:50}
+.sidebar-logo{padding:22px 18px 18px;border-bottom:1px solid rgba(255,255,255,.08)}
+.sidebar-logo .mark{font-size:1.5rem;line-height:1}
+.sidebar-logo .name{font-size:1rem;font-weight:800;color:#fff;margin-top:4px}
+.sidebar-logo .sub{font-size:.72rem;color:rgba(255,255,255,.4);margin-top:2px}
+nav{padding:10px 0;flex:1}
+nav a{display:flex;align-items:center;gap:10px;padding:10px 18px;color:rgba(255,255,255,.6);font-size:.875rem;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:all .15s;user-select:none}
+nav a .nav-icon{font-size:1rem;width:20px;text-align:center;flex-shrink:0}
+nav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+nav a.active{color:#fff;background:rgba(255,255,255,.09);border-left-color:#a855f7}
+.sidebar-footer{padding:14px 18px;border-top:1px solid rgba(255,255,255,.06);font-size:.72rem;color:rgba(255,255,255,.3);line-height:1.6}
+.main{margin-left:224px;padding:28px;min-height:100vh}
 .page{display:none}
 .page.active{display:block}
-.page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
-.page-header h1{font-size:1.4rem;color:#1e1b4b;font-weight:800}
-/* ── Cards & stats ── */
-.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:28px}
-.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
-.stat-card .label{font-size:.78rem;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
-.stat-card .val{font-size:1.8rem;font-weight:800;color:#1e1b4b}
-.stat-card .sub{font-size:.8rem;color:#888;margin-top:4px}
-/* ── Buttons ── */
-.btn{padding:9px 18px;border-radius:8px;border:none;font-size:.875rem;font-weight:700;cursor:pointer;transition:all .2s}
-.btn-primary{background:#7c3aed;color:#fff}
-.btn-primary:hover{background:#6d28d9}
-.btn-sm{padding:5px 12px;font-size:.8rem}
-.btn-danger{background:#fee2e2;color:#dc2626}
-.btn-danger:hover{background:#fecaca}
-.btn-success{background:#d1fae5;color:#059669}
-.btn-outline{background:#fff;border:2px solid #e5e7eb;color:#374151}
-.btn-outline:hover{border-color:#a855f7;color:#7c3aed}
-/* ── Tables ── */
-.card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06);overflow:hidden;margin-bottom:24px}
-.card-header{padding:16px 20px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between}
-.card-header h2{font-size:1rem;font-weight:700;color:#1e1b4b}
+
+/* ── Page header ── */
+.page-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:10px}
+.page-hdr h1{font-size:1.35rem;color:#1e1b4b;font-weight:800}
+.page-hdr-actions{display:flex;gap:8px;align-items:center}
+
+/* ── Stat cards ── */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:24px}
+.stat-card{background:#fff;border-radius:12px;padding:18px 20px;box-shadow:0 1px 6px rgba(0,0,0,.06);border-top:3px solid #e9d5ff}
+.stat-card.accent{border-top-color:#7c3aed}
+.stat-card.green{border-top-color:#10b981}
+.stat-card.amber{border-top-color:#f59e0b}
+.stat-card.blue{border-top-color:#3b82f6}
+.stat-card .s-label{font-size:.72rem;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:600}
+.stat-card .s-val{font-size:1.75rem;font-weight:800;color:#1e1b4b;line-height:1}
+.stat-card .s-sub{font-size:.75rem;color:#aaa;margin-top:5px}
+
+/* ── Cards ── */
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 6px rgba(0,0,0,.06);overflow:hidden;margin-bottom:20px}
+.card-hdr{padding:14px 20px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between}
+.card-hdr h2{font-size:.95rem;font-weight:700;color:#1e1b4b}
 .card-body{padding:20px}
-table{width:100%;border-collapse:collapse;font-size:.875rem}
-th{text-align:left;padding:10px 12px;background:#f9fafb;color:#6b7280;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em}
+
+/* ── Tables ── */
+table{width:100%;border-collapse:collapse;font-size:.855rem}
+th{text-align:left;padding:9px 12px;background:#f9fafb;color:#6b7280;font-size:.73rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700;white-space:nowrap}
 td{padding:10px 12px;border-top:1px solid #f3f4f6;color:#374151;vertical-align:middle}
 tr:hover td{background:#fafaf8}
+.table-empty{text-align:center;padding:40px;color:#aaa;font-size:.875rem}
+
+/* ── Buttons ── */
+.btn{padding:8px 16px;border-radius:7px;border:none;font-size:.845rem;font-weight:700;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:5px}
+.btn-primary{background:#7c3aed;color:#fff}
+.btn-primary:hover:not(:disabled){background:#6d28d9}
+.btn-primary:disabled{opacity:.55;cursor:not-allowed}
+.btn-outline{background:#fff;border:1.5px solid #e5e7eb;color:#374151}
+.btn-outline:hover{border-color:#a855f7;color:#7c3aed}
+.btn-danger{background:#fee2e2;color:#dc2626;border:none}
+.btn-danger:hover{background:#fecaca}
+.btn-success{background:#d1fae5;color:#059669;border:none}
+.btn-success:hover{background:#a7f3d0}
+.btn-ghost{background:transparent;border:none;color:#888;padding:6px 10px}
+.btn-ghost:hover{color:#374151;background:#f3f4f6}
+.btn-sm{padding:5px 11px;font-size:.78rem}
+.btn-xs{padding:3px 8px;font-size:.72rem}
+
 /* ── Badges ── */
-.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:700}
+.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:.72rem;font-weight:700;white-space:nowrap}
 .badge-review{background:#fef9c3;color:#854d0e}
 .badge-pending{background:#dbeafe;color:#1d4ed8}
 .badge-confirmed{background:#d1fae5;color:#065f46}
 .badge-completed{background:#f3f4f6;color:#374151}
 .badge-cancelled{background:#fee2e2;color:#991b1b}
-/* ── Booking detail modal ── */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:none;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto}
+.badge-custom{background:#fef3c7;color:#d97706}
+
+/* ── Modal ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(15,10,30,.5);z-index:200;display:none;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto;backdrop-filter:blur(2px)}
 .modal-overlay.open{display:flex}
-.modal{background:#fff;border-radius:16px;width:100%;max-width:680px;max-height:90vh;overflow-y:auto}
-.modal-header{padding:20px 24px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1}
-.modal-header h2{font-size:1.1rem;font-weight:700;color:#1e1b4b}
-.modal-close{background:none;border:none;font-size:1.4rem;cursor:pointer;color:#888;line-height:1}
-.modal-body{padding:24px}
-.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
-.detail-field label{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:#888;font-weight:700;display:block;margin-bottom:4px}
-.detail-field .val{font-size:.95rem;color:#1e1b4b;font-weight:600}
-.status-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
-.quote-summary{background:#f5f3ff;border-radius:10px;padding:16px;margin-bottom:20px}
-.quote-summary h3{font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:#7c3aed;font-weight:700;margin-bottom:10px}
-.q-line{display:flex;justify-content:space-between;padding:4px 0;font-size:.875rem;color:#374151;border-bottom:1px solid #e9d5ff}
-.q-line:last-child{border:none;font-weight:700;color:#1e1b4b}
-.stripe-section{background:#faf5ff;border-radius:10px;padding:16px;margin-bottom:20px;border:1px solid #e9d5ff}
-.notes-area{width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:8px;font-size:.875rem;resize:vertical;min-height:80px}
+.modal{background:#fff;border-radius:16px;width:100%;max-width:700px;box-shadow:0 24px 80px rgba(0,0,0,.2)}
+.modal-hdr{padding:18px 24px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;border-radius:16px 16px 0 0;z-index:1}
+.modal-hdr h2{font-size:1.05rem;font-weight:800;color:#1e1b4b}
+.modal-hdr .close{background:none;border:none;font-size:1.4rem;cursor:pointer;color:#aaa;line-height:1;padding:0 4px;transition:color .15s}
+.modal-hdr .close:hover{color:#374151}
+.modal-body{padding:22px 24px;max-height:80vh;overflow-y:auto}
+
+/* ── Modal internals ── */
+.status-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px}
+.status-pill{padding:5px 14px;border-radius:20px;border:1.5px solid #e5e7eb;background:#fff;font-size:.78rem;font-weight:700;cursor:pointer;transition:all .15s;color:#6b7280;text-transform:capitalize}
+.status-pill:hover{border-color:#a855f7;color:#7c3aed}
+.status-pill.active-review{background:#fef9c3;border-color:#fbbf24;color:#854d0e}
+.status-pill.active-pending{background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}
+.status-pill.active-confirmed{background:#d1fae5;border-color:#6ee7b7;color:#065f46}
+.status-pill.active-completed{background:#f3f4f6;border-color:#d1d5db;color:#374151}
+.status-pill.active-cancelled{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px}
+.detail-field label{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:3px}
+.detail-field .dval{font-size:.9rem;color:#1e1b4b;font-weight:600}
+.detail-field .dval a{color:#7c3aed;text-decoration:none}
+.detail-field .dval a:hover{text-decoration:underline}
+.section-label{font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;font-weight:700;margin-bottom:10px;display:block}
+.quote-block{background:#f5f3ff;border-radius:10px;padding:16px;margin-bottom:18px}
+.q-row{display:flex;justify-content:space-between;padding:5px 0;font-size:.855rem;color:#374151;border-bottom:1px solid #e9d5ff}
+.q-row:last-child{border:none;font-weight:700;color:#1e1b4b;padding-top:8px}
+.q-row.sub{padding-left:10px;color:#7c3aed;font-size:.8rem}
+.q-row.deposit-row{color:#059669;font-weight:700}
+.action-strip{display:flex;gap:8px;flex-wrap:wrap;padding-top:16px;border-top:1px solid #f3f4f6;margin-top:4px}
+
+/* Inline save feedback */
+.save-flash{font-size:.75rem;color:#059669;font-weight:700;opacity:0;transition:opacity .3s}
+.save-flash.show{opacity:1}
+
+/* Payment block */
+.payment-block{background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px}
+.pay-row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:10px}
+.pay-field label{font-size:.72rem;color:#888;display:block;margin-bottom:3px;font-weight:600}
+.pay-field input,.pay-field select{padding:7px 10px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.855rem;background:#fff;transition:border .15s}
+.pay-field input:focus,.pay-field select:focus{outline:none;border-color:#7c3aed}
+
+/* Stripe block */
+.stripe-block{background:#faf5ff;border:1.5px solid #e9d5ff;border-radius:10px;padding:16px;margin-bottom:18px}
+.stripe-result{font-size:.78rem;color:#888;margin-top:6px;min-height:18px}
+
+/* Notes block */
+.notes-block{margin-bottom:18px}
+.notes-area{width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:.855rem;resize:vertical;min-height:76px;transition:border .15s;font-family:inherit}
 .notes-area:focus{outline:none;border-color:#7c3aed}
+.notes-actions{display:flex;align-items:center;gap:10px;margin-top:6px}
+
 /* ── Calendar ── */
-.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
-.cal-header-days{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px}
-.cal-day-label{text-align:center;font-size:.75rem;font-weight:700;color:#888;padding:4px}
-.cal-day{min-height:72px;background:#f9fafb;border-radius:8px;padding:6px;font-size:.8rem;position:relative}
-.cal-day.today{background:#f5f3ff;border:2px solid #a855f7}
-.cal-day.other-month{opacity:.35}
-.cal-day .day-num{font-weight:700;color:#374151;margin-bottom:4px}
-.cal-event{background:#7c3aed;color:#fff;border-radius:4px;padding:2px 5px;font-size:.7rem;margin-bottom:2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cal-nav{display:flex;gap:8px;align-items:center}
+.cal-month-label{font-weight:700;color:#1e1b4b;min-width:150px;text-align:center;font-size:.95rem}
+.cal-day-labels{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px}
+.cal-day-label{text-align:center;font-size:.7rem;font-weight:700;color:#9ca3af;padding:4px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal-cell{min-height:80px;background:#f9fafb;border-radius:8px;padding:6px;font-size:.78rem}
+.cal-cell.today{background:#f5f3ff;box-shadow:inset 0 0 0 2px #a855f7}
+.cal-cell.other{opacity:.3}
+.cal-cell .cn{font-weight:700;color:#6b7280;margin-bottom:4px;font-size:.75rem}
+.cal-cell.today .cn{color:#7c3aed}
+.cal-evt{background:#7c3aed;color:#fff;border-radius:4px;padding:2px 5px;font-size:.67rem;margin-bottom:2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .15s}
+.cal-evt:hover{background:#6d28d9}
+.cal-evt.confirmed{background:#059669}
+.cal-evt.pending{background:#3b82f6}
+.cal-evt.review{background:#d97706}
+
 /* ── Staff ── */
-.staff-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
-.staff-card{background:#fff;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-top:4px solid #7c3aed}
-.staff-card h3{font-size:1rem;font-weight:700;color:#1e1b4b}
-.staff-card .role{font-size:.8rem;color:#888;margin:4px 0 12px}
-/* ── Staff skills ── */
-.skill-tag{display:inline-flex;align-items:center;gap:4px;background:#ede9fe;color:#7c3aed;border-radius:20px;padding:3px 10px;font-size:.75rem;font-weight:700;margin:2px}
-.skill-tag .remove-tag{cursor:pointer;opacity:.6;font-size:.85rem;line-height:1}
-.skill-tag .remove-tag:hover{opacity:1}
-.add-skill-row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
-.skill-preset{padding:3px 10px;border-radius:20px;border:2px solid #e9d5ff;background:#fff;color:#7c3aed;font-size:.75rem;font-weight:600;cursor:pointer;transition:all .2s}
-.skill-preset:hover{background:#ede9fe}
+.staff-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}
+.staff-card{background:#fff;border-radius:12px;padding:18px;box-shadow:0 1px 6px rgba(0,0,0,.06);border-top:4px solid #7c3aed}
+.staff-avatar{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.1rem;color:#fff;margin-bottom:10px;flex-shrink:0}
+.staff-card h3{font-size:.95rem;font-weight:700;color:#1e1b4b}
+.staff-role{font-size:.78rem;color:#9ca3af;margin:3px 0 12px}
+.skills-wrap{min-height:26px;margin-bottom:10px;display:flex;flex-wrap:wrap;gap:4px}
+.skill-tag{display:inline-flex;align-items:center;gap:3px;background:#ede9fe;color:#7c3aed;border-radius:20px;padding:3px 9px;font-size:.72rem;font-weight:700}
+.skill-rm{cursor:pointer;opacity:.5;font-size:.8rem;line-height:1;transition:opacity .15s}
+.skill-rm:hover{opacity:1}
+.skill-presets{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+.skill-preset-btn{padding:3px 9px;border-radius:20px;border:1.5px solid #e9d5ff;background:#fff;color:#7c3aed;font-size:.72rem;font-weight:600;cursor:pointer;transition:all .15s}
+.skill-preset-btn:hover{background:#ede9fe}
+.staff-card-actions{display:flex;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid #f3f4f6}
+
 /* ── Catalogue ── */
 .cat-section{margin-bottom:28px}
-.cat-section h3{font-size:1rem;font-weight:700;color:#1e1b4b;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #e9d5ff}
-.catalogue-table td input{width:100%;border:1px solid #e5e7eb;border-radius:6px;padding:5px 8px;font-size:.85rem}
-.catalogue-table td input:focus{outline:none;border-color:#7c3aed}
-.cat-loading{text-align:center;padding:40px;color:#7c3aed}
-.cat-loading .spinner{width:32px;height:32px;border:3px solid #e9d5ff;border-top-color:#7c3aed;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 10px}
+.cat-section h3{font-size:.9rem;font-weight:700;color:#1e1b4b;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid #e9d5ff}
+.cat-table{width:100%;border-collapse:collapse}
+.cat-table th{text-align:left;padding:7px 8px;background:#f9fafb;font-size:.68rem;text-transform:uppercase;color:#9ca3af;letter-spacing:.05em;font-weight:700}
+.cat-table td{padding:5px 6px;border-top:1px solid #f3f4f6}
+.cat-table input[type=text],.cat-table input[type=number]{width:100%;padding:5px 8px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:.82rem;background:#fff}
+.cat-table input:focus{outline:none;border-color:#7c3aed}
+.cat-table input[type=checkbox]{width:auto;cursor:pointer;width:16px;height:16px}
+.cat-loading{text-align:center;padding:48px;color:#7c3aed}
+.cat-spinner{width:30px;height:30px;border:3px solid #e9d5ff;border-top-color:#7c3aed;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 10px}
 @keyframes spin{to{transform:rotate(360deg)}}
-.save-indicator{font-size:.8rem;color:#059669;display:none}
-.save-indicator.visible{display:inline}
+
 /* ── Analytics ── */
-.analytics-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.chart-placeholder{background:#f9fafb;border-radius:8px;height:180px;display:flex;align-items:center;justify-content:center;color:#888;font-size:.85rem}
-/* ── Responsive ── */
+.referral-bar{height:8px;background:#e9d5ff;border-radius:4px;overflow:hidden;margin-top:4px}
+.referral-fill{height:100%;background:#7c3aed;border-radius:4px;transition:width .4s}
+
+/* ── Misc ── */
+.empty-state{text-align:center;padding:48px 24px;color:#9ca3af}
+.empty-state .ei{font-size:2.5rem;margin-bottom:10px}
+.empty-state p{font-size:.875rem}
+input,select,textarea{font-family:inherit}
+.filter-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.filter-bar select,.filter-bar input{padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.845rem;background:#fff;color:#374151}
+.filter-bar select:focus,.filter-bar input:focus{outline:none;border-color:#7c3aed}
+.text-muted{color:#9ca3af;font-size:.78rem}
+.divider{border:none;border-top:1px solid #f3f4f6;margin:16px 0}
+
+/* ── Mobile topbar & hamburger ── */
+.mobile-topbar{display:none;position:fixed;top:0;left:0;right:0;height:52px;background:#1e1b4b;z-index:60;align-items:center;justify-content:space-between;padding:0 16px}
+.mobile-topbar .m-logo{color:#fff;font-size:.95rem;font-weight:800;display:flex;align-items:center;gap:8px}
+.hamburger{background:none;border:none;cursor:pointer;padding:6px;display:flex;flex-direction:column;gap:5px;border-radius:6px;transition:background .15s}
+.hamburger:hover{background:rgba(255,255,255,.1)}
+.hamburger span{display:block;width:22px;height:2px;background:#fff;border-radius:2px;transition:all .25s}
+.hamburger.open span:nth-child(1){transform:translateY(7px) rotate(45deg)}
+.hamburger.open span:nth-child(2){opacity:0;transform:scaleX(0)}
+.hamburger.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+.nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:55;backdrop-filter:blur(2px)}
+.nav-overlay.open{display:block}
+
 @media(max-width:768px){
-  .sidebar{transform:translateX(-100%);z-index:50}
-  .main{margin-left:0}
-  .stats-grid{grid-template-columns:1fr 1fr}
-  .detail-grid{grid-template-columns:1fr}
+.mobile-topbar{display:flex}
+.sidebar{transform:translateX(-100%);transition:transform .25s ease;top:0;z-index:56}
+.sidebar.open{transform:translateX(0)}
+.main{margin-left:0;padding:72px 16px 24px}
+.detail-grid{grid-template-columns:1fr}
+.analytics-cols{grid-template-columns:1fr!important}
+.stats-grid{grid-template-columns:1fr 1fr}
+.page-hdr{flex-direction:column;align-items:flex-start}
+.filter-bar{width:100%}
+.filter-bar input{flex:1}
 }
 </style>
+
 </head>
 <body>
 
-<!-- Auth -->
+<!-- ══ AUTH ══ -->
+
 <div id="auth-screen">
   <div id="auth-box">
-    <div style="font-size:2.5rem;margin-bottom:8px">🐒</div>
+    <div class="logo">🐒</div>
     <h1>Funky Monkey Admin</h1>
-    <p>Enter your admin password to continue</p>
+    <p>Enter your password to continue</p>
     <input type="password" id="auth-pw" placeholder="Password" onkeydown="if(event.key==='Enter')doLogin()"/>
-    <button onclick="doLogin()">Sign In</button>
+    <button onclick="doLogin()">Sign In →</button>
     <div id="auth-err">Incorrect password. Try again.</div>
   </div>
 </div>
 
-<!-- App -->
+<!-- ══ MOBILE TOPBAR ══ -->
+
+<div class="mobile-topbar">
+  <div class="m-logo"><span>🐒</span>Funky Monkey</div>
+  <button class="hamburger" id="hamburger" onclick="toggleNav()" aria-label="Menu">
+    <span></span><span></span><span></span>
+  </button>
+</div>
+<div class="nav-overlay" id="nav-overlay" onclick="closeNav()"></div>
+
+<!-- ══ APP ══ -->
+
 <div id="app">
   <div class="sidebar">
-    <div class="sidebar-logo">🐒 Funky Monkey<span>Admin Dashboard</span></div>
+    <div class="sidebar-logo">
+      <div class="mark">🐒</div>
+      <div class="name">Funky Monkey</div>
+      <div class="sub">Admin Dashboard</div>
+    </div>
     <nav>
-      <a onclick="showPage('dashboard')" id="nav-dashboard">📊 Dashboard</a>
-      <a onclick="showPage('bookings')" id="nav-bookings">📋 Bookings</a>
-      <a onclick="showPage('calendar')" id="nav-calendar">📅 Calendar</a>
-      <a onclick="showPage('clients')" id="nav-clients">👥 Clients</a>
-      <a onclick="showPage('staff')" id="nav-staff">🎭 Staff Portal</a>
-      <a onclick="showPage('catalogue')" id="nav-catalogue">🗂 Catalogue</a>
-      <a onclick="showPage('analytics')" id="nav-analytics">📈 Analytics</a>
+      <a id="nav-dashboard" onclick="showPage('dashboard')"><span class="nav-icon">📊</span>Dashboard</a>
+      <a id="nav-bookings"  onclick="showPage('bookings')"><span class="nav-icon">📋</span>Bookings</a>
+      <a id="nav-calendar"  onclick="showPage('calendar')"><span class="nav-icon">📅</span>Calendar</a>
+      <a id="nav-clients"   onclick="showPage('clients')"><span class="nav-icon">👥</span>Clients</a>
+      <a id="nav-staff"     onclick="showPage('staff')"><span class="nav-icon">🎭</span>Staff Portal</a>
+      <a id="nav-catalogue" onclick="showPage('catalogue')"><span class="nav-icon">🗂</span>Catalogue</a>
+      <a id="nav-analytics" onclick="showPage('analytics')"><span class="nav-icon">📈</span>Analytics</a>
     </nav>
-    <div class="sidebar-footer">Funky Monkey Events · OKC<br/>(405) 431-6625</div>
+    <div class="sidebar-footer">
+      Funky Monkey Events · OKC<br>
+      (405) 431-6625
+    </div>
   </div>
 
   <div class="main">
 
-    <!-- DASHBOARD -->
-    <div class="page" id="page-dashboard">
-      <div class="page-header"><h1>Dashboard</h1><span id="dash-date" style="color:#888;font-size:.9rem"></span></div>
-      <div class="stats-grid">
-        <div class="stat-card"><div class="label">Total Bookings</div><div class="val" id="stat-total">—</div></div>
-        <div class="stat-card"><div class="label">Needs Review</div><div class="val" id="stat-review">—</div></div>
-        <div class="stat-card"><div class="label">Confirmed</div><div class="val" id="stat-confirmed">—</div></div>
-        <div class="stat-card"><div class="label">Revenue (Confirmed)</div><div class="val" id="stat-revenue">—</div></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h2>Recent Bookings</h2><button class="btn btn-primary btn-sm" onclick="showPage('bookings')">View All</button></div>
-        <table>
-          <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Date</th><th>Total</th><th>Status</th></tr></thead>
-          <tbody id="dash-bookings"></tbody>
-        </table>
-      </div>
+```
+<!-- ══ DASHBOARD ══ -->
+<div class="page" id="page-dashboard">
+  <div class="page-hdr">
+    <h1>Dashboard</h1>
+    <span class="text-muted" id="dash-date"></span>
+  </div>
+  <div class="stats-grid">
+    <div class="stat-card accent">
+      <div class="s-label">Total Bookings</div>
+      <div class="s-val" id="st-total">—</div>
     </div>
+    <div class="stat-card amber">
+      <div class="s-label">Needs Review</div>
+      <div class="s-val" id="st-review">—</div>
+      <div class="s-sub">Awaiting your response</div>
+    </div>
+    <div class="stat-card green">
+      <div class="s-label">Confirmed</div>
+      <div class="s-val" id="st-confirmed">—</div>
+    </div>
+    <div class="stat-card blue">
+      <div class="s-label">Revenue (Confirmed)</div>
+      <div class="s-val" id="st-revenue">—</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-hdr">
+      <h2>Recent Bookings</h2>
+      <button class="btn btn-primary btn-sm" onclick="showPage('bookings')">View All</button>
+    </div>
+    <table>
+      <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th></tr></thead>
+      <tbody id="dash-tbody"></tbody>
+    </table>
+  </div>
+</div>
 
-    <!-- BOOKINGS -->
-    <div class="page" id="page-bookings">
-      <div class="page-header">
-        <h1>All Bookings</h1>
-        <div style="display:flex;gap:10px;align-items:center">
-          <select id="filter-status" onchange="renderBookingsTable()" style="padding:8px 12px;border:2px solid #e5e7eb;border-radius:8px;font-size:.875rem">
-            <option value="">All Statuses</option>
-            <option value="review">Review</option>
-            <option value="pending">Pending</option>
-            <option value="confirmed">Confirmed</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-        </div>
-      </div>
-      <div class="card">
-        <table>
-          <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th><th></th></tr></thead>
-          <tbody id="bookings-tbody"></tbody>
-        </table>
-      </div>
+<!-- ══ BOOKINGS ══ -->
+<div class="page" id="page-bookings">
+  <div class="page-hdr">
+    <h1>All Bookings</h1>
+    <div class="filter-bar">
+      <select id="filter-status" onchange="renderBookingsTable()">
+        <option value="">All Statuses</option>
+        <option value="review">Review</option>
+        <option value="pending">Pending</option>
+        <option value="confirmed">Confirmed</option>
+        <option value="completed">Completed</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+      <input type="text" id="filter-search" placeholder="Search name, ref…" oninput="renderBookingsTable()" style="width:180px"/>
     </div>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th><th></th></tr></thead>
+      <tbody id="bookings-tbody"></tbody>
+    </table>
+  </div>
+</div>
 
-    <!-- CALENDAR -->
-    <div class="page" id="page-calendar">
-      <div class="page-header">
-        <h1>Calendar</h1>
-        <div style="display:flex;gap:10px">
-          <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">← Prev</button>
-          <span id="cal-month-label" style="font-weight:700;color:#1e1b4b;align-self:center;min-width:140px;text-align:center"></span>
-          <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Next →</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-body">
-          <div class="cal-header-days">
-            <div class="cal-day-label">Sun</div><div class="cal-day-label">Mon</div>
-            <div class="cal-day-label">Tue</div><div class="cal-day-label">Wed</div>
-            <div class="cal-day-label">Thu</div><div class="cal-day-label">Fri</div>
-            <div class="cal-day-label">Sat</div>
-          </div>
-          <div class="cal-grid" id="cal-grid"></div>
-        </div>
-      </div>
+<!-- ══ CALENDAR ══ -->
+<div class="page" id="page-calendar">
+  <div class="page-hdr">
+    <h1>Calendar</h1>
+    <div class="cal-nav">
+      <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">← Prev</button>
+      <span class="cal-month-label" id="cal-month-label"></span>
+      <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Next →</button>
     </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <div class="cal-day-labels">
+        <div class="cal-day-label">Sun</div><div class="cal-day-label">Mon</div>
+        <div class="cal-day-label">Tue</div><div class="cal-day-label">Wed</div>
+        <div class="cal-day-label">Thu</div><div class="cal-day-label">Fri</div>
+        <div class="cal-day-label">Sat</div>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+  </div>
+</div>
 
-    <!-- CLIENTS -->
-    <div class="page" id="page-clients">
-      <div class="page-header"><h1>Clients</h1></div>
-      <div class="card">
-        <table>
-          <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Bookings</th><th>Total Spent</th><th>Last Booking</th></tr></thead>
-          <tbody id="clients-tbody"></tbody>
-        </table>
-      </div>
-    </div>
+<!-- ══ CLIENTS ══ -->
+<div class="page" id="page-clients">
+  <div class="page-hdr"><h1>Clients</h1></div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Bookings</th><th>Total Spent</th><th>Last Event</th></tr></thead>
+      <tbody id="clients-tbody"></tbody>
+    </table>
+  </div>
+</div>
 
-    <!-- STAFF -->
-    <div class="page" id="page-staff">
-      <div class="page-header"><h1>Staff Portal</h1><button class="btn btn-primary btn-sm" onclick="openAddStaff()">+ Add Staff</button></div>
-      <div class="staff-grid" id="staff-grid"></div>
-    </div>
+<!-- ══ STAFF ══ -->
+<div class="page" id="page-staff">
+  <div class="page-hdr">
+    <h1>Staff Portal</h1>
+    <button class="btn btn-primary btn-sm" onclick="openAddStaff()">+ Add Staff</button>
+  </div>
+  <div class="staff-grid" id="staff-grid"></div>
+</div>
 
-    <!-- CATALOGUE -->
-    <div class="page" id="page-catalogue">
-      <div class="page-header">
-        <h1>Service Catalogue</h1>
-        <div style="display:flex;align-items:center;gap:12px">
-          <span class="save-indicator" id="save-indicator">✓ Saved</span>
-          <button class="btn btn-primary btn-sm" onclick="saveCatalogue()">Save Changes</button>
-        </div>
-      </div>
-      <p style="color:#888;font-size:.875rem;margin-bottom:20px">Changes save to the database and immediately reflect in the booking form.</p>
-      <div id="cat-loading" class="cat-loading"><div class="spinner"></div>Loading services…</div>
-      <div id="cat-content" style="display:none"></div>
+<!-- ══ STAFF PORTAL (staff login view) ══ -->
+<div class="page" id="page-portal">
+  <div class="page-hdr" style="flex-wrap:wrap;gap:10px">
+    <div>
+      <h1 id="portal-greeting">Hey! 👋</h1>
+      <div class="text-muted" style="font-size:.85rem;margin-top:2px">Staff Portal — Funky Monkey Events</div>
     </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-outline btn-sm" onclick="openStaffPreferences()">⚙️ My Preferences</button>
+      <button class="btn btn-outline btn-sm" onclick="sessionStorage.clear();location.reload()">Sign Out</button>
+    </div>
+  </div>
+  <div id="portal-gigs"></div>
+</div>
 
-    <!-- ANALYTICS -->
-    <div class="page" id="page-analytics">
-      <div class="page-header"><h1>Analytics</h1></div>
-      <div class="stats-grid">
-        <div class="stat-card"><div class="label">This Month Revenue</div><div class="val" id="an-month-rev">—</div></div>
-        <div class="stat-card"><div class="label">Bookings This Month</div><div class="val" id="an-month-cnt">—</div></div>
-        <div class="stat-card"><div class="label">Avg Booking Value</div><div class="val" id="an-avg">—</div></div>
-        <div class="stat-card"><div class="label">Completion Rate</div><div class="val" id="an-complete">—</div></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h2>Top Services</h2></div>
-        <table>
-          <thead><tr><th>Service</th><th>Bookings</th><th>Revenue</th></tr></thead>
-          <tbody id="an-services"></tbody>
-        </table>
-      </div>
-      <div class="card">
-        <div class="card-header"><h2>Referral Sources</h2></div>
-        <table>
-          <thead><tr><th>Source</th><th>Count</th><th>%</th></tr></thead>
-          <tbody id="an-referrals"></tbody>
-        </table>
-      </div>
+<!-- ══ CATALOGUE ══ -->
+<div class="page" id="page-catalogue">
+  <div class="page-hdr">
+    <h1>Service Catalogue</h1>
+    <div class="page-hdr-actions">
+      <span id="cat-saved" class="save-flash">✓ Saved</span>
+      <button class="btn btn-primary btn-sm" onclick="saveCatalogue()">Save Changes</button>
     </div>
+  </div>
+  <p class="text-muted" style="margin-bottom:20px">Changes save to the database and immediately appear in the booking form.</p>
+  <div id="cat-loading" class="cat-loading"><div class="cat-spinner"></div>Loading…</div>
+  <div id="cat-content" style="display:none"></div>
+</div>
+
+<!-- ══ ANALYTICS ══ -->
+<div class="page" id="page-analytics">
+  <div class="page-hdr"><h1>Analytics</h1></div>
+  <div class="stats-grid">
+    <div class="stat-card accent"><div class="s-label">This Month Revenue</div><div class="s-val" id="an-mrev">—</div></div>
+    <div class="stat-card blue"><div class="s-label">Bookings This Month</div><div class="s-val" id="an-mcnt">—</div></div>
+    <div class="stat-card green"><div class="s-label">Avg Booking Value</div><div class="s-val" id="an-avg">—</div></div>
+    <div class="stat-card amber"><div class="s-label">Completion Rate</div><div class="s-val" id="an-rate">—</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;flex-wrap:wrap">
+    <div class="card">
+      <div class="card-hdr"><h2>Top Services</h2></div>
+      <table><thead><tr><th>Service</th><th>Bookings</th><th>Revenue</th></tr></thead>
+      <tbody id="an-svcs"></tbody></table>
+    </div>
+    <div class="card">
+      <div class="card-hdr"><h2>Referral Sources</h2></div>
+      <table><thead><tr><th>Source</th><th>Count</th><th>%</th></tr></thead>
+      <tbody id="an-refs"></tbody></table>
+    </div>
+  </div>
+</div>
+```
 
   </div><!-- /main -->
 </div><!-- /app -->
 
-<!-- Booking Detail Modal -->
-<div class="modal-overlay" id="booking-modal">
+<!-- ══ BOOKING MODAL ══ -->
+
+<div class="modal-overlay" id="booking-modal" onclick="if(event.target===this)closeModal()">
   <div class="modal">
-    <div class="modal-header">
+    <div class="modal-hdr">
       <h2 id="modal-title">Booking Detail</h2>
-      <button class="modal-close" onclick="closeModal()">×</button>
+      <button class="close" onclick="closeModal()">×</button>
     </div>
     <div class="modal-body" id="modal-body"></div>
   </div>
 </div>
 
 <script>
-// ─── Data & State ──────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════
 let allBookings = [];
+let allStaff    = [];
+let currentUser = null; // { role:'admin'|'staff', staffId, staffName, staffColor }
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth();
-let catalogueServices = [];
-let catalogueAddons = [];
+let catServices = [], catAddons = [];
 
-const defaultStaff = [
-  { id:1, name:'Joe Coover', role:'Owner / Magician', color:'#7c3aed', pin:'1234' },
-  { id:2, name:'Staff Member 2', role:'Performer', color:'#0891b2', pin:'0000' },
-  { id:3, name:'Staff Member 3', role:'Face Painter', color:'#d97706', pin:'0000' },
-  { id:4, name:'Staff Member 4', role:'Balloon Artist', color:'#16a34a', pin:'0000' },
-  { id:5, name:'Staff Member 5', role:'DJ', color:'#dc2626', pin:'0000' },
-  { id:6, name:'Staff Member 6', role:'Assistant', color:'#7c3aed', pin:'0000' }
+const EXCLUSIVE_TAGS = new Set([
+  'Magic Show','Childrens Magic','Corporate Magic','Balloon Sculpting',
+  'Face Painting','Glitter Tattoos','Juggling','Stilt Walking',
+  'Acrobatics','Fire Breathing','Foam Party','Snow Experience',
+  'DJ Piñata','Game Show','Magic Camp','Photo Booth','Emcee'
+]);
+
+const SKILL_PRESETS = [
+  'Magic Show','Childrens Magic','Corporate Magic','Balloon Sculpting',
+  'Face Painting','Glitter Tattoos','Juggling','Stilt Walking',
+  'Acrobatics','Fire Breathing','Foam Party','Snow Experience',
+  'DJ Piñata','Game Show','Magic Camp','Photo Booth','Emcee','Driver','Setup'
 ];
 
-// ─── Auth ──────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════
+// AUTH
+// ══════════════════════════════════════════════════
 async function doLogin() {
   const pw = document.getElementById('auth-pw').value;
   document.getElementById('auth-err').style.display = 'none';
   try {
     const res = await fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ password: pw })
     });
     const data = await res.json();
     if (data.success) {
-      sessionStorage.setItem('fm_auth', '1');
+      currentUser = { role: data.role, staffId: data.staffId || null, staffName: data.staffName || 'Admin', staffColor: data.staffColor || '#7c3aed' };
+      sessionStorage.setItem('fm_auth', JSON.stringify(currentUser));
       document.getElementById('auth-screen').style.display = 'none';
       document.getElementById('app').style.display = 'block';
       init();
@@ -330,34 +508,79 @@ async function doLogin() {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  if (sessionStorage.getItem('fm_auth')) {
+  document.getElementById('dash-date').textContent =
+    new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  const saved = sessionStorage.getItem('fm_auth');
+  if (saved) {
+    try { currentUser = JSON.parse(saved); } catch { currentUser = { role: 'admin' }; }
     document.getElementById('auth-screen').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     init();
   }
-  document.getElementById('dash-date').textContent = new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
 });
 
-// ─── Init ──────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════
 async function init() {
-  await loadBookings();
-  showPage('dashboard');
+  if (currentUser?.role === 'staff') {
+    // Hide admin-only nav items for staff login
+    ['dashboard','bookings','calendar','clients','catalogue','analytics'].forEach(p => {
+      const el = document.getElementById('nav-' + p);
+      if (el) el.style.display = 'none';
+    });
+    // Load staff list so preferences modal can find this staff member
+    try { const r = await fetch('/api/staff'); allStaff = await r.json(); } catch {}
+    await loadStaffPortal();
+    showPage('portal');
+    const greet = document.getElementById('portal-greeting');
+    if (greet) greet.textContent = 'Hey, ' + (currentUser.staffName || 'there') + '! 👋';
+  } else {
+    await Promise.all([loadBookings(), loadStaffList()]);
+    showPage('dashboard');
+  }
+}
+
+async function loadStaffList() {
+  try {
+    const res = await fetch('/api/staff');
+    allStaff = await res.json();
+  } catch(e) { console.error('loadStaffList:', e); }
 }
 
 async function loadBookings() {
   try {
     const res = await fetch('/api/bookings');
     allBookings = await res.json();
-    updateDashStats();
-    renderDashBookings();
-    renderBookingsTable();
-    renderCalendar();
-    renderClients();
-    renderAnalytics();
-  } catch(e) { console.error('Load bookings:', e); }
+    refreshAllViews();
+  } catch(e) { console.error('loadBookings:', e); }
 }
 
-// ─── Navigation ───────────────────────────────────────────────────────────────
+function refreshAllViews() {
+  renderDashboard();
+  renderBookingsTable();
+  renderCalendar();
+  renderClients();
+  renderAnalytics();
+}
+
+// ══════════════════════════════════════════════════
+// MOBILE NAV
+// ══════════════════════════════════════════════════
+function toggleNav() {
+  const open = document.getElementById('hamburger').classList.toggle('open');
+  document.querySelector('.sidebar').classList.toggle('open', open);
+  document.getElementById('nav-overlay').classList.toggle('open', open);
+}
+function closeNav() {
+  document.getElementById('hamburger').classList.remove('open');
+  document.querySelector('.sidebar').classList.remove('open');
+  document.getElementById('nav-overlay').classList.remove('open');
+}
+
+// ══════════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════════
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
@@ -365,505 +588,801 @@ function showPage(name) {
   document.getElementById('nav-' + name).classList.add('active');
   if (name === 'staff') renderStaff();
   if (name === 'catalogue') loadCatalogue();
+  closeNav(); // close drawer after navigation on mobile
 }
 
-// ─── Dashboard ────────────────────────────────────────────────────────────────
-function updateDashStats() {
-  document.getElementById('stat-total').textContent = allBookings.length;
-  document.getElementById('stat-review').textContent = allBookings.filter(b => b.status === 'review').length;
-  document.getElementById('stat-confirmed').textContent = allBookings.filter(b => b.status === 'confirmed').length;
-  const rev = allBookings.filter(b => ['confirmed','completed'].includes(b.status))
+// ══════════════════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════════════════
+function renderDashboard() {
+  document.getElementById('st-total').textContent = allBookings.length;
+  document.getElementById('st-review').textContent = allBookings.filter(b => b.status === 'review').length;
+  document.getElementById('st-confirmed').textContent = allBookings.filter(b => b.status === 'confirmed').length;
+  const rev = allBookings
+    .filter(b => ['confirmed','completed'].includes(b.status))
     .reduce((s,b) => s + Number(b.total_price||0), 0);
-  document.getElementById('stat-revenue').textContent = '$' + rev.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
-}
+  document.getElementById('st-revenue').textContent = '$' + rev.toLocaleString('en-US',{maximumFractionDigits:0});
 
-function renderDashBookings() {
-  const tbody = document.getElementById('dash-bookings');
   const recent = [...allBookings].slice(0, 8);
-  tbody.innerHTML = recent.map(b => `
-    <tr style="cursor:pointer" onclick="openBooking('${b.id}')">
-      <td><code style="font-size:.8rem">${b.reference||'-'}</code></td>
-      <td>${b.client_name||''}</td>
-      <td>${b.service_name||''}</td>
-      <td>${fmtDate(b.event_date)}</td>
-      <td>$${Number(b.total_price||0).toFixed(0)}</td>
-      <td><span class="badge badge-${b.status||'review'}">${b.status||'review'}</span></td>
-    </tr>`).join('');
+  document.getElementById('dash-tbody').innerHTML = recent.length
+    ? recent.map(b => bookingRow(b)).join('')
+    : `<tr><td colspan="6" class="table-empty">No bookings yet</td></tr>`;
 }
 
-// ─── Bookings table ───────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════
+// BOOKINGS TABLE
+// ══════════════════════════════════════════════════
 function renderBookingsTable() {
-  const filter = document.getElementById('filter-status').value;
-  const list = filter ? allBookings.filter(b => b.status === filter) : allBookings;
-  const tbody = document.getElementById('bookings-tbody');
-  tbody.innerHTML = list.map(b => `
-    <tr style="cursor:pointer" onclick="openBooking('${b.id}')">
-      <td><code style="font-size:.8rem">${b.reference||'-'}</code></td>
-      <td><div style="font-weight:600">${b.client_name||''}</div><div style="font-size:.78rem;color:#888">${b.client_email||''}</div></td>
-      <td>${b.service_name||''}</td>
-      <td>${fmtDate(b.event_date)}</td>
-      <td>$${Number(b.total_price||0).toFixed(0)}</td>
-      <td><span class="badge badge-${b.status||'review'}">${b.status||'review'}</span></td>
-      <td><button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openBooking('${b.id}')">View</button></td>
-    </tr>`).join('');
+  const statusFilter = document.getElementById('filter-status').value;
+  const search = (document.getElementById('filter-search').value || '').toLowerCase().trim();
+
+  let list = allBookings;
+  if (statusFilter) list = list.filter(b => b.status === statusFilter);
+  if (search) list = list.filter(b =>
+    (b.client_name||'').toLowerCase().includes(search) ||
+    (b.reference||'').toLowerCase().includes(search) ||
+    (b.service_name||'').toLowerCase().includes(search)
+  );
+
+  document.getElementById('bookings-tbody').innerHTML = list.length
+    ? list.map(b => bookingRow(b, true)).join('')
+    : `<tr><td colspan="7" class="table-empty">No bookings match your filters</td></tr>`;
 }
 
-// ─── Booking detail modal ─────────────────────────────────────────────────────
+function bookingRow(b, showViewBtn = false) {
+  return `<tr style="cursor:pointer" onclick="openBooking('${b.id}')">
+    <td><code style="font-size:.75rem;color:#7c3aed">${b.reference||'—'}</code></td>
+    <td><div style="font-weight:600">${esc(b.client_name||'')}</div><div class="text-muted">${esc(b.client_email||'')}</div></td>
+    <td>${esc(b.service_name||'—')}${b.is_custom_quote?'<span class="badge badge-custom" style="margin-left:5px">Quote</span>':''}</td>
+    <td>${fmtDate(b.event_date)}</td>
+    <td>${Number(b.total_price||0)>0?'$'+Number(b.total_price).toFixed(0):'<span class="text-muted">TBD</span>'}</td>
+    <td><span class="badge badge-${b.status||'review'}">${b.status||'review'}</span></td>
+    ${showViewBtn?`<td><button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openBooking('${b.id}')">View</button></td>`:''}
+  </tr>`;
+}
+
+// ══════════════════════════════════════════════════
+// BOOKING MODAL
+// ══════════════════════════════════════════════════
 function openBooking(id) {
   const b = allBookings.find(x => String(x.id) === String(id));
   if (!b) return;
-  document.getElementById('modal-title').textContent = `${b.reference || 'Booking'} — ${b.client_name}`;
 
-  const addons = Array.isArray(b.addons) ? b.addons : (typeof b.addons === 'string' ? JSON.parse(b.addons||'[]') : []);
-  const addonLines = addons.map(a => `<div class="q-line"><span>${a.name}</span><span>$${Number(a.price||0).toFixed(2)}</span></div>`).join('');
-  const mileageLine = Number(b.mileage_cost) > 0 ? `<div class="q-line"><span>Travel (${b.mileage_miles} mi)</span><span>$${Number(b.mileage_cost).toFixed(2)}</span></div>` : '';
+  document.getElementById('modal-title').textContent = `${b.reference||'Booking'} — ${b.client_name}`;
+
+  const addons = parseAddons(b.addons);
+  const addonRows = addons.map(a =>
+    `<div class="q-row sub"><span>${esc(a.name)}</span><span>${Number(a.price||0)>0?'+$'+Number(a.price).toFixed(2):'Custom'}</span></div>`
+  ).join('');
+  const mileageRow = Number(b.mileage_cost) > 0
+    ? `<div class="q-row sub"><span>🚗 Travel (${b.mileage_miles} mi)</span><span>+$${Number(b.mileage_cost).toFixed(2)}</span></div>` : '';
+  const extraRow = Number(b.extra_hours) > 0
+    ? `<div class="q-row sub"><span>+${b.extra_hours} extra hr${b.extra_hours>1?'s':''}</span><span>+$${Number(b.extra_hours_cost||0).toFixed(2)}</span></div>` : '';
 
   document.getElementById('modal-body').innerHTML = `
-    <div class="status-row">
+    <!-- Status pills -->
+    <div class="status-pills">
       ${['review','pending','confirmed','completed','cancelled'].map(s =>
-        `<button class="btn btn-sm ${b.status===s?'btn-primary':'btn-outline'}" onclick="setStatus('${b.id}','${s}')">${s}</button>`
+        `<button class="status-pill ${b.status===s?'active-'+s:''}" onclick="setStatus('${b.id}','${s}')">${s}</button>`
       ).join('')}
     </div>
+
+    <!-- Detail grid -->
     <div class="detail-grid">
-      <div class="detail-field"><label>Client</label><div class="val">${b.client_name}</div></div>
-      <div class="detail-field"><label>Phone</label><div class="val">${b.client_phone||'—'}</div></div>
-      <div class="detail-field"><label>Email</label><div class="val">${b.client_email||'—'}</div></div>
-      <div class="detail-field"><label>Referral</label><div class="val">${b.referral_source||'—'}</div></div>
-      <div class="detail-field"><label>Event Date</label><div class="val">${fmtDate(b.event_date)} ${b.event_time||''}</div></div>
-      <div class="detail-field"><label>Event Type</label><div class="val">${b.event_type||'—'}</div></div>
-      <div class="detail-field"><label>Guests</label><div class="val">${b.guest_count||'—'}</div></div>
-      <div class="detail-field"><label>ZIP / Location</label><div class="val">${b.event_zip||'—'}${b.event_location?' — '+b.event_location:''}</div></div>
+      <div class="detail-field"><label>Client</label><div class="dval">${esc(b.client_name||'—')}</div></div>
+      <div class="detail-field"><label>Phone</label><div class="dval"><a href="tel:${b.client_phone||''}">${esc(b.client_phone||'—')}</a></div></div>
+      <div class="detail-field"><label>Email</label><div class="dval"><a href="mailto:${b.client_email||''}">${esc(b.client_email||'—')}</a></div></div>
+      <div class="detail-field"><label>Referral</label><div class="dval">${esc(b.referral_source||'—')}</div></div>
+      <div class="detail-field"><label>Event Date</label><div class="dval">${fmtDate(b.event_date)}${b.event_time?' at '+fmtTime(b.event_time):''}</div></div>
+      <div class="detail-field"><label>Event Type</label><div class="dval">${esc(b.event_type||'—')}</div></div>
+      <div class="detail-field"><label>Guests</label><div class="dval">${b.guest_count||'—'}</div></div>
+      <div class="detail-field"><label>ZIP / Location</label><div class="dval">${esc(b.event_zip||'—')}${b.event_location?' — '+esc(b.event_location):''}</div></div>
     </div>
-    ${b.notes ? `<div style="margin-bottom:16px"><label style="font-size:.75rem;text-transform:uppercase;color:#888;font-weight:700;letter-spacing:.05em">Client Notes</label><p style="margin-top:4px;color:#374151;font-size:.9rem">${b.notes}</p></div>` : ''}
-    <div class="quote-summary">
-      <h3>Quote</h3>
-      <div class="q-line"><span>${b.service_name}</span><span>$${Number(b.service_price||0).toFixed(2)}</span></div>
-      ${addonLines}
-      ${mileageLine}
-      <div class="q-line" style="font-weight:700"><span>Total</span><span>$${Number(b.total_price||0).toFixed(2)}</span></div>
-      <div class="q-line" style="color:#7c3aed"><span>Deposit</span><span>$${Number(b.deposit_amount||100).toFixed(2)} ${b.deposit_paid?'✅ Paid':'⏳ Unpaid'}</span></div>
-      <div class="q-line"><span>Balance Due</span><span>$${Number(b.balance_due||0).toFixed(2)}</span></div>
+
+    ${b.notes?`<div style="margin-bottom:18px"><span class="section-label">Client Notes</span><p style="font-size:.875rem;color:#374151;line-height:1.6">${esc(b.notes)}</p></div>`:''}
+
+    <!-- Quote -->
+    <div class="quote-block">
+      <span class="section-label">Quote Breakdown</span>
+      <div class="q-row"><span>${esc(b.service_name||'Service')}</span><span>${Number(b.service_price||0)>0?'$'+Number(b.service_price).toFixed(2):'Custom quote'}</span></div>
+      ${extraRow}${addonRows}${mileageRow}
+      <div class="q-row"><span>Total</span><span>${Number(b.total_price||0)>0?'$'+Number(b.total_price).toFixed(2):'Custom'}</span></div>
+      <div class="q-row deposit-row"><span>Deposit ${b.deposit_paid?'✅ Paid':'⏳ Unpaid'}</span><span>$${Number(b.deposit_amount||100).toFixed(2)}</span></div>
+      <div class="q-row"><span>Balance Due at Event</span><span>${Number(b.balance_due||0)>0?'$'+Number(b.balance_due).toFixed(2):'TBD'}</span></div>
     </div>
-    <div class="stripe-section">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <strong style="font-size:.9rem">💳 Stripe Deposit Link</strong>
-        <button class="btn btn-primary btn-sm" onclick="generateStripeLink('${b.id}')">Send Deposit Link</button>
+
+    <!-- Stripe link -->
+    <div class="stripe-block">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <strong style="font-size:.875rem">💳 Stripe Deposit Link</strong>
+        <button class="btn btn-primary btn-sm" onclick="sendStripeLink('${b.id}')">Send to Client</button>
       </div>
-      <div id="stripe-result-${b.id}" style="font-size:.8rem;color:#888"></div>
+      ${b.stripe_payment_link?`<div class="stripe-result">Last link: <a href="${b.stripe_payment_link}" target="_blank" style="color:#7c3aed">Open →</a></div>`:''}
+      <div class="stripe-result" id="stripe-msg-${b.id}"></div>
     </div>
-    <div style="margin-bottom:16px">
-      <label style="font-size:.75rem;text-transform:uppercase;color:#888;font-weight:700;letter-spacing:.05em;display:block;margin-bottom:6px">Admin Notes</label>
-      <textarea class="notes-area" id="admin-notes-${b.id}" placeholder="Internal notes (not visible to client)…">${b.admin_notes||''}</textarea>
-      <button class="btn btn-outline btn-sm" style="margin-top:6px" onclick="saveAdminNotes('${b.id}')">Save Notes</button>
+
+    <!-- Admin notes -->
+    <div class="notes-block">
+      <span class="section-label">Admin Notes <span class="text-muted">(internal only)</span></span>
+      <textarea class="notes-area" id="admin-notes-${b.id}" placeholder="Internal notes not visible to the client…">${esc(b.admin_notes||'')}</textarea>
+
+```
+  <div class="notes-actions">
+    <button class="btn btn-outline btn-sm" onclick="saveAdminNotes('${b.id}')">Save Notes</button>
+    <span class="save-flash" id="notes-flash-${b.id}">✓ Saved</span>
+  </div>
+</div>
+
+<!-- Record payment -->
+<div class="payment-block">
+  <span class="section-label">💵 Record Payment</span>
+  <div class="pay-row">
+    <div class="pay-field">
+      <label>Amount ($)</label>
+      <input type="number" id="pay-amt-${b.id}" placeholder="0.00" step="0.01" style="width:100px"/>
     </div>
-    <div style="background:#f9fafb;border-radius:10px;padding:14px;margin-bottom:16px">
-      <div style="font-size:.75rem;text-transform:uppercase;color:#888;font-weight:700;letter-spacing:.05em;margin-bottom:10px">💵 Record Payment</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-        <div>
-          <label style="font-size:.75rem;color:#888;display:block;margin-bottom:3px">Amount</label>
-          <input id="pay-amount-${b.id}" type="number" placeholder="0.00" style="width:100px;padding:7px 10px;border:2px solid #e5e7eb;border-radius:6px;font-size:.875rem"/>
-        </div>
-        <div>
-          <label style="font-size:.75rem;color:#888;display:block;margin-bottom:3px">Method</label>
-          <select id="pay-method-${b.id}" style="padding:7px 10px;border:2px solid #e5e7eb;border-radius:6px;font-size:.875rem">
-            <option value="cash">Cash</option>
-            <option value="stripe">Stripe</option>
-            <option value="paypal">PayPal</option>
-            <option value="venmo">Venmo</option>
-            <option value="check">Check</option>
-          </select>
-        </div>
-        <div style="flex:1;min-width:120px">
-          <label style="font-size:.75rem;color:#888;display:block;margin-bottom:3px">Note (optional)</label>
-          <input id="pay-note-${b.id}" type="text" placeholder="e.g. deposit, full payment…" style="width:100%;padding:7px 10px;border:2px solid #e5e7eb;border-radius:6px;font-size:.875rem"/>
-        </div>
-        <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordPayment('${b.id}')">Save Payment</button>
-      </div>
+    <div class="pay-field">
+      <label>Method</label>
+      <select id="pay-meth-${b.id}">
+        <option value="cash">Cash</option>
+        <option value="stripe">Stripe</option>
+        <option value="venmo">Venmo</option>
+        <option value="paypal">PayPal</option>
+        <option value="check">Check</option>
+        <option value="zelle">Zelle</option>
+      </select>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-outline btn-sm" onclick="toggleContract('${b.id}')">
-        ${b.contract_signed ? '📝 Contract Signed ✓' : '📝 Mark Contract Signed'}
-      </button>
-      <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this booking?'))deleteBooking('${b.id}')">Delete</button>
+    <div class="pay-field" style="flex:1;min-width:120px">
+      <label>Note (optional)</label>
+      <input type="text" id="pay-note-${b.id}" placeholder="e.g. deposit, balance…" style="width:100%"/>
     </div>
-  `;
-  document.getElementById('booking-modal').classList.add('open');
+    <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordPayment('${b.id}')">Save Payment</button>
+    <span class="save-flash" id="pay-flash-${b.id}">✓ Saved</span>
+  </div>
+</div>
+
+<!-- Action strip -->
+<div class="action-strip">
+  <button class="btn btn-outline btn-sm" onclick="toggleContract('${b.id}')">
+    ${b.contract_signed?'📝 Contract Signed ✓':'📝 Mark Contract Signed'}
+  </button>
+  <button class="btn btn-danger btn-sm" onclick="confirmDelete('${b.id}')">🗑 Delete</button>
+</div>
+```
+
+`;
+
+document.getElementById(‘booking-modal’).classList.add(‘open’);
 }
 
 function closeModal() {
-  document.getElementById('booking-modal').classList.remove('open');
+document.getElementById(‘booking-modal’).classList.remove(‘open’);
 }
-document.getElementById('booking-modal').addEventListener('click', e => {
-  if (e.target === e.currentTarget) closeModal();
-});
 
+// ── Status ──
 async function setStatus(id, status) {
-  await fetch('/api/booking/' + id, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status })
-  });
-  await loadBookings();
-  openBooking(id);
+try {
+await patch(id, { status });
+await loadBookings();
+openBooking(id);
+} catch(e) { alert(’Failed to update status: ’ + e.message); }
 }
 
+// ── Admin notes — inline save feedback, no alert ──
 async function saveAdminNotes(id) {
-  const notes = document.getElementById('admin-notes-' + id).value;
-  await fetch('/api/booking/' + id, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ admin_notes: notes })
-  });
-  alert('Notes saved.');
+const notes = document.getElementById(‘admin-notes-’ + id).value;
+try {
+await patch(id, { admin_notes: notes });
+// Update local state so re-opening reflects the change
+const b = allBookings.find(x => String(x.id) === String(id));
+if (b) b.admin_notes = notes;
+flash(‘notes-flash-’ + id);
+} catch(e) { alert(’Failed to save notes: ’ + e.message); }
 }
 
-async function generateStripeLink(id) {
-  const el = document.getElementById('stripe-result-' + id);
-  el.textContent = 'Generating…';
-  try {
-    const res = await fetch('/api/create-stripe-link', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ booking_id: id })
-    });
-    const data = await res.json();
-    if (data.url) {
-      el.innerHTML = `✅ Sent to client. <a href="${data.url}" target="_blank" style="color:#7c3aed">Open link</a>`;
-    } else {
-      el.textContent = '❌ Error: ' + (data.error || 'Unknown error');
-    }
-  } catch(e) { el.textContent = '❌ ' + e.message; }
+// ── Stripe link — pulls all required fields from booking object ──
+async function sendStripeLink(id) {
+const b = allBookings.find(x => String(x.id) === String(id));
+if (!b) return;
+const el = document.getElementById(‘stripe-msg-’ + id);
+el.textContent = ‘Generating…’;
+
+const depositAmount = Number(b.deposit_amount) || 100;
+
+try {
+const res = await fetch(’/api/create-stripe-link’, {
+method: ‘POST’,
+headers: { ‘Content-Type’: ‘application/json’ },
+body: JSON.stringify({
+bookingId:  b.id,
+bookingRef: b.reference,
+client:     b.client_name,
+email:      b.client_email,
+service:    b.service_name,
+amount:     depositAmount,
+})
+});
+const data = await res.json();
+if (data.url) {
+el.innerHTML = `✅ Link sent. <a href="${data.url}" target="_blank" style="color:#7c3aed">Open →</a>`;
+const bk = allBookings.find(x => String(x.id) === String(id));
+if (bk) bk.stripe_payment_link = data.url;
+} else {
+el.textContent = ’❌ ’ + (data.error || ‘Unknown error’);
+}
+} catch(e) { el.textContent = ’❌ ’ + e.message; }
 }
 
-async function deleteBooking(id) {
-  await fetch('/api/booking/' + id, { method: 'DELETE' });
-  closeModal();
-  await loadBookings();
-}
-
-async function toggleContract(id) {
-  const b = allBookings.find(x => String(x.id) === String(id));
-  if (!b) return;
-  await fetch('/api/booking/' + id, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contract_signed: !b.contract_signed })
-  });
-  await loadBookings();
-  openBooking(id);
-}
-
+// ── Record payment — inline feedback, reopens modal to show updated deposit status ──
 async function recordPayment(id) {
-  const amount = document.getElementById('pay-amount-' + id).value;
-  const method = document.getElementById('pay-method-' + id).value;
-  const note = document.getElementById('pay-note-' + id).value;
-  if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
-    alert('Please enter a valid payment amount.');
-    return;
-  }
-  const btn = document.getElementById('pay-btn-' + id);
-  btn.disabled = true; btn.textContent = 'Saving…';
-  try {
-    const res = await fetch('/api/booking/' + id, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ payment_amount: Number(amount), payment_method: method, payment_note: note, deposit_paid: true })
-    });
-    if (!res.ok) throw new Error('Save failed');
-    btn.textContent = '✅ Saved';
-    await loadBookings();
-  } catch(e) {
-    alert('Error saving payment: ' + e.message);
-    btn.disabled = false; btn.textContent = 'Save Payment';
-  }
+const amt = document.getElementById(‘pay-amt-’ + id).value;
+const method = document.getElementById(‘pay-meth-’ + id).value;
+const note = document.getElementById(‘pay-note-’ + id).value;
+
+if (!amt || isNaN(Number(amt)) || Number(amt) <= 0) {
+document.getElementById(‘pay-amt-’ + id).style.borderColor = ‘#dc2626’;
+setTimeout(() => document.getElementById(‘pay-amt-’ + id).style.borderColor = ‘’, 1500);
+return;
 }
 
-// ─── Calendar ─────────────────────────────────────────────────────────────────
-function changeMonth(dir) { calMonth += dir; if(calMonth>11){calMonth=0;calYear++;}else if(calMonth<0){calMonth=11;calYear--;} renderCalendar(); }
+const btn = document.getElementById(‘pay-btn-’ + id);
+btn.disabled = true; btn.textContent = ‘Saving…’;
+
+try {
+await patch(id, {
+payment_amount: Number(amt),
+payment_method: method,
+payment_note: note,
+deposit_paid: true
+});
+await loadBookings();
+flash(‘pay-flash-’ + id);
+btn.textContent = ‘Save Payment’;
+btn.disabled = false;
+// Reopen to reflect updated deposit_paid status
+openBooking(id);
+} catch(e) {
+alert(’Error saving payment: ’ + e.message);
+btn.disabled = false; btn.textContent = ‘Save Payment’;
+}
+}
+
+// ── Toggle contract — optimistic UI ──
+async function toggleContract(id) {
+const b = allBookings.find(x => String(x.id) === String(id));
+if (!b) return;
+const newVal = !b.contract_signed;
+try {
+await patch(id, { contract_signed: newVal });
+b.contract_signed = newVal;
+openBooking(id); // re-render modal with updated state
+} catch(e) { alert(’Failed to update contract: ’ + e.message); }
+}
+
+async function confirmDelete(id) {
+if (!confirm(‘Delete this booking? This cannot be undone.’)) return;
+await fetch(’/api/booking/’ + id, { method: ‘DELETE’ });
+closeModal();
+await loadBookings();
+}
+
+// ── Shared PATCH helper ──
+async function patch(id, payload) {
+const res = await fetch(’/api/booking/’ + id, {
+method: ‘PATCH’,
+headers: { ‘Content-Type’: ‘application/json’ },
+body: JSON.stringify(payload)
+});
+if (!res.ok) {
+const err = await res.json().catch(() => ({}));
+throw new Error(err.error || ‘Request failed’);
+}
+return res.json();
+}
+
+// ══════════════════════════════════════════════════
+// CALENDAR
+// ══════════════════════════════════════════════════
+function changeMonth(dir) {
+calMonth += dir;
+if (calMonth > 11) { calMonth = 0; calYear++; }
+else if (calMonth < 0) { calMonth = 11; calYear–; }
+renderCalendar();
+}
 
 function renderCalendar() {
-  const label = new Date(calYear, calMonth, 1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
-  document.getElementById('cal-month-label').textContent = label;
-  const grid = document.getElementById('cal-grid');
-  const firstDay = new Date(calYear, calMonth, 1).getDay();
-  const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
-  const today = new Date();
-  let html = '';
-  for (let i=0;i<firstDay;i++) html += `<div class="cal-day other-month"></div>`;
-  for (let d=1;d<=daysInMonth;d++) {
-    const isToday = d===today.getDate()&&calMonth===today.getMonth()&&calYear===today.getFullYear();
-    const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const dayBookings = allBookings.filter(b => b.event_date && b.event_date.startsWith(dateStr) && b.status !== 'cancelled');
-    const eventsHtml = dayBookings.map(b => `<div class="cal-event" onclick="openBooking('${b.id}')" title="${b.client_name}">${b.service_name||b.client_name}</div>`).join('');
-    html += `<div class="cal-day${isToday?' today':''}"><div class="day-num">${d}</div>${eventsHtml}</div>`;
-  }
-  grid.innerHTML = html;
+document.getElementById(‘cal-month-label’).textContent =
+new Date(calYear, calMonth, 1).toLocaleDateString(‘en-US’,{month:‘long’,year:‘numeric’});
+
+const firstDay = new Date(calYear, calMonth, 1).getDay();
+const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+const today = new Date();
+let html = ‘’;
+
+for (let i=0;i<firstDay;i++) html += `<div class="cal-cell other"></div>`;
+for (let d=1;d<=daysInMonth;d++) {
+const isToday = d===today.getDate()&&calMonth===today.getMonth()&&calYear===today.getFullYear();
+const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+const dayBkgs = allBookings.filter(b => b.event_date && b.event_date.startsWith(dateStr) && b.status !== ‘cancelled’);
+const evts = dayBkgs.map(b =>
+`<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${b.client_name} — ${b.service_name}">${b.service_name||b.client_name}</div>`
+).join(’’);
+html += `<div class="cal-cell${isToday?' today':''}"><div class="cn">${d}</div>${evts}</div>`;
+}
+document.getElementById(‘cal-grid’).innerHTML = html;
 }
 
-// ─── Clients ──────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════
+// CLIENTS
+// ══════════════════════════════════════════════════
 function renderClients() {
-  const clientMap = {};
-  allBookings.forEach(b => {
-    const k = b.client_email || b.client_name;
-    if (!clientMap[k]) clientMap[k] = { name: b.client_name, email: b.client_email, phone: b.client_phone, bookings: 0, total: 0, last: null };
-    clientMap[k].bookings++;
-    clientMap[k].total += Number(b.total_price||0);
-    if (!clientMap[k].last || b.event_date > clientMap[k].last) clientMap[k].last = b.event_date;
-  });
-  const clients = Object.values(clientMap).sort((a,b) => b.total - a.total);
-  document.getElementById('clients-tbody').innerHTML = clients.map(c => `
-    <tr>
-      <td style="font-weight:600">${c.name}</td>
-      <td>${c.email||'—'}</td>
-      <td>${c.phone||'—'}</td>
-      <td>${c.bookings}</td>
-      <td>$${c.total.toFixed(0)}</td>
-      <td>${fmtDate(c.last)}</td>
-    </tr>`).join('');
+const map = {};
+allBookings.forEach(b => {
+const k = b.client_email || b.client_name;
+if (!map[k]) map[k] = { name:b.client_name, email:b.client_email, phone:b.client_phone, count:0, total:0, last:null };
+map[k].count++;
+map[k].total += Number(b.total_price||0);
+if (!map[k].last || b.event_date > map[k].last) map[k].last = b.event_date;
+});
+const clients = Object.values(map).sort((a,b) => b.total - a.total);
+document.getElementById(‘clients-tbody’).innerHTML = clients.length
+? clients.map(c => ` <tr> <td style="font-weight:600">${esc(c.name)}</td> <td><a href="mailto:${c.email||''}" style="color:#7c3aed">${esc(c.email||'—')}</a></td> <td><a href="tel:${c.phone||''}" style="color:#374151">${esc(c.phone||'—')}</a></td> <td>${c.count}</td> <td>$${c.total.toFixed(0)}</td> <td>${fmtDate(c.last)}</td> </tr>`).join(’’)
+: `<tr><td colspan="6" class="table-empty">No clients yet</td></tr>`;
 }
 
-// ─── Staff ────────────────────────────────────────────────────────────────────
-const SKILL_PRESETS = [
-  "Magic Show","Childrens Magic","Corporate Magic","Balloon Sculpting",
-  "Face Painting","Glitter Tattoos","Juggling","Stilt Walking",
-  "Acrobatics","Fire Breathing","Foam Party","Snow Experience",
-  "DJ Pinata","Game Show","Magic Camp","Photo Booth","Emcee"
-];
-
-function getStaff() {
-  return JSON.parse(localStorage.getItem('fm_staff') || 'null') || defaultStaff;
-}
-function saveStaffData(staff) {
-  localStorage.setItem('fm_staff', JSON.stringify(staff));
+// ══════════════════════════════════════════════════
+// STAFF (DB-backed)
+// ══════════════════════════════════════════════════
+function parseSkills(raw) {
+if (Array.isArray(raw)) return raw;
+try { return JSON.parse(raw || ‘[]’); } catch { return []; }
 }
 
-function renderStaff() {
-  const staff = getStaff();
-  document.getElementById('staff-grid').innerHTML = staff.map(s => {
-    const skills = s.skills || [];
-    const tagsHtml = skills.map(sk =>
-      `<span class="skill-tag">${sk}<span class="remove-tag" onclick="removeSkill(${s.id},'${sk.replace(/'/g,"\\'")}')">×</span></span>`
-    ).join('');
-    return `<div class="staff-card" style="border-top-color:${s.color}">
-      <div style="width:44px;height:44px;border-radius:50%;background:${s.color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.1rem;margin-bottom:10px">${s.name[0]}</div>
-      <h3>${s.name}</h3>
-      <div class="role">${s.role}</div>
-      <div style="margin:10px 0;min-height:28px">${tagsHtml || '<span style="color:#bbb;font-size:.78rem">No skills added yet</span>'}</div>
-      <div class="add-skill-row">
-        ${SKILL_PRESETS.filter(p => !skills.includes(p)).slice(0,4).map(p =>
-          `<button class="skill-preset" onclick="addSkill(${s.id},'${p.replace(/'/g,"\\'")}')">+ ${p}</button>`
-        ).join('')}
-        <button class="skill-preset" style="border-color:#a855f7" onclick="addCustomSkill(${s.id})">+ Custom…</button>
+async function renderStaff() {
+const grid = document.getElementById(‘staff-grid’);
+grid.innerHTML = ‘<div style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af">Loading…</div>’;
+try {
+const res = await fetch(’/api/staff’);
+allStaff = await res.json();
+} catch(e) {
+grid.innerHTML = ‘<div style="grid-column:1/-1;text-align:center;padding:40px;color:#dc2626">Failed to load staff.</div>’;
+return;
+}
+if (!allStaff.length) {
+grid.innerHTML = ‘<div style="grid-column:1/-1;text-align:center;padding:48px;color:#9ca3af">No staff yet. Add your first team member.</div>’;
+return;
+}
+grid.innerHTML = allStaff.map(s => {
+const skills = parseSkills(s.skills);
+const tags = skills.map(sk => {
+const excl = EXCLUSIVE_TAGS.has(sk.name);
+return `<span class="skill-tag" style="${excl?'':'background:#f0fdf4;color:#059669;border-color:#a7f3d0'}" title="${excl?'Exclusive — one per gig':'Stackable — can combine'}">${esc(sk.name)}<span class="skill-rm" onclick="removeSkill(${s.id},'${sk.name.replace(/'/g,"\\'")}')">×</span></span>`;
+}).join(’’);
+const existingNames = skills.map(sk => sk.name);
+const presets = SKILL_PRESETS.filter(p => !existingNames.includes(p)).slice(0,4).map(p =>
+`<button class="skill-preset-btn" onclick="addSkill(${s.id},'${p.replace(/'/g,"\\'")}')">+ ${p}</button>`
+).join(’’);
+return ` <div class="staff-card" style="border-top-color:${s.color}"> <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"> <div class="staff-avatar" style="background:${s.color}">${(s.preferred_name||s.name)[0]}</div> <div style="flex:1;min-width:0"> <div style="font-weight:700;color:#1e1b4b;font-size:.95rem">${esc(s.preferred_name||s.name)}${s.name!==s.preferred_name&&s.preferred_name?'<span style="font-weight:400;color:#9ca3af;font-size:.78rem"> ('+esc(s.name)+')</span>':''}</div> <div class="staff-role">${esc(s.role)}${s.pronouns?' &middot; <em style="font-weight:400">'+esc(s.pronouns)+'</em>':''}</div> </div> </div> <div style="font-size:.76rem;color:#6b7280;margin-bottom:10px;display:flex;flex-direction:column;gap:3px"> <div><a href="tel:${s.phone||''}" style="color:#374151;text-decoration:none">📞 ${esc(s.phone||'—')}</a></div> <div><a href="mailto:${s.email||''}" style="color:#7c3aed;text-decoration:none">✉️ ${esc(s.email||'—')}</a></div> <div style="display:flex;justify-content:space-between;align-items:center"> <span>🔑 PIN: <code style="background:#f3f4f6;padding:1px 6px;border-radius:4px">${esc(s.pin||'—')}</code></span> <span style="color:#9ca3af;font-size:.72rem">${s.comms_preference||'email'}</span> </div> </div> <div class="skills-wrap" style="margin-bottom:4px">${tags||'<span style="color:#bbb;font-size:.75rem">No skills yet</span>'}</div> <div style="font-size:.67rem;color:#9ca3af;margin-bottom:8px"> <span style="background:#ede9fe;color:#7c3aed;border-radius:3px;padding:1px 5px;font-weight:700">Purple</span> exclusive &nbsp; <span style="background:#f0fdf4;color:#059669;border-radius:3px;padding:1px 5px;font-weight:700">Green</span> stackable </div> <div class="skill-presets">${presets} <button class="skill-preset-btn" style="border-color:#a855f7;color:#7c3aed" onclick="addCustomSkill(${s.id})">+ Custom…</button> </div> <div class="staff-card-actions"> <button class="btn btn-primary btn-sm" onclick="openStaffModal(${s.id})">Edit</button> <button class="btn btn-danger btn-sm" onclick="archiveStaff(${s.id})">Remove</button> </div> </div>`;
+}).join(’’);
+}
+
+async function addSkill(id, skillName) {
+const s = allStaff.find(x => x.id === id); if (!s) return;
+const skills = parseSkills(s.skills);
+if (skills.find(sk => sk.name === skillName)) return;
+skills.push({ name: skillName, exclusive: EXCLUSIVE_TAGS.has(skillName) });
+await patchStaff(id, { skills });
+renderStaff();
+}
+
+async function removeSkill(id, skillName) {
+const s = allStaff.find(x => x.id === id); if (!s) return;
+const skills = parseSkills(s.skills).filter(sk => sk.name !== skillName);
+await patchStaff(id, { skills });
+renderStaff();
+}
+
+function addCustomSkill(id) {
+const skillName = prompt(‘Enter skill name:’);
+if (skillName?.trim()) addSkill(id, skillName.trim());
+}
+
+async function archiveStaff(id) {
+if (!confirm(‘Remove this staff member? Their history is preserved.’)) return;
+await fetch(’/api/staff/’ + id, { method: ‘DELETE’ });
+renderStaff();
+}
+
+async function patchStaff(id, payload) {
+const res = await fetch(’/api/staff/’ + id, {
+method: ‘PATCH’,
+headers: { ‘Content-Type’: ‘application/json’ },
+body: JSON.stringify(payload)
+});
+if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error||‘Save failed’); }
+const updated = await res.json();
+const idx = allStaff.findIndex(x => x.id === id);
+if (idx !== -1) allStaff[idx] = updated;
+return updated;
+}
+
+// ── Add / Edit Staff Modal ───────────────────────────────────────────────────
+function openAddStaff() { openStaffModal(null); }
+
+function openStaffModal(id) {
+const s = id ? allStaff.find(x => x.id === id) : null;
+document.getElementById(‘modal-title’).textContent = s ? ’Edit: ’ + (s.preferred_name||s.name) : ‘Add Staff Member’;
+document.getElementById(‘modal-body’).innerHTML = ` <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px"> <div class="detail-field" style="grid-column:1/-1"> <label>Full Name *</label> <input id="sf-name" type="text" value="${esc(s?.name||'')}" placeholder="Jane Smith" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Preferred Name</label> <input id="sf-pname" type="text" value="${esc(s?.preferred_name||'')}" placeholder="Jane" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Pronouns</label> <input id="sf-pronouns" type="text" value="${esc(s?.pronouns||'')}" placeholder="she/her" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Role</label> <input id="sf-role" type="text" value="${esc(s?.role||'Performer')}" placeholder="Performer" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Card Color</label> <input id="sf-color" type="color" value="${s?.color||'#7c3aed'}" style="width:100%;height:38px;border:1.5px solid #e5e7eb;border-radius:7px;cursor:pointer;padding:2px"/> </div> <div class="detail-field"> <label>Phone * <span style="color:#9ca3af;font-weight:400">(required)</span></label> <input id="sf-phone" type="tel" value="${esc(s?.phone||'')}" placeholder="(405) 555-1234" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Email * <span style="color:#9ca3af;font-weight:400">(required)</span></label> <input id="sf-email" type="email" value="${esc(s?.email||'')}" placeholder="jane@email.com" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Login PIN</label> <input id="sf-pin" type="text" value="${esc(s?.pin||'0000')}" maxlength="10" placeholder="e.g. 1234" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;font-family:monospace;letter-spacing:.1em"/> <div style="font-size:.72rem;color:#9ca3af;margin-top:3px">Staff use this PIN to log in</div> </div> <div class="detail-field"> <label>Comms Preference</label> <select id="sf-comms" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="email" ${(s?.comms_preference||'email')==='email'?'selected':''}>Email</option> <option value="sms"   ${s?.comms_preference==='sms'  ?'selected':''}>SMS (future)</option> <option value="call"  ${s?.comms_preference==='call' ?'selected':''}>Phone Call</option> </select> </div> </div> <div style="margin-bottom:14px"> <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:5px">Admin Notes <span style="font-weight:400">(internal only)</span></label> <textarea id="sf-anotes" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit" placeholder="Internal notes about this person…">${esc(s?.admin_notes||'')}</textarea> </div> <div style="display:flex;gap:10px;flex-wrap:wrap"> <button class="btn btn-primary" onclick="saveStaffModal(${id||'null'})">${s?'Save Changes':'Add Staff Member'}</button> <button class="btn btn-outline" onclick="closeModal()">Cancel</button> </div>`;
+document.getElementById(‘booking-modal’).classList.add(‘open’);
+}
+
+async function saveStaffModal(id) {
+const name  = document.getElementById(‘sf-name’).value.trim();
+const phone = document.getElementById(‘sf-phone’).value.trim();
+const email = document.getElementById(‘sf-email’).value.trim();
+if (!name)  { alert(‘Name is required.’); return; }
+if (!phone) { alert(‘Phone number is required.’); return; }
+if (!email) { alert(‘Email is required.’); return; }
+const payload = {
+name,
+preferred_name:   document.getElementById(‘sf-pname’).value.trim() || name,
+pronouns:         document.getElementById(‘sf-pronouns’).value.trim(),
+role:             document.getElementById(‘sf-role’).value.trim() || ‘Performer’,
+color:            document.getElementById(‘sf-color’).value,
+phone, email,
+pin:              document.getElementById(‘sf-pin’).value.trim() || ‘0000’,
+comms_preference: document.getElementById(‘sf-comms’).value,
+admin_notes:      document.getElementById(‘sf-anotes’).value.trim(),
+};
+try {
+if (id) {
+await patchStaff(id, payload);
+} else {
+const res = await fetch(’/api/staff’, {
+method: ‘POST’, headers: { ‘Content-Type’: ‘application/json’ }, body: JSON.stringify(payload)
+});
+if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error||‘Create failed’); }
+}
+closeModal();
+renderStaff();
+} catch(e) { alert(’Save failed: ’ + e.message); }
+}
+
+// ══════════════════════════════════════════════════
+// STAFF PORTAL (staff role — their own view)
+// ══════════════════════════════════════════════════
+async function loadStaffPortal() {
+const grid = document.getElementById(‘portal-gigs’);
+if (!grid) return;
+grid.innerHTML = ‘<div style="text-align:center;padding:40px;color:#9ca3af">Loading your gigs…</div>’;
+try {
+const res = await fetch(’/api/staff-assignments?staff_id=’ + currentUser.staffId);
+const data = await res.json();
+renderPortalGigs(data.myGigs || [], data.openGigs || []);
+} catch(e) {
+grid.innerHTML = ‘<div style="text-align:center;padding:40px;color:#dc2626">Failed to load. Try refreshing.</div>’;
+}
+}
+
+function renderPortalGigs(myGigs, openGigs) {
+const grid = document.getElementById(‘portal-gigs’);
+let html = ‘’;
+
+const assigned   = myGigs.filter(g => g.status === ‘assigned’);
+const interested = myGigs.filter(g => g.status === ‘interested’ || g.status === ‘backup’);
+
+if (assigned.length) {
+html += ‘<h3 style="font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:#059669;font-weight:700;margin-bottom:10px">✅ My Confirmed Gigs</h3>’;
+html += assigned.map(g => gigCard(g, true)).join(’’);
+}
+if (interested.length) {
+html += ‘<h3 style="font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:#f59e0b;font-weight:700;margin:20px 0 10px">👋 Expressed Interest</h3>’;
+html += interested.map(g => gigCard(g, false)).join(’’);
+}
+if (openGigs.length) {
+html += ‘<h3 style="font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;font-weight:700;margin:20px 0 10px">📋 Open Gigs Matching My Skills</h3>’;
+html += openGigs.map(g => openGigCard(g)).join(’’);
+}
+if (!html) {
+html = ‘<div style="text-align:center;padding:48px;color:#9ca3af"><div style="font-size:3rem;margin-bottom:12px">🎪</div><p>No upcoming gigs right now.<br>Check back soon!</p></div>’;
+}
+grid.innerHTML = html;
+}
+
+function gigCard(g, isAssigned) {
+const dateStr = g.event_date
+? new Date(g.event_date+‘T00:00:00’).toLocaleDateString(‘en-US’,{weekday:‘long’,month:‘long’,day:‘numeric’,year:‘numeric’})
+: ‘TBD’;
+const checklistStatuses = [‘upcoming’,‘on_my_way’,‘arrived’,‘completed’];
+const checklistLabels   = { upcoming:‘📅 Upcoming’, on_my_way:‘🚗 On My Way’, arrived:‘📍 Arrived’, completed:‘✅ Done’ };
+const curStatus = g.checklist_status || ‘upcoming’;
+const curIdx    = checklistStatuses.indexOf(curStatus);
+
+const checklistHtml = isAssigned ? `<div style="margin-top:14px;padding-top:14px;border-top:1px solid #f3f4f6"> <div style="font-size:.72rem;text-transform:uppercase;color:#9ca3af;font-weight:700;margin-bottom:8px">Day-of Checklist</div> <div style="display:flex;gap:6px;flex-wrap:wrap"> ${checklistStatuses.map((s, i) => { const isActive = s === curStatus; const isPast   = i < curIdx; const isNext   = i === curIdx + 1; return`<button class=“btn btn-sm ${isActive?‘btn-primary’:isPast?‘btn-success’:‘btn-outline’}”
+onclick=“updateChecklist(’${g.log_id||’’}’,’${g.id}’,’${g.booking_id}’,${currentUser.staffId},’${s}’)”
+${isActive||isPast?‘disabled’:’’}>${checklistLabels[s]}</button>`; }).join('')} </div> ${curStatus === 'completed' ? `<button class="btn btn-outline btn-sm" style="margin-top:8px;border-color:#7c3aed;color:#7c3aed"
+onclick="openSurvey('${g.log_id}','${g.booking_id}')">📋 Submit Post-Gig Report</button>` : ''} </div>` : ‘’;
+
+return `
+
+  <div style="background:#fff;border-radius:12px;padding:18px;box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:14px;border-left:4px solid ${isAssigned?'#10b981':'#f59e0b'}">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px">
+      <div>
+        <div style="font-weight:700;color:#1e1b4b">${esc(g.service_name)}</div>
+        <div style="font-size:.78rem;color:#9ca3af;margin-top:2px">${esc(g.tag_filled)} · <span class="badge badge-${g.booking_status}">${g.booking_status}</span></div>
       </div>
-      <div style="margin-top:10px">
-        <button class="btn btn-outline btn-sm" onclick="editStaff(${s.id})">Edit</button>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-weight:700;color:#1e1b4b;font-size:.875rem">${dateStr}</div>
+        ${g.event_time?`<div style="font-size:.78rem;color:#9ca3af">${fmtTime(g.event_time)}</div>`:''}
       </div>
-    </div>`;
-  }).join('');
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:.8rem;color:#374151">
+      <div>📍 ${esc(g.event_zip||'OKC')}${isAssigned&&g.event_location?' — '+esc(g.event_location):''}</div>
+      <div>👥 ${g.guest_count||'?'} guests · ${esc(g.event_type||'')}</div>
+      ${isAssigned?`<div>👤 <strong>${esc(g.client_name)}</strong></div>`:''}
+      ${isAssigned&&g.client_phone?`<div>📞 <a href="tel:${g.client_phone}" style="color:#7c3aed">${esc(g.client_phone)}</a></div>`:''}
+    </div>
+    ${isAssigned&&g.client_notes?`<div style="margin-top:8px;font-size:.78rem;color:#6b7280;background:#f9fafb;border-radius:6px;padding:8px">${esc(g.client_notes)}</div>`:''}
+    ${checklistHtml}
+  </div>`;
 }
 
-function addSkill(staffId, skill) {
-  const staff = getStaff();
-  const s = staff.find(x => x.id === staffId);
-  if (!s) return;
-  if (!s.skills) s.skills = [];
-  if (!s.skills.includes(skill)) s.skills.push(skill);
-  saveStaffData(staff);
-  renderStaff();
+function openGigCard(g) {
+const dateStr = g.event_date
+? new Date(g.event_date+‘T00:00:00’).toLocaleDateString(‘en-US’,{weekday:‘short’,month:‘short’,day:‘numeric’,year:‘numeric’})
+: ‘TBD’;
+return `
+
+  <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:12px;border-left:4px solid #e5e7eb">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div>
+        <div style="font-weight:600;color:#1e1b4b">${esc(g.service_name)}</div>
+        <div style="font-size:.78rem;color:#9ca3af;margin-top:2px">${dateStr} · ${esc(g.event_zip||'OKC area')} · ${g.guest_count||'?'} guests</div>
+        <div style="margin-top:5px"><span class="badge" style="background:#ede9fe;color:#7c3aed">${esc(g.tag_required)}</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+        <button class="btn btn-primary btn-sm" onclick="expressInterest(${g.id},'${g.tag_required}','interested')">I'm Available</button>
+        <button class="btn btn-outline btn-sm" onclick="expressInterest(${g.id},'${g.tag_required}','backup')">Backup</button>
+      </div>
+    </div>
+  </div>`;
 }
 
-function removeSkill(staffId, skill) {
-  const staff = getStaff();
-  const s = staff.find(x => x.id === staffId);
-  if (!s || !s.skills) return;
-  s.skills = s.skills.filter(sk => sk !== skill);
-  saveStaffData(staff);
-  renderStaff();
+async function updateChecklist(logId, assignmentId, bookingId, staffId, status) {
+try {
+await fetch(’/api/staff-assignments’, {
+method:‘POST’, headers:{‘Content-Type’:‘application/json’},
+body: JSON.stringify({ action:‘update_checklist’, log_id:logId||undefined, assignment_id:assignmentId, booking_id:bookingId, staff_id:staffId, status })
+});
+loadStaffPortal();
+} catch(e) { alert(’Update failed: ’ + e.message); }
 }
 
-function addCustomSkill(staffId) {
-  const skill = prompt('Enter skill name:');
-  if (!skill || !skill.trim()) return;
-  addSkill(staffId, skill.trim());
+async function expressInterest(bookingId, tagFilled, status) {
+try {
+await fetch(’/api/staff-assignments’, {
+method:‘POST’, headers:{‘Content-Type’:‘application/json’},
+body: JSON.stringify({ action:‘express_interest’, booking_id:bookingId, staff_id:currentUser.staffId, tag_filled:tagFilled, status })
+});
+loadStaffPortal();
+} catch(e) { alert(’Failed: ’ + e.message); }
 }
 
-function openAddStaff() {
-  const name = prompt('Staff name:'); if(!name) return;
-  const role = prompt('Role:') || 'Performer';
-  const staff = JSON.parse(localStorage.getItem('fm_staff') || 'null') || defaultStaff;
-  staff.push({ id: Date.now(), name, role, color: '#7c3aed', pin: '0000' });
-  localStorage.setItem('fm_staff', JSON.stringify(staff));
-  renderStaff();
+function openSurvey(logId) {
+document.getElementById(‘modal-title’).textContent = ‘📋 Post-Gig Report’;
+document.getElementById(‘modal-body’).innerHTML = ` <p style="color:#6b7280;font-size:.875rem;margin-bottom:18px">Joe reviews all reports. Fill in what's relevant.</p> <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px"> <div class="detail-field"> <label>Actual Guest Count</label> <input id="sv-guests" type="number" placeholder="e.g. 45" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Event Rating</label> <select id="sv-rating" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="">Select…</option> <option value="5">⭐⭐⭐⭐⭐ Amazing</option> <option value="4">⭐⭐⭐⭐ Great</option> <option value="3">⭐⭐⭐ Good</option> <option value="2">⭐⭐ Rough</option> <option value="1">⭐ Difficult</option> </select> </div> <div class="detail-field"> <label>Balance Collected?</label> <select id="sv-balcollect" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="">Select…</option> <option value="true">✅ Yes</option> <option value="false">❌ No</option> </select> </div> <div class="detail-field"> <label>Amount Collected ($)</label> <input id="sv-balamount" type="number" step="0.01" placeholder="0.00" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Gas Level After</label> <select id="sv-gas" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="">N/A</option> <option>Full</option><option>3/4</option><option>1/2</option><option>1/4</option> <option value="Low">Low — needs fill</option> </select> </div> <div class="detail-field"> <label>Foam Fluid Needed?</label> <select id="sv-foam" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="">N/A</option> <option value="true">⚠️ Yes — needs refill</option> <option value="false">✅ No — still good</option> </select> </div> <div class="detail-field"> <label>Empty Jugs Refilled?</label> <select id="sv-jugs" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="">N/A</option> <option value="true">✅ Yes</option> <option value="false">❌ No</option> </select> </div> </div> <div style="margin-bottom:12px"> <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:5px">Notes / Highlights</label> <textarea id="sv-notes" rows="3" placeholder="How'd it go? Anything worth sharing…" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit"></textarea> </div> <div style="margin-bottom:16px"> <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:5px">Issues / Problems</label> <textarea id="sv-issues" rows="3" placeholder="Anything to flag or fix next time…" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit"></textarea> </div> <div style="display:flex;gap:10px;flex-wrap:wrap"> <button class="btn btn-primary" onclick="submitSurvey('${logId}')">Submit Report</button> <button class="btn btn-outline" onclick="closeModal()">Cancel</button> </div>`;
+document.getElementById(‘booking-modal’).classList.add(‘open’);
 }
 
-function editStaff(id) {
-  const staff = JSON.parse(localStorage.getItem('fm_staff') || 'null') || defaultStaff;
-  const s = staff.find(x => x.id === id); if(!s) return;
-  const name = prompt('Name:', s.name); if(!name) return;
-  const role = prompt('Role:', s.role);
-  s.name = name; if(role) s.role = role;
-  localStorage.setItem('fm_staff', JSON.stringify(staff));
-  renderStaff();
+async function submitSurvey(logId) {
+const boolVal = id => { const v = document.getElementById(id).value; return v===’’?undefined:v===‘true’; };
+const payload = {
+action: ‘submit_survey’, log_id: logId,
+guest_count_actual: document.getElementById(‘sv-guests’).value    || undefined,
+event_rating:       document.getElementById(‘sv-rating’).value    || undefined,
+balance_collected:  boolVal(‘sv-balcollect’),
+balance_amount:     document.getElementById(‘sv-balamount’).value || undefined,
+gas_level:          document.getElementById(‘sv-gas’).value       || undefined,
+foam_fluid_needed:  boolVal(‘sv-foam’),
+empty_jugs_refilled:boolVal(‘sv-jugs’),
+notes:              document.getElementById(‘sv-notes’).value.trim()  || undefined,
+issues:             document.getElementById(‘sv-issues’).value.trim() || undefined,
+};
+Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
+try {
+await fetch(’/api/staff-assignments’, {
+method:‘POST’, headers:{‘Content-Type’:‘application/json’}, body: JSON.stringify(payload)
+});
+closeModal();
+alert(‘Report submitted! Thanks 🎉’);
+loadStaffPortal();
+} catch(e) { alert(’Submit failed: ’ + e.message); }
 }
 
-// ─── Catalogue ────────────────────────────────────────────────────────────────
+// Staff can edit their own preferences from portal
+function openStaffPreferences() {
+const s = allStaff.find(x => x.id === currentUser.staffId) || {};
+document.getElementById(‘modal-title’).textContent = ‘My Preferences’;
+document.getElementById(‘modal-body’).innerHTML = ` <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px"> <div class="detail-field"> <label>Preferred Name</label> <input id="pref-name" type="text" value="${esc(s.preferred_name||s.name||'')}" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Pronouns</label> <input id="pref-pronouns" type="text" value="${esc(s.pronouns||'')}" placeholder="she/her" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Phone *</label> <input id="pref-phone" type="tel" value="${esc(s.phone||'')}" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field"> <label>Email *</label> <input id="pref-email" type="email" value="${esc(s.email||'')}" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/> </div> <div class="detail-field" style="grid-column:1/-1"> <label>Communication Preference</label> <select id="pref-comms" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"> <option value="email" ${(s.comms_preference||'email')==='email'?'selected':''}>Email</option> <option value="sms"   ${s.comms_preference==='sms'  ?'selected':''}>SMS (coming soon)</option> <option value="call"  ${s.comms_preference==='call' ?'selected':''}>Phone Call</option> </select> </div> </div> <div style="margin-bottom:16px"> <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:5px">Notes to Joe</label> <textarea id="pref-notes" rows="4" placeholder="Availability constraints, preferences, questions for Joe…" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit">${esc(s.staff_notes||'')}</textarea> </div> <div style="display:flex;gap:10px;flex-wrap:wrap"> <button class="btn btn-primary" onclick="saveStaffPreferences()">Save</button> <button class="btn btn-outline" onclick="closeModal()">Cancel</button> </div>`;
+document.getElementById(‘booking-modal’).classList.add(‘open’);
+}
+
+async function saveStaffPreferences() {
+const phone = document.getElementById(‘pref-phone’).value.trim();
+const email = document.getElementById(‘pref-email’).value.trim();
+if (!phone || !email) { alert(‘Phone and email are required.’); return; }
+const payload = {
+preferred_name:   document.getElementById(‘pref-name’).value.trim(),
+pronouns:         document.getElementById(‘pref-pronouns’).value.trim(),
+phone, email,
+comms_preference: document.getElementById(‘pref-comms’).value,
+staff_notes:      document.getElementById(‘pref-notes’).value.trim(),
+};
+try {
+const updated = await patchStaff(currentUser.staffId, payload);
+currentUser.staffName = updated.preferred_name || updated.name;
+sessionStorage.setItem(‘fm_auth’, JSON.stringify(currentUser));
+const el = document.getElementById(‘portal-greeting’);
+if (el) el.textContent = ’Hey, ’ + currentUser.staffName + ‘! 👋’;
+closeModal();
+} catch(e) { alert(’Save failed: ’ + e.message); }
+}
+
+// ══════════════════════════════════════════════════
+// CATALOGUE
+// ══════════════════════════════════════════════════
 async function loadCatalogue() {
-  document.getElementById('cat-loading').style.display = 'block';
-  document.getElementById('cat-content').style.display = 'none';
-  try {
-    const res = await fetch('/api/services');
-    const data = await res.json();
-    catalogueServices = data.services || [];
-    catalogueAddons = data.addons || [];
-    renderCatalogue();
-    document.getElementById('cat-loading').style.display = 'none';
-    document.getElementById('cat-content').style.display = 'block';
-  } catch(e) {
-    document.getElementById('cat-loading').innerHTML = '<p style="color:#dc2626">Failed to load services. Check API.</p>';
-  }
+document.getElementById(‘cat-loading’).style.display = ‘block’;
+document.getElementById(‘cat-content’).style.display = ‘none’;
+try {
+const res = await fetch(’/api/services’);
+const data = await res.json();
+catServices = data.services || [];
+catAddons = data.addons || [];
+renderCatalogue();
+document.getElementById(‘cat-loading’).style.display = ‘none’;
+document.getElementById(‘cat-content’).style.display = ‘block’;
+} catch(e) {
+document.getElementById(‘cat-loading’).innerHTML = ‘<p style="color:#dc2626;text-align:center">Failed to load. Check API connection.</p>’;
+}
 }
 
 function renderCatalogue() {
-  const catOrder = ['shows','performers','experiences','camps'];
-  const catLabels = { shows:'🎭 Shows', performers:'🤹 Performers', experiences:'🎊 Experiences', camps:'🏕 Camps' };
-  let html = '';
+const catOrder = [‘shows’,‘performers’,‘experiences’,‘camps’];
+const catLabels = { shows:‘🎭 Shows’, performers:‘🤹 Performers’, experiences:‘🎊 Experiences’, camps:‘🏕 Camps’ };
+let html = ‘’;
 
-  catOrder.forEach(cat => {
-    const svcs = catalogueServices.filter(s => s.category === cat);
-    if (!svcs.length) return;
-    html += `<div class="cat-section"><h3>${catLabels[cat]||cat}</h3>
-    <table class="catalogue-table" style="width:100%;border-collapse:collapse">
-      <thead><tr><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Icon</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Name</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Price</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Duration</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Guest Note</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Active</th></tr></thead>
-      <tbody>`;
-    svcs.forEach(s => {
-      html += `<tr data-id="${s.id}" data-service-id="${s.service_id}" data-category="${s.category}">
-        <td style="padding:6px 8px"><input type="text" value="${s.icon||'🎪'}" style="width:52px;text-align:center" data-field="icon"/></td>
-        <td style="padding:6px 8px"><input type="text" value="${s.name}" data-field="name"/></td>
-        <td style="padding:6px 8px"><input type="number" value="${Number(s.price).toFixed(0)}" style="width:90px" data-field="price"/></td>
-        <td style="padding:6px 8px"><input type="number" value="${s.duration_minutes||120}" style="width:80px" placeholder="mins" data-field="duration_minutes"/></td>
-        <td style="padding:6px 8px"><input type="text" value="${s.guest_suggestion||''}" data-field="guest_suggestion"/></td>
-        <td style="padding:6px 8px;text-align:center"><input type="checkbox" ${s.active?'checked':''} data-field="active" style="width:auto"/></td>
-      </tr>`;
-    });
-    html += `</tbody></table></div>`;
-  });
+catOrder.forEach(cat => {
+const svcs = catServices.filter(s => s.category === cat);
+if (!svcs.length) return;
+html += `<div class="cat-section"><h3>${catLabels[cat]||cat}</h3> <table class="cat-table"> <thead><tr><th style="width:52px">Icon</th><th>Name</th><th style="width:90px">Price $</th><th style="width:80px">Mins</th><th>Guest Note</th><th style="width:60px;text-align:center">Active</th></tr></thead> <tbody>`;
+svcs.forEach(s => {
+html += `<tr data-service-id="${s.service_id}" data-category="${s.category}"> <td><input type="text" value="${esc(s.icon||'🎪')}" style="width:46px;text-align:center" data-field="icon"/></td> <td><input type="text" value="${esc(s.name)}" data-field="name"/></td> <td><input type="number" value="${Number(s.price).toFixed(0)}" data-field="price"/></td> <td><input type="number" value="${s.duration_minutes||120}" data-field="duration_minutes"/></td> <td><input type="text" value="${esc(s.guest_suggestion||'')}" data-field="guest_suggestion"/></td> <td style="text-align:center"><input type="checkbox" ${s.active?'checked':''} data-field="active"/></td> </tr>`;
+});
+html += `</tbody></table></div>`;
+});
 
-  // Add-ons section
-  html += `<div class="cat-section"><h3>➕ Add-ons</h3>
-  <table class="catalogue-table" style="width:100%;border-collapse:collapse">
-    <thead><tr><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Name</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Price</th><th style="padding:8px;background:#f9fafb;font-size:.75rem;text-transform:uppercase;color:#888">Active</th></tr></thead>
+html += `<div class="cat-section"><h3>➕ Add-ons</h3>
+
+  <table class="cat-table">
+    <thead><tr><th>Name</th><th style="width:90px">Price $</th><th style="width:60px;text-align:center">Active</th></tr></thead>
     <tbody>`;
-  catalogueAddons.forEach(a => {
+  catAddons.forEach(a => {
     html += `<tr data-addon-id="${a.addon_id}">
-      <td style="padding:6px 8px"><input type="text" value="${a.name}" data-field="name"/></td>
-      <td style="padding:6px 8px"><input type="number" value="${Number(a.price).toFixed(0)}" style="width:90px" data-field="price"/></td>
-      <td style="padding:6px 8px;text-align:center"><input type="checkbox" ${a.active?'checked':''} data-field="active" style="width:auto"/></td>
+      <td><input type="text" value="${esc(a.name)}" data-field="name"/></td>
+      <td><input type="number" value="${Number(a.price).toFixed(0)}" data-field="price"/></td>
+      <td style="text-align:center"><input type="checkbox" ${a.active?'checked':''} data-field="active"/></td>
     </tr>`;
   });
   html += `</tbody></table></div>`;
 
-  document.getElementById('cat-content').innerHTML = html;
+document.getElementById(‘cat-content’).innerHTML = html;
 }
 
 async function saveCatalogue() {
-  const btn = document.querySelector('[onclick="saveCatalogue()"]');
-  btn.disabled = true; btn.textContent = 'Saving…';
-  const indicator = document.getElementById('save-indicator');
-  indicator.classList.remove('visible');
+const btn = document.querySelector(’[onclick=“saveCatalogue()”]’);
+btn.disabled = true; btn.textContent = ‘Saving…’;
 
-  try {
-    const rows = document.querySelectorAll('#cat-content tr[data-service-id]');
-    for (const row of rows) {
-      const service_id = row.dataset.serviceId;
-      const category = row.dataset.category;
-      const fields = row.querySelectorAll('[data-field]');
-      const payload = { service_id, category };
-      fields.forEach(f => {
-        const field = f.dataset.field;
-        if (f.type === 'checkbox') payload[field] = f.checked;
-        else if (field === 'price' || field === 'duration_minutes') payload[field] = Number(f.value);
-        else payload[field] = f.value;
-      });
-      await fetch('/api/services', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-    }
+try {
+for (const row of document.querySelectorAll(’#cat-content tr[data-service-id]’)) {
+const payload = { service_id: row.dataset.serviceId, category: row.dataset.category };
+row.querySelectorAll(’[data-field]’).forEach(f => {
+const field = f.dataset.field;
+if (f.type === ‘checkbox’) payload[field] = f.checked;
+else if (field === ‘price’ || field === ‘duration_minutes’) payload[field] = Number(f.value);
+else payload[field] = f.value;
+});
+await fetch(’/api/services’, { method:‘POST’, headers:{‘Content-Type’:‘application/json’}, body:JSON.stringify(payload) });
+}
+for (const row of document.querySelectorAll(’#cat-content tr[data-addon-id]’)) {
+const payload = { type:‘addon’, addon_id: row.dataset.addonId };
+row.querySelectorAll(’[data-field]’).forEach(f => {
+const field = f.dataset.field;
+if (f.type === ‘checkbox’) payload[field] = f.checked;
+else if (field === ‘price’) payload[field] = Number(f.value);
+else payload[field] = f.value;
+});
+await fetch(’/api/services’, { method:‘POST’, headers:{‘Content-Type’:‘application/json’}, body:JSON.stringify(payload) });
+}
+flash(‘cat-saved’);
+} catch(e) { alert(’Save failed: ’ + e.message); }
 
-    const addonRows = document.querySelectorAll('#cat-content tr[data-addon-id]');
-    for (const row of addonRows) {
-      const addon_id = row.dataset.addonId;
-      const fields = row.querySelectorAll('[data-field]');
-      const payload = { type: 'addon', addon_id };
-      fields.forEach(f => {
-        const field = f.dataset.field;
-        if (f.type === 'checkbox') payload[field] = f.checked;
-        else if (field === 'price') payload[field] = Number(f.value);
-        else payload[field] = f.value;
-      });
-      await fetch('/api/services', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-    }
-
-    indicator.classList.add('visible');
-    setTimeout(() => indicator.classList.remove('visible'), 3000);
-  } catch(e) { alert('Save failed: ' + e.message); }
-
-  btn.disabled = false; btn.textContent = 'Save Changes';
+btn.disabled = false; btn.textContent = ‘Save Changes’;
 }
 
-// ─── Analytics ────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════
+// ANALYTICS
+// ══════════════════════════════════════════════════
 function renderAnalytics() {
-  const now = new Date();
-  const thisMonth = allBookings.filter(b => {
-    if (!b.event_date) return false;
-    const d = new Date(b.event_date);
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  });
-  const confirmedAll = allBookings.filter(b => ['confirmed','completed'].includes(b.status));
-  const monthRev = thisMonth.filter(b=>['confirmed','completed'].includes(b.status)).reduce((s,b)=>s+Number(b.total_price||0),0);
-  const avg = confirmedAll.length ? confirmedAll.reduce((s,b)=>s+Number(b.total_price||0),0)/confirmedAll.length : 0;
-  const completeRate = allBookings.length ? Math.round((allBookings.filter(b=>b.status==='completed').length/allBookings.length)*100) : 0;
+const now = new Date();
+const thisMonth = allBookings.filter(b => {
+if (!b.event_date) return false;
+const d = new Date(b.event_date + ‘T00:00:00’);
+return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
+});
+const confirmed = allBookings.filter(b => [‘confirmed’,‘completed’].includes(b.status));
+const mRev = thisMonth.filter(b => [‘confirmed’,‘completed’].includes(b.status))
+.reduce((s,b) => s+Number(b.total_price||0), 0);
+const avg = confirmed.length ? confirmed.reduce((s,b)=>s+Number(b.total_price||0),0)/confirmed.length : 0;
+const rate = allBookings.length ? Math.round(allBookings.filter(b=>b.status===‘completed’).length/allBookings.length*100) : 0;
 
-  document.getElementById('an-month-rev').textContent = '$'+monthRev.toFixed(0);
-  document.getElementById('an-month-cnt').textContent = thisMonth.length;
-  document.getElementById('an-avg').textContent = '$'+avg.toFixed(0);
-  document.getElementById('an-complete').textContent = completeRate+'%';
+document.getElementById(‘an-mrev’).textContent = ‘$’ + mRev.toLocaleString(‘en-US’,{maximumFractionDigits:0});
+document.getElementById(‘an-mcnt’).textContent = thisMonth.length;
+document.getElementById(‘an-avg’).textContent = ‘$’ + avg.toFixed(0);
+document.getElementById(‘an-rate’).textContent = rate + ‘%’;
 
-  // Top services
-  const svcMap = {};
-  allBookings.forEach(b => {
-    const k = b.service_name||'Unknown';
-    if (!svcMap[k]) svcMap[k] = { count:0, rev:0 };
-    svcMap[k].count++;
-    svcMap[k].rev += Number(b.total_price||0);
-  });
-  const svcs = Object.entries(svcMap).sort((a,b)=>b[1].count-a[1].count);
-  document.getElementById('an-services').innerHTML = svcs.map(([k,v])=>`
-    <tr><td>${k}</td><td>${v.count}</td><td>$${v.rev.toFixed(0)}</td></tr>`).join('');
+// Top services
+const svcMap = {};
+allBookings.forEach(b => {
+const k = b.service_name||‘Unknown’;
+if (!svcMap[k]) svcMap[k] = { count:0, rev:0 };
+svcMap[k].count++; svcMap[k].rev += Number(b.total_price||0);
+});
+document.getElementById(‘an-svcs’).innerHTML = Object.entries(svcMap)
+.sort((a,b)=>b[1].count-a[1].count)
+.map(([k,v]) => `<tr><td>${esc(k)}</td><td>${v.count}</td><td>$${v.rev.toFixed(0)}</td></tr>`).join(’’);
 
-  // Referrals
-  const refMap = {};
-  allBookings.forEach(b => {
-    const k = b.referral_source || 'Unknown';
-    refMap[k] = (refMap[k]||0)+1;
-  });
-  const refs = Object.entries(refMap).sort((a,b)=>b[1]-a[1]);
-  const total = refs.reduce((s,r)=>s+r[1],0);
-  document.getElementById('an-referrals').innerHTML = refs.map(([k,v])=>`
-    <tr><td>${k}</td><td>${v}</td><td>${total?Math.round(v/total*100):0}%</td></tr>`).join('');
+// Referrals
+const refMap = {};
+allBookings.forEach(b => { const k = b.referral_source||‘Unknown’; refMap[k]=(refMap[k]||0)+1; });
+const refs = Object.entries(refMap).sort((a,b)=>b[1]-a[1]);
+const total = refs.reduce((s,r)=>s+r[1],0);
+document.getElementById(‘an-refs’).innerHTML = refs.map(([k,v]) => ` <tr> <td>${esc(k)}</td><td>${v}</td> <td> <div style="display:flex;align-items:center;gap:6px"> <span>${total?Math.round(v/total*100):0}%</span> <div class="referral-bar" style="flex:1"><div class="referral-fill" style="width:${total?Math.round(v/total*100):0}%"></div></div> </div> </td> </tr>`).join(’’);
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════
+// HELPERS
+// ══════════════════════════════════════════════════
 function fmtDate(d) {
-  if (!d) return '—';
-  const dt = new Date(d + (d.includes('T')?'':'T00:00:00'));
-  return dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+if (!d) return ‘—’;
+return new Date(d + (d.includes(‘T’)?’’:‘T00:00:00’))
+.toLocaleDateString(‘en-US’,{month:‘short’,day:‘numeric’,year:‘numeric’});
+}
+
+function fmtTime(t) {
+if (!t) return ‘’;
+const [hh,mm] = t.split(’:’);
+const h = parseInt(hh);
+return `${h%12||12}:${mm} ${h<12?'AM':'PM'}`;
+}
+
+function esc(str) {
+return String(str||’’).replace(/&/g,’&’).replace(/</g,’<’).replace(/>/g,’>’).replace(/”/g,’"’);
+}
+
+function parseAddons(raw) {
+if (Array.isArray(raw)) return raw;
+if (typeof raw === ‘string’) { try { return JSON.parse(raw); } catch { return []; } }
+return [];
+}
+
+function flash(id) {
+const el = document.getElementById(id);
+if (!el) return;
+el.classList.add(‘show’);
+setTimeout(() => el.classList.remove(‘show’), 2500);
 }
 </script>
+
 </body>
 </html>
