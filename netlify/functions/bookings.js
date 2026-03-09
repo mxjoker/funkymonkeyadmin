@@ -25,6 +25,7 @@ async function ensureTable(client) {
       deposit_paid BOOLEAN DEFAULT FALSE,
       deposit_paid_at TIMESTAMPTZ,
       stripe_session_id VARCHAR(255),
+      stripe_payment_link TEXT DEFAULT '',
 
       event_date DATE,
       event_time VARCHAR(10),
@@ -69,6 +70,7 @@ async function ensureTable(client) {
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_paid BOOLEAN DEFAULT FALSE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_paid_at TIMESTAMPTZ",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_payment_link TEXT DEFAULT ''",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_date DATE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_time VARCHAR(10)",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_zip VARCHAR(10)",
@@ -118,6 +120,17 @@ exports.handler = async (event) => {
 
     // GET all bookings
     if (event.httpMethod === 'GET') {
+      // staff_view=true — strip client contact, financials, admin notes
+      if (event.queryStringParameters?.staff_view === 'true') {
+        const { rows } = await client.query(
+          `SELECT id, reference, status, service_id, service_name,
+                  event_date, event_time, event_zip, event_type, guest_count
+           FROM bookings
+           WHERE status NOT IN ('cancelled')
+           ORDER BY event_date ASC`
+        );
+        return { statusCode: 200, headers, body: JSON.stringify(rows) };
+      }
       const { rows } = await client.query(
         'SELECT * FROM bookings ORDER BY created_at DESC'
       );
@@ -206,7 +219,7 @@ exports.handler = async (event) => {
 async function sendEmails(booking) {
   const RESEND_API_KEY = process.env.RESEND_API_KEY;
   const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
-  const FROM = 'Funky Monkey Events <onboarding@resend.dev>';
+  const FROM = 'Funky Monkey Events <bookings@funkymonkeyevents.com>';
 
   const dateStr = booking.event_date
     ? new Date(booking.event_date + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })

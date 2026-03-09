@@ -1,13 +1,16 @@
-const FROM = "onboarding@resend.dev";
+const FROM = "Funky Monkey Events <bookings@funkymonkeyevents.com>";
 
 const sendEmail = async (to, subject, html) => {
   if (!process.env.RESEND_API_KEY || !to) return;
   try {
-    await fetch("https://api.resend.com/emails", {
+    const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { "Authorization": `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({ from: FROM, to, subject, html })
     });
+    const data = await res.json();
+    if (data.error) console.error("Resend error:", JSON.stringify(data));
+    else console.log("Email sent to:", to, "id:", data.id);
   } catch(e) { console.error("Email error:", e.message); }
 };
 

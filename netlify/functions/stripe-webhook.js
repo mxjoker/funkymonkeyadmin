@@ -2,17 +2,20 @@ const { Client } = require("pg");
 const crypto = require("crypto");
 
 const db = () => new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-const FROM = "onboarding@resend.dev";
+const FROM = "Funky Monkey Events <bookings@funkymonkeyevents.com>";
 const NOTIFY = process.env.NOTIFY_EMAIL || "Joe.Coover@gmail.com";
 
 const sendEmail = async (to, subject, html) => {
   if (!process.env.RESEND_API_KEY || !to) return;
   try {
-    await fetch("https://api.resend.com/emails", {
+    const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { "Authorization": `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({ from: FROM, to, subject, html })
     });
+    const data = await res.json();
+    if (data.error) console.error("Resend error:", JSON.stringify(data));
+    else console.log("Email sent to:", to, "id:", data.id);
   } catch(e) { console.error("Email error:", e.message); }
 };
 
@@ -54,64 +57,102 @@ exports.handler = async (event) => {
       const session = ev.data.object;
       const amountPaid = (session.amount_total || 0) / 100;
       const customerEmail = session.customer_details?.email || session.customer_email;
-      const bookingId = session.metadata?.booking_id || session.client_reference_id;
+
+      // create-stripe-link.js stores the numeric DB id in metadata.booking_db_id
+      // and the reference (FM-XXXXXX) in metadata.booking_id / client_reference_id
+      const bookingDbId  = session.metadata?.booking_db_id;
+      const bookingRef   = session.metadata?.booking_id || session.client_reference_id;
 
       let booking = null;
-      if (bookingId) {
-        const r = await c.query("SELECT * FROM bookings WHERE booking_id=$1 LIMIT 1", [bookingId]);
-        booking = r.rows[0];
+
+      // 1. Try numeric DB id first (most reliable)
+      if (bookingDbId) {
+        const r = await c.query("SELECT * FROM bookings WHERE id=$1 LIMIT 1", [parseInt(bookingDbId)]);
+        booking = r.rows[0] || null;
       }
+
+      // 2. Fall back to reference string (FM-XXXXXX)
+      if (!booking && bookingRef) {
+        const r = await c.query("SELECT * FROM bookings WHERE reference=$1 LIMIT 1", [bookingRef]);
+        booking = r.rows[0] || null;
+      }
+
+      // 3. Last resort: match by client email + open status
       if (!booking && customerEmail) {
         const r = await c.query(
-          "SELECT * FROM bookings WHERE email=$1 AND status IN ('review','pending','confirmed') ORDER BY created_at DESC LIMIT 1",
+          "SELECT * FROM bookings WHERE LOWER(client_email)=LOWER($1) AND status IN ('review','pending','confirmed') ORDER BY created_at DESC LIMIT 1",
           [customerEmail]
         );
-        booking = r.rows[0];
+        booking = r.rows[0] || null;
       }
 
       if (booking) {
-        const newDeposit = (parseFloat(booking.deposit) || 0) + amountPaid;
+        // Mark deposit paid, set status confirmed, record payment method
         const updated = await c.query(
-          "UPDATE bookings SET deposit=$1, payment_method='stripe', status='confirmed' WHERE id=$2 RETURNING *",
-          [newDeposit, booking.id]
+          `UPDATE bookings
+           SET deposit_paid=TRUE,
+               deposit_paid_at=NOW(),
+               deposit_amount=$1,
+               payment_method='stripe',
+               status='confirmed'
+           WHERE id=$2
+           RETURNING *`,
+          [amountPaid, booking.id]
         );
         const b = updated.rows[0];
-        const grand = parseFloat(b.total) + parseFloat(b.mileage_fee);
-        const balance = Math.max(0, grand - newDeposit).toFixed(2);
 
-        // Client email
-        await sendEmail(b.email, "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events",
-          wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${b.client}</strong>! 🎉</p>
+        // Calculate balance due
+        const total    = parseFloat(b.total_price)   || 0;
+        const mileage  = parseFloat(b.mileage_cost)  || 0;
+        const deposit  = parseFloat(b.deposit_amount)|| 0;
+        const balance  = Math.max(0, (total + mileage) - deposit).toFixed(2);
+
+        const dateStr  = b.event_date
+          ? new Date(b.event_date + "T00:00:00").toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric", year:"numeric" })
+          : "";
+        const timeStr  = b.event_time     || "";
+        const locStr   = b.event_location || b.event_zip || "OKC";
+
+        // Client confirmation email
+        await sendEmail(
+          b.client_email,
+          "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events",
+          wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${b.client_name}</strong>! 🎉</p>
             <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">We got your deposit and your event is officially <strong style="color:#10B981">CONFIRMED!</strong></p>
             <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
-              <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</span><br><span style="font-weight:600">${b.service}</span></div>
-              <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date & Time</span><br><span style="font-weight:600">${b.date} at ${b.time}</span></div>
-              <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Location</span><br><span style="font-weight:600">${b.location}</span></div>
+              <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</span><br><span style="font-weight:600">${b.service_name}</span></div>
+              <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date &amp; Time</span><br><span style="font-weight:600">${dateStr}${timeStr ? " at " + timeStr : ""}</span></div>
+              <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Location</span><br><span style="font-weight:600">${locStr}</span></div>
               <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #3D246044">
                 <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Deposit Paid ✓</span><br><span style="color:#10B981;font-size:20px;font-weight:900">$${amountPaid.toFixed(2)}</span></div>
                 <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Balance Due Day-Of</span><br><span style="color:#FFD600;font-size:20px;font-weight:900">$${balance}</span></div>
               </div>
             </div>
-            <p style="color:#A78BCA;font-size:13px;text-align:center">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`));
+            <p style="color:#A78BCA;font-size:13px;text-align:center">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`)
+        );
 
-        // Admin email
-        await sendEmail(NOTIFY, `💰 Deposit In: ${b.client} — $${amountPaid.toFixed(2)}`,
+        // Admin notification email
+        await sendEmail(
+          NOTIFY,
+          `💰 Deposit In: ${b.client_name} — $${amountPaid.toFixed(2)}`,
           wrap(`<p style="font-size:15px;font-weight:700;color:#10B981;margin-bottom:16px">💰 Stripe deposit received — booking auto-confirmed!</p>
             <table style="width:100%;border-collapse:collapse">
-              <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700;width:130px">Booking ID</td><td style="padding:7px 0;color:#FFD600;font-weight:700">${b.booking_id}</td></tr>
-              <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Client</td><td style="padding:7px 0;font-weight:700">${b.client}</td></tr>
-              <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</td><td style="padding:7px 0">${b.service}</td></tr>
-              <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date</td><td style="padding:7px 0">${b.date} at ${b.time}</td></tr>
+              <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700;width:130px">Ref</td><td style="padding:7px 0;color:#FFD600;font-weight:700">${b.reference}</td></tr>
+              <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Client</td><td style="padding:7px 0;font-weight:700">${b.client_name}</td></tr>
+              <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</td><td style="padding:7px 0">${b.service_name}</td></tr>
+              <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date</td><td style="padding:7px 0">${dateStr}${timeStr ? " at " + timeStr : ""}</td></tr>
               <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Deposit Paid</td><td style="padding:7px 0;color:#10B981;font-size:18px;font-weight:900">$${amountPaid.toFixed(2)}</td></tr>
               <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Balance Due</td><td style="padding:7px 0;color:#FFD600;font-weight:700">$${balance}</td></tr>
             </table>
             <div style="margin-top:20px;text-align:center">
               <a href="https://funkymonkeyadmin.netlify.app/admin.html" style="background:linear-gradient(135deg,#FF6B00,#FFD600);color:#0F0A1E;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:900;font-size:14px">View in Dashboard →</a>
-            </div>`));
+            </div>`)
+        );
 
-        console.log(`Auto-confirmed booking ${b.booking_id} — deposit $${amountPaid}`);
+        console.log(`Webhook: confirmed booking ${b.reference} (id:${b.id}) — deposit $${amountPaid}`);
+
       } else {
-        console.warn(`No booking matched email:${customerEmail} / id:${bookingId}`);
+        console.warn(`Webhook: no booking matched — dbId:${bookingDbId} ref:${bookingRef} email:${customerEmail}`);
       }
     }
 

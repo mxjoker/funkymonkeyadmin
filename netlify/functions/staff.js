@@ -6,7 +6,8 @@ const pool = new Pool({
 });
 
 const DEFAULT_STAFF = [
-  { staff_id:'joe_coover',  name:'Joe Coover',     preferred_name:'Joe',   role:'Owner / Magician', color:'#7c3aed', pin:'1234', phone:'(405) 431-6625', email:'Joe.Coover@gmail.com', pronouns:'he/him', comms_preference:'email', skills:[{name:'Magic Show',exclusive:true},{name:'Corporate Magic',exclusive:true},{name:'Childrens Magic',exclusive:true},{name:'Driver',exclusive:false}], admin_notes:'Owner', staff_notes:'', sort_order:1 },
+  { staff_id:'joe_coover', name:'Joe Coover', preferred_name:'Joe',  role:'Owner / Magician', color:'#7c3aed', pin:'9632', phone:'(405) 431-6625', email:'Joe.Coover@gmail.com', pronouns:'he/him', comms_preference:'email', skills:[{name:'Magic Show',exclusive:true},{name:'Corporate Magic',exclusive:true},{name:'Childrens Magic',exclusive:true},{name:'Driver',exclusive:false}], admin_notes:'Owner', staff_notes:'', sort_order:1 },
+  { staff_id:'troy_scott',  name:'Troy Scott', preferred_name:'Troy', role:'Performer',        color:'#0ea5e9', pin:'1234', phone:'',              email:'',                      pronouns:'',       comms_preference:'email', skills:[],                                                                                                                                                             admin_notes:'',      staff_notes:'', sort_order:2 },
 ];
 
 async function ensureTable(client) {
@@ -37,9 +38,12 @@ async function ensureTable(client) {
   const migrations = [
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS preferred_name VARCHAR(255) DEFAULT ''",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS pronouns VARCHAR(64) DEFAULT ''",
+    "ALTER TABLE staff ADD COLUMN IF NOT EXISTS role VARCHAR(100) DEFAULT 'Performer'",
+    "ALTER TABLE staff ADD COLUMN IF NOT EXISTS color VARCHAR(20) DEFAULT '#7c3aed'",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS comms_preference VARCHAR(20) DEFAULT 'email'",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS phone VARCHAR(50) DEFAULT ''",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS email VARCHAR(255) DEFAULT ''",
+    "ALTER TABLE staff ADD COLUMN IF NOT EXISTS skills JSONB DEFAULT '[]'",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS staff_notes TEXT DEFAULT ''",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS admin_notes TEXT DEFAULT ''",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE",
@@ -50,19 +54,22 @@ async function ensureTable(client) {
     try { await client.query(sql); } catch (_) {}
   }
 
-  // Seed default staff if empty
-  const { rows } = await client.query('SELECT COUNT(*) FROM staff');
-  if (parseInt(rows[0].count) === 0) {
-    for (const s of DEFAULT_STAFF) {
-      await client.query(
-        `INSERT INTO staff (staff_id, name, preferred_name, pronouns, role, color, pin, phone, email, comms_preference, skills, admin_notes, staff_notes, sort_order)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-         ON CONFLICT (staff_id) DO NOTHING`,
-        [s.staff_id, s.name, s.preferred_name, s.pronouns, s.role, s.color, s.pin,
-         s.phone, s.email, s.comms_preference, JSON.stringify(s.skills),
-         s.admin_notes, s.staff_notes, s.sort_order]
-      );
-    }
+  // Seed / correct default staff on every startup (DO UPDATE ensures PIN fixes apply to existing rows)
+  for (const s of DEFAULT_STAFF) {
+    await client.query(
+      `INSERT INTO staff (staff_id, name, preferred_name, pronouns, role, color, pin, phone, email, comms_preference, skills, admin_notes, staff_notes, sort_order)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       ON CONFLICT (staff_id) DO UPDATE SET
+         pin          = EXCLUDED.pin,
+         name         = EXCLUDED.name,
+         preferred_name = EXCLUDED.preferred_name,
+         role         = EXCLUDED.role,
+         color        = EXCLUDED.color,
+         sort_order   = EXCLUDED.sort_order`,
+      [s.staff_id, s.name, s.preferred_name, s.pronouns, s.role, s.color, s.pin,
+       s.phone, s.email, s.comms_preference, JSON.stringify(s.skills),
+       s.admin_notes, s.staff_notes, s.sort_order]
+    );
   }
 }
 
@@ -80,7 +87,16 @@ exports.handler = async (event) => {
   try {
     await ensureTable(client);
 
-    // GET all active staff
+    // GET single staff member by ID (staff portal — own record only, no PIN or admin notes)
+    if (event.httpMethod === 'GET' && event.path.match(/\/staff\/\d+$/)) {
+      const id = parseInt(event.path.split('/').pop());
+      const { rows } = await client.query('SELECT * FROM staff WHERE id=$1 AND active=TRUE', [id]);
+      if (!rows.length) return { statusCode: 404, headers: HEADERS, body: JSON.stringify({ error: 'Not found' }) };
+      const { pin, admin_notes, ...safe } = rows[0];
+      return { statusCode: 200, headers: HEADERS, body: JSON.stringify(safe) };
+    }
+
+    // GET all active staff (admin only)
     if (event.httpMethod === 'GET') {
       const { rows } = await client.query(
         'SELECT * FROM staff WHERE active = TRUE ORDER BY sort_order, id'

@@ -24,7 +24,7 @@ const notify = async ({ to_email, to_name, subject, html }) => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        from: 'Funky Monkey Events <onboarding@resend.dev>',
+        from: 'Funky Monkey Events <bookings@funkymonkeyevents.com>',
         to: to_email,
         subject,
         html
@@ -96,6 +96,7 @@ async function ensureTables(client) {
       event_rating INTEGER CHECK(event_rating BETWEEN 1 AND 5),
       notes TEXT DEFAULT '',
       issues TEXT DEFAULT '',
+      survey_submitted_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
@@ -109,6 +110,7 @@ async function ensureTables(client) {
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS foam_fluid_needed BOOLEAN",
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS empty_jugs_refilled BOOLEAN",
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS gas_level VARCHAR(50)",
+    "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS survey_submitted_at TIMESTAMPTZ",
   ];
   for (const sql of migrations) {
     try { await client.query(sql); } catch (_) {}
@@ -199,7 +201,16 @@ exports.handler = async (event) => {
           openGigs = rows;
         }
 
-        return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ myGigs, openGigs }) };
+        // Only assigned staff get client contact details
+        const safeGigs = myGigs.map(g => {
+          if (g.status !== 'assigned') {
+            const { client_name, client_phone, client_email, total_price, deposit_paid, balance_due, ...safe } = g;
+            return safe;
+          }
+          return g;
+        });
+
+        return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ myGigs: safeGigs, openGigs }) };
       }
 
       return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'booking_id or staff_id required' }) };
@@ -422,6 +433,7 @@ exports.handler = async (event) => {
 
       if (!sets.length) return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'No survey fields provided' }) };
 
+      sets.push(`survey_submitted_at=NOW()`);
       sets.push(`updated_at=NOW()`);
       vals.push(parseInt(log_id));
 

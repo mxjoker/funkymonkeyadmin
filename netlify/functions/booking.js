@@ -1,7 +1,7 @@
 const { Client } = require("pg");
 
 const db = () => new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-const FROM = "onboarding@resend.dev";
+const FROM = "Funky Monkey Events <bookings@funkymonkeyevents.com>";
 const NOTIFY = process.env.NOTIFY_EMAIL || "Joe.Coover@gmail.com";
 const SITE = "https://funkymonkeyadmin.netlify.app";
 
@@ -26,7 +26,6 @@ const wrap = (body) => `<div style="font-family:sans-serif;max-width:560px;margi
 const createStripeLink = async (booking) => {
   if (!process.env.STRIPE_SECRET_KEY) { console.error("No STRIPE_SECRET_KEY"); return null; }
 
-  // Use deposit_amount field, fall back to 100
   const depositAmount = Number(booking.deposit_amount) || 100;
   const amountCents = Math.round(depositAmount * 100);
 
@@ -35,32 +34,41 @@ const createStripeLink = async (booking) => {
     return null;
   }
 
-  const serviceName = booking.service_name || booking.service || "Event";
-  const eventDate = booking.event_date || booking.date || "";
-  const eventLocation = booking.event_location || booking.location || "OKC";
+  const serviceName = booking.service_name || "Event";
+  const eventDate   = booking.event_date   || "";
+  const eventLocation = booking.event_location || booking.event_zip || "OKC";
+  const clientEmail = booking.client_email || "";
 
   try {
-    const res = await fetch("https://api.stripe.com/v1/payment_links", {
+    // Use Checkout Sessions (not Payment Links) so checkout.session.completed
+    // webhook fires and auto-confirms the booking when deposit is paid.
+    const params = new URLSearchParams({
+      "mode": "payment",
+      "success_url": `${SITE}/booking-form.html?paid=1`,
+      "cancel_url":  `${SITE}/booking-form.html?cancelled=1`,
+      "customer_email": clientEmail,
+      "client_reference_id": booking.reference || String(booking.id),
+      "metadata[booking_id]":    booking.reference || String(booking.id),
+      "metadata[booking_db_id]": String(booking.id),
+      "line_items[0][price_data][currency]": "usd",
+      "line_items[0][price_data][unit_amount]": String(amountCents),
+      "line_items[0][price_data][product_data][name]": `${serviceName} — Deposit`,
+      "line_items[0][price_data][product_data][description]": `Deposit · ${eventDate} · ${eventLocation}`,
+      "line_items[0][quantity]": "1",
+      "payment_method_types[0]": "card",
+    });
+
+    const res = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${process.env.STRIPE_SECRET_KEY}`,
         "Content-Type": "application/x-www-form-urlencoded"
       },
-      body: new URLSearchParams({
-        "line_items[0][price_data][currency]": "usd",
-        "line_items[0][price_data][product_data][name]": `${serviceName} — Deposit`,
-        "line_items[0][price_data][product_data][description]": `Deposit · ${eventDate} · ${eventLocation}`,
-        "line_items[0][price_data][unit_amount]": String(amountCents),
-        "line_items[0][quantity]": "1",
-        "metadata[booking_id]": String(booking.id),
-        "after_completion[type]": "redirect",
-        "after_completion[redirect][url]": `${SITE}/booking-form.html?paid=1`,
-        "customer_creation": "always",
-      }).toString()
+      body: params.toString()
     });
     const data = await res.json();
-    if (data.error) { console.error("Stripe API error:", JSON.stringify(data.error)); return null; }
-    console.log("Stripe link created:", data.url);
+    if (!res.ok) { console.error("Stripe API error:", JSON.stringify(data.error)); return null; }
+    console.log("Stripe checkout session created:", data.url, "booking:", booking.reference);
     return data.url || null;
   } catch(e) {
     console.error("Stripe link error:", e.message);
@@ -149,14 +157,12 @@ exports.handler = async (event) => {
         admin_notes:       "admin_notes",
         contract_signed:   "contract_signed",
         notes:             "notes",
-        deposit:           "deposit",
         deposit_paid:      "deposit_paid",
         payment_method:    "payment_method",
         payment_amount:    "payment_amount",
         payment_note:      "payment_note",
         paymentMethod:     "payment_method",
         contractSigned:    "contract_signed",
-        staffId:           "staff_id",
         stripePaymentLink: "stripe_payment_link",
         event_type_id:     "event_type_id",
         is_custom_quote:   "is_custom_quote",
