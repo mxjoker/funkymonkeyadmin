@@ -1,5 +1,5 @@
 const { Client } = require("pg");
-const { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog } = require('./_email');
+const { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange } = require('./_email');
 
 const db = () => new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 const SITE = "https://funkymonkeyadmin.netlify.app";
@@ -61,6 +61,19 @@ exports.handler = async (event) => {
   try {
     await c.connect();
     await ensureEmailLog(c);
+    await ensureBookingChanges(c);
+
+    if (event.httpMethod === "GET") {
+      if (event.queryStringParameters?.activity !== 'true') {
+        return { statusCode: 405, headers: h, body: JSON.stringify({ error: "Method not allowed" }) };
+      }
+      const { rows: changes } = await c.query(
+        `SELECT id, action, detail, created_at FROM booking_changes
+         WHERE booking_id=$1 ORDER BY created_at DESC`,
+        [parseInt(id)]
+      );
+      return { statusCode: 200, headers: h, body: JSON.stringify({ changes }) };
+    }
 
     if (event.httpMethod === "PATCH") {
       const u = JSON.parse(event.body || "{}");
@@ -90,6 +103,13 @@ exports.handler = async (event) => {
         customer_type:     "customer_type",
         venue:             "venue",
       };
+
+      // Fetch old status for change log (only when a status change is incoming)
+      let prevStatus = null;
+      if (u.status) {
+        const prev = await c.query('SELECT status FROM bookings WHERE id=$1', [parseInt(id)]);
+        prevStatus = prev.rows[0]?.status || '?';
+      }
 
       const sets = [], vals = [];
       let idx = 1;
@@ -136,6 +156,23 @@ exports.handler = async (event) => {
       if (u.status && ["confirmed", "cancelled", "completed"].includes(u.status)) {
         const sent = await fireStatusAutomations(c, updated, u.status, stripeLink);
         console.log(`Fired ${sent} automation(s) for status=${u.status} booking=${updated.reference}`);
+      }
+
+      // Log high-signal changes to booking_changes
+      if (u.status && prevStatus !== u.status) {
+        await logChange(c, parseInt(id), 'Status changed', `${prevStatus} → ${u.status}`);
+      }
+      if (u.payment_amount !== undefined && u.payment_method !== undefined) {
+        const amt = `$${Number(u.payment_amount).toFixed(2)} ${u.payment_method}`;
+        const ref = u.payment_ref ? ` — Ref: ${u.payment_ref}` : '';
+        await logChange(c, parseInt(id), 'Payment recorded', amt + ref);
+      }
+      if (u.contract_signed !== undefined || u.contractSigned !== undefined) {
+        const signed = u.contract_signed ?? u.contractSigned;
+        await logChange(c, parseInt(id), signed ? 'Contract signed' : 'Contract unsigned', '');
+      }
+      if (u.admin_notes !== undefined) {
+        await logChange(c, parseInt(id), 'Admin notes updated', '');
       }
 
       return { statusCode: 200, headers: h, body: JSON.stringify(updated) };
