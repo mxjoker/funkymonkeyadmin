@@ -514,7 +514,57 @@ const S = {
 // ══════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════
-window.addEventListener('DOMContentLoaded', () => {
+let dbAddons = [];        // all addons from DB: [{ addon_id, name, price, ... }]
+let dbServiceAddons = {}; // { service_id: [addon_id, ...] }
+
+async function loadAddonsFromDB() {
+  try {
+    const res = await fetch('/api/services');
+    const data = await res.json();
+    dbAddons = data.addons || [];
+    dbServiceAddons = data.service_addons || {};
+    const dbServiceEventTypes = data.service_event_types || {};
+
+    // Patch each SERVICES entry's .addons with DB data
+    for (const [svcId, addonIds] of Object.entries(dbServiceAddons)) {
+      if (SERVICES[svcId]) {
+        SERVICES[svcId].addons = addonIds
+          .map(aid => {
+            const a = dbAddons.find(x => x.addon_id === aid);
+            if (!a) return null;
+            return { id: a.addon_id, name: a.name, price: Number(a.price) };
+          })
+          .filter(Boolean);
+      }
+    }
+    // For services not in dbServiceAddons, clear addons (DB is now source of truth)
+    for (const svcId of Object.keys(SERVICES)) {
+      if (!dbServiceAddons[svcId]) SERVICES[svcId].addons = [];
+    }
+
+    // Patch EVENT_TYPES[x].svcs from DB if any service_event_types data exists
+    if (Object.keys(dbServiceEventTypes).length > 0) {
+      // Build inverse map: event_type_id -> [service_ids]
+      const etToSvcs = {};
+      for (const [svcId, etIds] of Object.entries(dbServiceEventTypes)) {
+        for (const etId of etIds) {
+          if (!etToSvcs[etId]) etToSvcs[etId] = [];
+          etToSvcs[etId].push(svcId);
+        }
+      }
+      // Patch each EVENT_TYPES entry
+      EVENT_TYPES.forEach(et => {
+        if (etToSvcs[et.id]) et.svcs = etToSvcs[et.id];
+      });
+    }
+
+  } catch(e) {
+    console.warn('Could not load add-ons from DB, using defaults:', e.message);
+  }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  await loadAddonsFromDB();
   renderEtGrid();
   populateTimes();
   setMinDate();
@@ -642,15 +692,22 @@ function buildAccordion(svc) {
   }
 
   // Photo booth add-ons for non-photo-booth services
+  // Source from DB if available, else fall back to hardcoded
+  const pbAddons = ['pb_kiosk', 'pb_360'].map(id => {
+    const db = dbAddons.find(x => x.addon_id === id);
+    return db ? { id: db.addon_id, name: db.name, price: Number(db.price), note: 'Standalone: $385' } : null;
+  }).filter(Boolean);
+  const pbList = pbAddons.length ? pbAddons : PHOTO_BOOTH_ADDONS;
+
   if (!svc.id.startsWith('pb_')) {
     html += `<div class="photo-booth-section">
       <div class="addon-section-label">📸 Photo Booth Add-Ons</div>
       <div class="addon-list">`;
-    PHOTO_BOOTH_ADDONS.forEach(a => {
+    pbList.forEach(a => {
       const isSelected = S.addons.includes(a.id);
       html += `<div class="addon-item${isSelected?' selected':''}" id="addon-${a.id}" onclick="toggleAddon('${svc.id}','${a.id}')">
         <div class="addon-check"></div>
-        <div class="addon-name">${a.name}<span class="addon-note">${a.note}</span></div>
+        <div class="addon-name">${a.name}<span class="addon-note">${a.note||''}</span></div>
         <div class="addon-price-tag">+$${a.price}</div>
       </div>`;
     });
@@ -822,13 +879,16 @@ async function buildQuote() {
     total += extraCost;
   }
 
-  // Addons
-  const allAddons = [...(svc.addons||[]), ...PHOTO_BOOTH_ADDONS.map(a=>({...a, fromPB:true}))];
+  // Addons — source from service addons + photo booth fallback, all from DB
+  const pbFallback = PHOTO_BOOTH_ADDONS; // kept as static fallback if DB unavailable
+  const allAddons = [...(svc.addons||[]), ...pbFallback.map(a=>({...a, fromPB:true}))];
   S.addons.forEach(aid => {
-    // Check in service addons first
     let addon = (svc.addons||[]).find(a=>a.id===aid);
-    // Then photo booth addons
-    if (!addon) addon = PHOTO_BOOTH_ADDONS.find(a=>a.id===aid);
+    if (!addon) addon = pbFallback.find(a=>a.id===aid);
+    if (!addon) { // try DB directly
+      const db = dbAddons.find(x => x.addon_id === aid);
+      if (db) addon = { id: db.addon_id, name: db.name, price: Number(db.price) };
+    }
     if (!addon) return;
 
     if (addon.isQuote) {
@@ -914,6 +974,7 @@ async function submitBooking() {
 
   const addonDetails = S.addons.map(aid => {
     let a = (svc.addons||[]).find(x=>x.id===aid) || PHOTO_BOOTH_ADDONS.find(x=>x.id===aid);
+    if (!a) { const db = dbAddons.find(x=>x.addon_id===aid); if (db) a = {id:db.addon_id,name:db.name,price:Number(db.price)}; }
     if (!a) return null;
     const price = a.price === 'per_child' ? a.rate * guests : (a.isQuote ? 0 : Number(a.price));
     return { id: aid, name: a.name, price };

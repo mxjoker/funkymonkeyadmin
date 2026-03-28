@@ -6,22 +6,33 @@ const pool = new Pool({
 });
 
 const DEFAULT_SERVICES = [
-  { service_id:'magic_kids',    category:'shows',       name:"Children's Magic Show",      price:350,  icon:'🎩', duration_minutes:60,  guest_suggestion:'Best for 10-100 kids',       sort_order:1  },
-  { service_id:'magic_corp',    category:'shows',       name:'Corporate Magic Show',        price:800,  icon:'✨', duration_minutes:90,  guest_suggestion:'Up to 300 guests',           sort_order:2  },
-  { service_id:'balloon_wkshp', category:'shows',       name:'Balloon Sculpting Workshop',  price:275,  icon:'🎈', duration_minutes:60,  guest_suggestion:'Great for 10-50 guests',     sort_order:3  },
-  { service_id:'dj_pinata',     category:'shows',       name:'DJ Pinata',                   price:500,  icon:'🎵', duration_minutes:120, guest_suggestion:'Perfect for 20-150 guests',  sort_order:4  },
-  { service_id:'gameshow',      category:'shows',       name:'Game Show Champions',         price:450,  icon:'🏆', duration_minutes:75,  guest_suggestion:'Great for 15-80 guests',     sort_order:5  },
-  { service_id:'school_asm',    category:'shows',       name:'Magic School Assembly',       price:600,  icon:'🏫', duration_minutes:45,  guest_suggestion:'Up to 500 students',         sort_order:6  },
-  { service_id:'balloon',       category:'performers',  name:'Balloon Artist',              price:200,  icon:'🎈', duration_minutes:120, guest_suggestion:'Any party size',             sort_order:7  },
-  { service_id:'face_paint',    category:'performers',  name:'Face Painting',               price:200,  icon:'🎨', duration_minutes:120, guest_suggestion:'Best for 15-60 guests',      sort_order:8  },
-  { service_id:'glitter',       category:'performers',  name:'Glitter Tattoos',             price:175,  icon:'💫', duration_minutes:120, guest_suggestion:'Any party size',             sort_order:9  },
-  { service_id:'juggler',       category:'performers',  name:'Juggler',                     price:225,  icon:'🤹', duration_minutes:120, guest_suggestion:'Any party size',             sort_order:10 },
-  { service_id:'stilts',        category:'performers',  name:'Stilt Walker',                price:275,  icon:'🎪', duration_minutes:120, guest_suggestion:'Outdoor events recommended', sort_order:11 },
-  { service_id:'acrobat',       category:'performers',  name:'Acrobat',                     price:350,  icon:'🤸', duration_minutes:120, guest_suggestion:'Any party size',             sort_order:12 },
-  { service_id:'fire',          category:'performers',  name:'Fire Breather',               price:400,  icon:'🔥', duration_minutes:120, guest_suggestion:'Outdoor events only',        sort_order:13 },
-  { service_id:'foam',          category:'experiences', name:'Foam Party',                  price:650,  icon:'🫧', duration_minutes:180, guest_suggestion:'Best for 20-200 guests',     sort_order:14 },
-  { service_id:'snow',          category:'experiences', name:'Snow Experience',             price:550,  icon:'X',  duration_minutes:180, guest_suggestion:'Best for 20-150 guests',     sort_order:15 },
-  { service_id:'camp',          category:'camps',       name:'Magic Camp',                  price:150,  icon:'🎩', duration_minutes:480, guest_suggestion:'Per day, up to 20 kids',     sort_order:16 }
+  { service_id:'deluxe_magic',   category:'shows',       name:'Deluxe Birthday Magic Show',           price:385,  icon:'🎩', duration_minutes:45,  guest_suggestion:'Best for kids parties',        sort_order:1  },
+  { service_id:'basic_magic',    category:'shows',       name:'Basic Birthday Magic Show',             price:345,  icon:'🎩', duration_minutes:30,  guest_suggestion:'Perfect for shorter slots',    sort_order:2  },
+  { service_id:'corporate_magic',category:'shows',       name:'Corporate Magic Show',                  price:875,  icon:'✨', duration_minutes:45,  guest_suggestion:'Up to 300 guests',             sort_order:3  },
+  { service_id:'game_show',      category:'shows',       name:'Game Show Champions',                   price:3500, icon:'🏆', duration_minutes:90,  guest_suggestion:'Great for 15-80 guests',       sort_order:4  },
+  { service_id:'school_asm',     category:'shows',       name:'Magic School Assembly',                 price:385,  icon:'🏫', duration_minutes:45,  guest_suggestion:'Up to 500 students',           sort_order:5  },
+  { service_id:'dj_pinata',      category:'shows',       name:'DJ Piñata',                            price:385,  icon:'🎵', duration_minutes:120, guest_suggestion:'Perfect for 20-150 guests',    sort_order:6  },
+  { service_id:'wedding_magic',  category:'shows',       name:'Walk-Around Cocktail Hour Magic',       price:900,  icon:'🪄', duration_minutes:90,  guest_suggestion:'Cocktail hour & receptions',   sort_order:7  },
+  { service_id:'balloon_40',     category:'performers',  name:'Balloon Workshop — Up to 40 Kids',     price:345,  icon:'🎈', duration_minutes:30,  guest_suggestion:'Up to 40 kids',                sort_order:8  },
+  { service_id:'balloon_60',     category:'performers',  name:'Balloon Workshop — 40–60 Kids',        price:385,  icon:'🎈', duration_minutes:30,  guest_suggestion:'40–60 kids',                   sort_order:9  },
+  { service_id:'face_paint',     category:'performers',  name:'Face Painting',                         price:200,  icon:'🎨', duration_minutes:60,  guest_suggestion:'Approx. 30 guests per hour',   sort_order:10 },
+  { service_id:'airbrush',       category:'performers',  name:'Airbrush Tattoos',                      price:200,  icon:'💨', duration_minutes:60,  guest_suggestion:'Approx. 30 tattoos per hour',  sort_order:11 },
+  { service_id:'glitter',        category:'performers',  name:'Glitter Tattoos',                       price:200,  icon:'💫', duration_minutes:60,  guest_suggestion:'20–25 per hour',               sort_order:12 },
+  { service_id:'foam_single',    category:'experiences', name:'Foam Party — Single Cannon',            price:385,  icon:'🫧', duration_minutes:45,  guest_suggestion:'Up to 30 kids',                sort_order:13 },
+  { service_id:'foam_double',    category:'experiences', name:'Foam Party — Double Cannon',            price:730,  icon:'🫧', duration_minutes:45,  guest_suggestion:'30+ kids',                     sort_order:14 },
+  { service_id:'snow_45',        category:'experiences', name:'Snow Party — 45 Minutes',               price:385,  icon:'❄️', duration_minutes:45,  guest_suggestion:'Any size party',               sort_order:15 },
+  { service_id:'snow_90',        category:'experiences', name:'Snow Party — 90 Minutes',               price:525,  icon:'❄️', duration_minutes:90,  guest_suggestion:'Any size party',               sort_order:16 },
+  { service_id:'cotton_candy',   category:'experiences', name:'Live Spun Cotton Candy',                price:385,  icon:'🍭', duration_minutes:120, guest_suggestion:'Any party size',               sort_order:17 },
+  { service_id:'mini_donuts',    category:'experiences', name:'Hot & Fresh Mini Donuts',               price:385,  icon:'🍩', duration_minutes:120, guest_suggestion:'Any party size',               sort_order:18 },
+  { service_id:'bubble_show',    category:'experiences', name:"Prof. Bucket's Bubble Show",            price:385,  icon:'🫧', duration_minutes:45,  guest_suggestion:'Any party size',               sort_order:19 },
+  { service_id:'pb_kiosk_svc',   category:'experiences', name:'Digital Kiosk Photo Booth',             price:385,  icon:'📸', duration_minutes:120, guest_suggestion:'Any party size',               sort_order:20 },
+  { service_id:'pb_360_svc',     category:'experiences', name:'360 Video Booth',                       price:385,  icon:'🎥', duration_minutes:120, guest_suggestion:'Any party size',               sort_order:21 },
+  { service_id:'lib_magic',      category:'library',     name:'Library — Magic Show',                  price:345,  icon:'🎩', duration_minutes:45,  guest_suggestion:'Summer reading programs',       sort_order:22 },
+  { service_id:'lib_balloon',    category:'library',     name:'Library — Balloon Workshop',            price:345,  icon:'🎈', duration_minutes:30,  guest_suggestion:'Summer reading programs',       sort_order:23 },
+  { service_id:'lib_bubble',     category:'library',     name:"Library — Prof. Bucket's Bubble Show",  price:345,  icon:'🫧', duration_minutes:45,  guest_suggestion:'Summer reading programs',       sort_order:24 },
+  { service_id:'lib_doodles',    category:'library',     name:'Library — Story-Doodles',               price:345,  icon:'✏️', duration_minutes:45,  guest_suggestion:'Summer reading programs',       sort_order:25 },
+  { service_id:'lib_foam',       category:'library',     name:'Library — Foam Party',                  price:385,  icon:'🫧', duration_minutes:45,  guest_suggestion:'Summer reading programs',       sort_order:26 },
+  { service_id:'lib_workshop',   category:'library',     name:'Library — Magic Workshop',              price:345,  icon:'🪄', duration_minutes:45,  guest_suggestion:'Summer reading programs',       sort_order:27 },
 ];
 
 const DEFAULT_ADDONS = [
@@ -33,6 +44,25 @@ const DEFAULT_ADDONS = [
 ];
 
 async function ensureTables(client) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS service_addons (
+      id SERIAL PRIMARY KEY,
+      service_id VARCHAR(64) NOT NULL,
+      addon_id VARCHAR(64) NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      UNIQUE(service_id, addon_id)
+    )
+  `);
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS service_event_types (
+      id SERIAL PRIMARY KEY,
+      service_id VARCHAR(64) NOT NULL,
+      event_type_id VARCHAR(64) NOT NULL,
+      UNIQUE(service_id, event_type_id)
+    )
+  `);
+
   await client.query(`
     CREATE TABLE IF NOT EXISTS services (
       id SERIAL PRIMARY KEY,
@@ -101,21 +131,66 @@ exports.handler = async (event) => {
     await ensureTables(client);
 
     if (event.httpMethod === 'GET') {
-      const [svcResult, addonResult] = await Promise.all([
+      const [svcResult, addonResult, svcAddonResult, svcEtResult] = await Promise.all([
         client.query('SELECT * FROM services WHERE active = TRUE ORDER BY sort_order, id'),
-        client.query('SELECT * FROM addons WHERE active = TRUE ORDER BY sort_order, id')
+        client.query('SELECT * FROM addons WHERE active = TRUE ORDER BY sort_order, id'),
+        client.query('SELECT * FROM service_addons ORDER BY service_id, sort_order'),
+        client.query('SELECT * FROM service_event_types ORDER BY service_id')
       ]);
+
+      const svcAddonMap = {};
+      svcAddonResult.rows.forEach(r => {
+        if (!svcAddonMap[r.service_id]) svcAddonMap[r.service_id] = [];
+        svcAddonMap[r.service_id].push(r.addon_id);
+      });
+
+      const svcEtMap = {};
+      svcEtResult.rows.forEach(r => {
+        if (!svcEtMap[r.service_id]) svcEtMap[r.service_id] = [];
+        svcEtMap[r.service_id].push(r.event_type_id);
+      });
+
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ services: svcResult.rows, addons: addonResult.rows })
+        body: JSON.stringify({
+          services: svcResult.rows,
+          addons: addonResult.rows,
+          service_addons: svcAddonMap,
+          service_event_types: svcEtMap   // { service_id: [event_type_id, ...] }
+        })
       };
     }
 
     if (event.httpMethod === 'POST') {
       const body = JSON.parse(event.body || '{}');
 
-      if (body.type === 'addon') {
+      if (body.type === 'service_event_types') {
+        const { service_id, event_type_ids } = body;
+        if (!service_id) return { statusCode: 400, headers, body: JSON.stringify({ error: 'service_id required' }) };
+        await client.query('DELETE FROM service_event_types WHERE service_id=$1', [service_id]);
+        for (const et_id of (event_type_ids || [])) {
+          await client.query(
+            'INSERT INTO service_event_types (service_id, event_type_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+            [service_id, et_id]
+          );
+        }
+        return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
+      } else if (body.type === 'service_addons') {
+        // Replace all addon links for a service
+        // body.service_id, body.addon_ids: string[]
+        const { service_id, addon_ids } = body;
+        if (!service_id) return { statusCode: 400, headers, body: JSON.stringify({ error: 'service_id required' }) };
+        await client.query('DELETE FROM service_addons WHERE service_id=$1', [service_id]);
+        let order = 0;
+        for (const addon_id of (addon_ids || [])) {
+          await client.query(
+            'INSERT INTO service_addons (service_id, addon_id, sort_order) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
+            [service_id, addon_id, order++]
+          );
+        }
+        return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
+      } else if (body.type === 'addon') {
         await client.query(
           `INSERT INTO addons (addon_id, name, price, active, sort_order)
            VALUES ($1,$2,$3,$4,$5)

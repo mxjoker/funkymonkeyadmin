@@ -185,6 +185,11 @@ tr:hover td{background:#fafaf8}
 .cat-table input[type=text],.cat-table input[type=number]{width:100%;padding:5px 8px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:.82rem;background:#fff}
 .cat-table input:focus{outline:none;border-color:#7c3aed}
 .cat-table input[type=checkbox]{width:auto;cursor:pointer;width:16px;height:16px}
+.cat-tag{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:20px;font-size:.75rem;font-weight:600}
+.cat-tag-excl{background:#ede9fe;color:#7c3aed}
+.cat-tag-stack{background:#f0fdf4;color:#059669}
+.cat-tag button{background:none;border:none;cursor:pointer;color:inherit;opacity:.6;font-size:.8rem;padding:0;line-height:1}
+.cat-tag button:hover{opacity:1}
 .cat-loading{text-align:center;padding:48px;color:#7c3aed}
 .cat-spinner{width:30px;height:30px;border:3px solid #e9d5ff;border-top-color:#7c3aed;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 10px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -266,9 +271,10 @@ input,select,textarea{font-family:inherit}
       <a id="nav-bookings"  onclick="showPage('bookings')"><span class="nav-icon">📋</span>Bookings</a>
       <a id="nav-calendar"  onclick="showPage('calendar')"><span class="nav-icon">📅</span>Calendar</a>
       <a id="nav-clients"   onclick="showPage('clients')"><span class="nav-icon">👥</span>Clients</a>
-      <a id="nav-staff"     onclick="showPage('staff')"><span class="nav-icon">🎭</span>Staff Portal</a>
+      <a id="nav-staff"     onclick="showPage('staff')"><span class="nav-icon">🎭</span>Staffing</a>
       <a id="nav-catalogue" onclick="showPage('catalogue')"><span class="nav-icon">🗂</span>Catalogue</a>
       <a id="nav-analytics" onclick="showPage('analytics')"><span class="nav-icon">📈</span>Analytics</a>
+      <a id="nav-portal"    style="display:none"></a>
     </nav>
     <div class="sidebar-footer">
       Funky Monkey Events · OKC<br>
@@ -344,20 +350,33 @@ input,select,textarea{font-family:inherit}
       <div class="page-hdr">
         <h1>Calendar</h1>
         <div class="cal-nav">
-          <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">← Prev</button>
+          <button class="btn btn-outline btn-sm" onclick="changeMonth(-2)">← Prev</button>
           <span class="cal-month-label" id="cal-month-label"></span>
-          <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Next →</button>
+          <button class="btn btn-outline btn-sm" onclick="changeMonth(2)">Next →</button>
         </div>
       </div>
-      <div class="card">
+      <div class="card" style="margin-bottom:16px">
         <div class="card-body">
+          <div style="font-weight:700;color:#6b7280;font-size:.82rem;margin-bottom:8px" id="cal-month-label-1"></div>
           <div class="cal-day-labels">
             <div class="cal-day-label">Sun</div><div class="cal-day-label">Mon</div>
             <div class="cal-day-label">Tue</div><div class="cal-day-label">Wed</div>
             <div class="cal-day-label">Thu</div><div class="cal-day-label">Fri</div>
             <div class="cal-day-label">Sat</div>
           </div>
-          <div class="cal-grid" id="cal-grid"></div>
+          <div class="cal-grid" id="cal-grid-1"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body">
+          <div style="font-weight:700;color:#6b7280;font-size:.82rem;margin-bottom:8px" id="cal-month-label-2"></div>
+          <div class="cal-day-labels">
+            <div class="cal-day-label">Sun</div><div class="cal-day-label">Mon</div>
+            <div class="cal-day-label">Tue</div><div class="cal-day-label">Wed</div>
+            <div class="cal-day-label">Thu</div><div class="cal-day-label">Fri</div>
+            <div class="cal-day-label">Sat</div>
+          </div>
+          <div class="cal-grid" id="cal-grid-2"></div>
         </div>
       </div>
     </div>
@@ -376,7 +395,7 @@ input,select,textarea{font-family:inherit}
     <!-- ══ STAFF ══ -->
     <div class="page" id="page-staff">
       <div class="page-hdr">
-        <h1>Staff Portal</h1>
+        <h1>Staffing</h1>
         <button class="btn btn-primary btn-sm" onclick="openAddStaff()">+ Add Staff</button>
       </div>
       <div class="staff-grid" id="staff-grid"></div>
@@ -394,6 +413,7 @@ input,select,textarea{font-family:inherit}
           <button class="btn btn-outline btn-sm" onclick="sessionStorage.clear();location.reload()">Sign Out</button>
         </div>
       </div>
+      <div id="portal-joe-note" style="display:none"></div>
       <div id="portal-gigs"></div>
     </div>
 
@@ -471,6 +491,17 @@ const SKILL_PRESETS = [
   'Face Painting','Glitter Tattoos','Juggling','Stilt Walking',
   'Acrobatics','Fire Breathing','Foam Party','Snow Experience',
   'DJ Piñata','Game Show','Magic Camp','Photo Booth','Emcee','Driver','Setup'
+];
+
+const EVENT_TYPE_DEFS = [
+  { id:'kids_bday',   icon:'🎂', label:'Kids Birthday Party' },
+  { id:'family',      icon:'👨‍👩‍👧‍👦', label:'Family Gathering' },
+  { id:'school_asm',  icon:'🏫', label:'School Assembly' },
+  { id:'school_fund', icon:'🎟️', label:'School Fundraiser' },
+  { id:'corporate',   icon:'🏢', label:'Corporate Event' },
+  { id:'community',   icon:'🏘️', label:'Community Event' },
+  { id:'wedding',     icon:'💍', label:'Wedding' },
+  { id:'library',     icon:'📚', label:'Library Program' },
 ];
 
 // ══════════════════════════════════════════════════
@@ -595,7 +626,7 @@ function renderDashboard() {
     .reduce((s,b) => s + Number(b.total_price||0), 0);
   document.getElementById('st-revenue').textContent = '$' + rev.toLocaleString('en-US',{maximumFractionDigits:0});
 
-  const recent = [...allBookings].slice(0, 8);
+  const recent = [...allBookings].sort((a,b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8);
   document.getElementById('dash-tbody').innerHTML = recent.length
     ? recent.map(b => bookingRow(b)).join('')
     : `<tr><td colspan="6" class="table-empty">No bookings yet</td></tr>`;
@@ -731,6 +762,34 @@ function openBooking(id) {
       </div>
     </div>
 
+    <!-- Staff Assignment (admin only) -->
+    ${currentUser?.role === 'admin' ? `
+    <div class="notes-block" id="staff-assign-block-${b.id}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span class="section-label" style="margin-bottom:0">👥 Staff Assignment</span>
+        <button class="btn btn-outline btn-sm" id="notify-btn-${b.id}" onclick="notifyStaff('${b.id}')">📣 Notify Matching Staff</button>
+      </div>
+      <div id="staff-assign-body-${b.id}" style="font-size:.85rem;color:#6b7280">Loading…</div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div>
+          <label style="font-size:.75rem;font-weight:600;color:#6b7280;display:block;margin-bottom:3px">Staff Member</label>
+          <select id="assign-staff-${b.id}" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem">
+            <option value="">— select —</option>
+            ${allStaff.map(s => `<option value="${s.id}">${esc(s.preferred_name||s.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:.75rem;font-weight:600;color:#6b7280;display:block;margin-bottom:3px">Role / Tag</label>
+          <select id="assign-tag-${b.id}" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem">
+            ${SKILL_PRESETS.map(t => `<option value="${t}">${t}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="assignStaff('${b.id}')">Assign</button>
+        <span class="save-flash" id="assign-flash-${b.id}">✓ Assigned</span>
+      </div>
+    </div>
+    ` : ''}
+
     <!-- Action strip -->
     <div class="action-strip">
       <button class="btn btn-outline btn-sm" onclick="toggleContract('${b.id}')">
@@ -741,10 +800,154 @@ function openBooking(id) {
   `;
 
   document.getElementById('booking-modal').classList.add('open');
+
+  // Load staff assignments after modal renders (admin only)
+  if (currentUser?.role === 'admin') loadStaffAssignments(b.id);
 }
 
 function closeModal() {
   document.getElementById('booking-modal').classList.remove('open');
+}
+
+// ══════════════════════════════════════════════════
+// STAFF ASSIGNMENT (admin modal panel)
+// ══════════════════════════════════════════════════
+
+async function loadStaffAssignments(bookingId) {
+  const el = document.getElementById('staff-assign-body-' + bookingId);
+  if (!el) return;
+  try {
+    const res = await fetch('/api/staff-assignments?booking_id=' + bookingId);
+    const { assignments } = await res.json();
+    if (!assignments || !assignments.length) {
+      el.innerHTML = '<span style="color:#9ca3af;font-style:italic">No staff assigned yet.</span>';
+      return;
+    }
+    el.innerHTML = assignments.map(a => {
+      const name = esc(a.preferred_name || a.staff_name || '—');
+      const color = a.color || '#7c3aed';
+      const statusColors = { assigned:'#10b981', interested:'#3b82f6', backup:'#f59e0b', unassigned:'#9ca3af' };
+      const sc = statusColors[a.status] || '#9ca3af';
+
+      // Checklist progress badge
+      const clStatus = a.checklist_status || 'upcoming';
+      const clLabels = { upcoming:'📅 Upcoming', on_my_way:'🚗 On My Way', arrived:'📍 Arrived', completed:'✅ Done' };
+      const clBadge = a.status === 'assigned'
+        ? `<span style="font-size:.68rem;color:#6b7280;background:#f3f4f6;border-radius:10px;padding:1px 7px">${clLabels[clStatus]||clStatus}</span>`
+        : '';
+
+      // Survey data — show if submitted
+      let surveyHtml = '';
+      if (a.survey_submitted_at) {
+        const submittedDate = new Date(a.survey_submitted_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+        const stars = a.event_rating ? '⭐'.repeat(a.event_rating) : '—';
+        const balance = a.balance_collected === true
+          ? '✅ Collected — $' + Number(a.balance_amount||0).toFixed(2)
+          : a.balance_collected === false ? '❌ Not collected' : '—';
+        surveyHtml = `
+          <div style="margin-top:8px;padding:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:.78rem">
+            <div style="font-weight:700;color:#166534;margin-bottom:6px">📋 Post-Gig Report <span style="font-weight:400;color:#6b7280">${submittedDate}</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;color:#374151">
+              <div><span style="color:#6b7280">Rating:</span> ${stars}</div>
+              <div><span style="color:#6b7280">Guests:</span> ${a.guest_count_actual ?? '—'}</div>
+              <div style="grid-column:1/-1"><span style="color:#6b7280">Balance:</span> ${balance}</div>
+              ${a.gas_level ? `<div><span style="color:#6b7280">Gas:</span> ${esc(a.gas_level)}</div>` : ''}
+              ${a.foam_fluid_needed != null ? `<div><span style="color:#6b7280">Foam fluid:</span> ${a.foam_fluid_needed ? '⚠️ Needed' : '✅ OK'}</div>` : ''}
+              ${a.empty_jugs_refilled != null ? `<div><span style="color:#6b7280">Jugs refilled:</span> ${a.empty_jugs_refilled ? '✅ Yes' : '❌ No'}</div>` : ''}
+              ${a.survey_notes ? `<div style="grid-column:1/-1"><span style="color:#6b7280">Notes:</span> ${esc(a.survey_notes)}</div>` : ''}
+              ${a.survey_issues ? `<div style="grid-column:1/-1"><span style="color:#dc2626">Issues:</span> ${esc(a.survey_issues)}</div>` : ''}
+            </div>
+          </div>`;
+      } else if (a.status === 'assigned' && clStatus === 'completed') {
+        surveyHtml = `<div style="margin-top:6px;font-size:.75rem;color:#f59e0b;font-style:italic">⏳ Survey not yet submitted</div>`;
+      }
+
+      return `
+        <div style="padding:8px 10px;background:#f9fafb;border-radius:8px;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
+            <span style="font-weight:600;flex:1">${name}</span>
+            <span style="font-size:.75rem;color:#6b7280">${esc(a.tag_filled)}</span>
+            ${clBadge}
+            <span style="font-size:.72rem;font-weight:700;color:${sc};text-transform:uppercase">${a.status}</span>
+            ${a.status === 'assigned'
+              ? `<button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:.75rem" onclick="unassignStaff('${bookingId}',${a.staff_id},'${esc(a.tag_filled)}')">Remove</button>`
+              : `<button class="btn btn-primary btn-sm" style="padding:2px 8px;font-size:.75rem" onclick="promoteToAssigned('${bookingId}',${a.staff_id},'${esc(a.tag_filled)}')">Assign</button>`
+            }
+          </div>
+          ${surveyHtml}
+        </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<span style="color:#dc2626">Failed to load assignments.</span>';
+  }
+}
+
+async function assignStaff(bookingId) {
+  const staffSel = document.getElementById('assign-staff-' + bookingId);
+  const tagSel   = document.getElementById('assign-tag-'   + bookingId);
+  const staffId  = staffSel?.value;
+  const tag      = tagSel?.value;
+  if (!staffId || !tag) { alert('Select a staff member and role first.'); return; }
+
+  try {
+    const res = await fetch('/api/staff-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'assign', booking_id: parseInt(bookingId), staff_id: parseInt(staffId), tag_filled: tag })
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    staffSel.value = '';
+    flash('assign-flash-' + bookingId);
+    await loadStaffAssignments(bookingId);
+  } catch(e) { alert('Error assigning staff: ' + e.message); }
+}
+
+async function promoteToAssigned(bookingId, staffId, tag) {
+  try {
+    const res = await fetch('/api/staff-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'assign', booking_id: parseInt(bookingId), staff_id: parseInt(staffId), tag_filled: tag })
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    await loadStaffAssignments(bookingId);
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function unassignStaff(bookingId, staffId, tag) {
+  if (!confirm('Remove this staff member from the gig?')) return;
+  try {
+    const res = await fetch('/api/staff-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'unassign', booking_id: parseInt(bookingId), staff_id: parseInt(staffId), tag_filled: tag })
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    await loadStaffAssignments(bookingId);
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function notifyStaff(bookingId) {
+  const btn = document.getElementById('notify-btn-' + bookingId);
+  if (!btn) return;
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    const res = await fetch('/api/staff-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'notify_staff', booking_id: parseInt(bookingId) })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed');
+    btn.textContent = `✅ Notified ${data.notified} staff`;
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
+  } catch(e) {
+    btn.textContent = '❌ ' + e.message;
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
+  }
 }
 
 // ── Status ──
@@ -753,6 +956,19 @@ async function setStatus(id, status) {
     await patch(id, { status });
     await loadBookings();
     openBooking(id);
+    // Auto-notify matching staff when a booking is confirmed
+    if (status === 'confirmed') {
+      fetch('/api/staff-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'notify_staff', booking_id: parseInt(id) })
+      }).then(r => r.json()).then(d => {
+        if (d.notified > 0) {
+          const btn = document.getElementById('notify-btn-' + id);
+          if (btn) { btn.textContent = '✅ Notified ' + d.notified + ' staff'; setTimeout(() => btn.textContent = '📣 Notify Matching Staff', 4000); }
+        }
+      }).catch(() => {});
+    }
   } catch(e) { alert('Failed to update status: ' + e.message); }
 }
 
@@ -873,31 +1089,43 @@ async function patch(id, payload) {
 // ══════════════════════════════════════════════════
 function changeMonth(dir) {
   calMonth += dir;
-  if (calMonth > 11) { calMonth = 0; calYear++; }
-  else if (calMonth < 0) { calMonth = 11; calYear--; }
+  while (calMonth > 11) { calMonth -= 12; calYear++; }
+  while (calMonth < 0)  { calMonth += 12; calYear--; }
   renderCalendar();
 }
 
-function renderCalendar() {
+function renderOneMonth(year, month, gridId, labelId) {
+  const label = new Date(year, month, 1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  document.getElementById(labelId).textContent = label;
+  // also update the nav label to show the range
   document.getElementById('cal-month-label').textContent =
-    new Date(calYear, calMonth, 1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
+    new Date(calYear, calMonth, 1).toLocaleDateString('en-US',{month:'long',year:'numeric'}) + ' – ' +
+    new Date(calYear, calMonth+1 > 11 ? 0 : calMonth+1, 1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
 
-  const firstDay = new Date(calYear, calMonth, 1).getDay();
-  const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
   const today = new Date();
   let html = '';
-
   for (let i=0;i<firstDay;i++) html += `<div class="cal-cell other"></div>`;
   for (let d=1;d<=daysInMonth;d++) {
-    const isToday = d===today.getDate()&&calMonth===today.getMonth()&&calYear===today.getFullYear();
-    const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isToday = d===today.getDate()&&month===today.getMonth()&&year===today.getFullYear();
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const dayBkgs = allBookings.filter(b => b.event_date && b.event_date.startsWith(dateStr) && b.status !== 'cancelled');
     const evts = dayBkgs.map(b =>
       `<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${b.client_name} — ${b.service_name}">${b.service_name||b.client_name}</div>`
     ).join('');
     html += `<div class="cal-cell${isToday?' today':''}"><div class="cn">${d}</div>${evts}</div>`;
   }
-  document.getElementById('cal-grid').innerHTML = html;
+  document.getElementById(gridId).innerHTML = html;
+}
+
+function renderCalendar() {
+  // Month 1: calYear/calMonth
+  renderOneMonth(calYear, calMonth, 'cal-grid-1', 'cal-month-label-1');
+  // Month 2: next month
+  let m2 = calMonth + 1, y2 = calYear;
+  if (m2 > 11) { m2 = 0; y2++; }
+  renderOneMonth(y2, m2, 'cal-grid-2', 'cal-month-label-2');
 }
 
 // ══════════════════════════════════════════════════
@@ -944,6 +1172,7 @@ async function renderStaff() {
     grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#dc2626">Failed to load staff.</div>';
     return;
   }
+  loadStaffList(); // refresh global allStaff cache
   if (!allStaff.length) {
     grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:48px;color:#9ca3af">No staff yet. Add your first team member.</div>';
     return;
@@ -955,9 +1184,6 @@ async function renderStaff() {
       return `<span class="skill-tag" style="${excl?'':'background:#f0fdf4;color:#059669;border-color:#a7f3d0'}" title="${excl?'Exclusive — one per gig':'Stackable — can combine'}">${esc(sk.name)}<span class="skill-rm" onclick="removeSkill(${s.id},'${sk.name.replace(/'/g,"\\'")}')">×</span></span>`;
     }).join('');
     const existingNames = skills.map(sk => sk.name);
-    const presets = SKILL_PRESETS.filter(p => !existingNames.includes(p)).slice(0,4).map(p =>
-      `<button class="skill-preset-btn" onclick="addSkill(${s.id},'${p.replace(/'/g,"\\'")}')">+ ${p}</button>`
-    ).join('');
     return `
     <div class="staff-card" style="border-top-color:${s.color}">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
@@ -975,14 +1201,24 @@ async function renderStaff() {
           <span style="color:#9ca3af;font-size:.72rem">${s.comms_preference||'email'}</span>
         </div>
       </div>
-      <div class="skills-wrap" style="margin-bottom:4px">${tags||'<span style="color:#bbb;font-size:.75rem">No skills yet</span>'}</div>
+      <div class="skills-wrap" style="margin-bottom:6px">${tags||'<span style="color:#bbb;font-size:.75rem">No skills yet</span>'}</div>
       <div style="font-size:.67rem;color:#9ca3af;margin-bottom:8px">
         <span style="background:#ede9fe;color:#7c3aed;border-radius:3px;padding:1px 5px;font-weight:700">Purple</span> exclusive &nbsp;
         <span style="background:#f0fdf4;color:#059669;border-radius:3px;padding:1px 5px;font-weight:700">Green</span> stackable
       </div>
-      <div class="skill-presets">${presets}
-        <button class="skill-preset-btn" style="border-color:#a855f7;color:#7c3aed" onclick="addCustomSkill(${s.id})">+ Custom…</button>
+      <div class="skill-presets">
+        <button class="skill-preset-btn" style="border-color:#a855f7;color:#7c3aed;font-weight:700" onclick="openTagPicker(${s.id})">＋ Add Skills</button>
       </div>
+      ${s.staff_notes ? `
+      <div style="margin-top:10px;padding:8px 10px;background:#fefce8;border:1px solid #fde68a;border-radius:7px">
+        <div style="font-size:.67rem;text-transform:uppercase;font-weight:700;color:#92400e;margin-bottom:3px">📝 Notes from ${esc(s.preferred_name||s.name)}</div>
+        <div style="font-size:.78rem;color:#78350f;line-height:1.5">${esc(s.staff_notes)}</div>
+      </div>` : ''}
+      ${s.shared_notes ? `
+      <div style="margin-top:10px;padding:8px 10px;background:#f0fdf4;border:1px solid #86efac;border-radius:7px">
+        <div style="font-size:.67rem;text-transform:uppercase;font-weight:700;color:#166534;margin-bottom:3px">💬 Notes to ${esc(s.preferred_name||s.name)}</div>
+        <div style="font-size:.78rem;color:#14532d;line-height:1.5">${esc(s.shared_notes)}</div>
+      </div>` : ''}
       <div class="staff-card-actions">
         <button class="btn btn-primary btn-sm" onclick="openStaffModal(${s.id})">Edit</button>
         <button class="btn btn-danger btn-sm" onclick="archiveStaff(${s.id})">Remove</button>
@@ -990,6 +1226,8 @@ async function renderStaff() {
     </div>`;
   }).join('');
 }
+
+// ── Staff skills ─────────────────────────────────────────────────────────────
 
 async function addSkill(id, skillName) {
   const s = allStaff.find(x => x.id === id); if (!s) return;
@@ -1010,6 +1248,75 @@ async function removeSkill(id, skillName) {
 function addCustomSkill(id) {
   const skillName = prompt('Enter skill name:');
   if (skillName?.trim()) addSkill(id, skillName.trim());
+}
+
+function openTagPicker(staffId) {
+  const s = allStaff.find(x => x.id === staffId);
+  if (!s) return;
+  const existing = parseSkills(s.skills).map(sk => sk.name);
+
+  const exclusiveTags = [...EXCLUSIVE_TAGS];
+  const stackableTags = SKILL_PRESETS.filter(t => !EXCLUSIVE_TAGS.has(t));
+
+  const tagBtn = (tag) => {
+    const has = existing.includes(tag);
+    const excl = EXCLUSIVE_TAGS.has(tag);
+    const bg = has ? (excl ? '#7c3aed' : '#059669') : '#f9fafb';
+    const color = has ? '#fff' : '#374151';
+    const border = has ? 'none' : '1.5px solid #e5e7eb';
+    return `<button onclick="toggleTagPicker(${staffId},'${tag.replace(/'/g,"\\'")}',this)"
+      style="padding:5px 12px;border-radius:20px;font-size:.78rem;font-weight:600;cursor:pointer;background:${bg};color:${color};border:${border};transition:all .15s"
+      data-tag="${esc(tag)}" data-has="${has}">${esc(tag)}${has?' ✓':''}</button>`;
+  };
+
+  document.getElementById('modal-title').textContent = `Skills — ${esc(s.preferred_name||s.name)}`;
+  document.getElementById('modal-body').innerHTML = `
+    <p style="font-size:.82rem;color:#6b7280;margin-bottom:14px">Click tags to toggle. Purple = exclusive (one per gig), Green = stackable.</p>
+    <div style="margin-bottom:14px">
+      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#7c3aed;font-weight:700;margin-bottom:8px">🎩 Exclusive Skills</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${exclusiveTags.map(tagBtn).join('')}</div>
+    </div>
+    <div style="margin-bottom:18px">
+      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#059669;font-weight:700;margin-bottom:8px">🔁 Stackable Skills</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${stackableTags.map(tagBtn).join('')}</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;padding-top:10px;border-top:1px solid #f3f4f6">
+      <input id="custom-tag-input" type="text" placeholder="Custom skill…"
+        style="flex:1;padding:8px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"
+        onkeydown="if(event.key==='Enter')addCustomTagPicker(${staffId})"/>
+      <button class="btn btn-outline btn-sm" onclick="addCustomTagPicker(${staffId})">+ Add</button>
+    </div>
+    <div style="margin-top:14px"><button class="btn btn-outline" onclick="closeModal()">Done</button></div>`;
+  document.getElementById('booking-modal').classList.add('open');
+}
+
+async function toggleTagPicker(staffId, tagName, btn) {
+  const has = btn.dataset.has === 'true';
+  if (has) {
+    await removeSkill(staffId, tagName);
+    btn.dataset.has = 'false';
+    const excl = EXCLUSIVE_TAGS.has(tagName);
+    btn.style.background = '#f9fafb'; btn.style.color = '#374151';
+    btn.style.border = '1.5px solid #e5e7eb';
+    btn.textContent = tagName;
+  } else {
+    await addSkill(staffId, tagName);
+    btn.dataset.has = 'true';
+    const excl = EXCLUSIVE_TAGS.has(tagName);
+    btn.style.background = excl ? '#7c3aed' : '#059669';
+    btn.style.color = '#fff'; btn.style.border = 'none';
+    btn.textContent = tagName + ' ✓';
+  }
+}
+
+async function addCustomTagPicker(staffId) {
+  const input = document.getElementById('custom-tag-input');
+  const name = input?.value.trim();
+  if (!name) return;
+  await addSkill(staffId, name);
+  input.value = '';
+  // Re-open to reflect new tag
+  openTagPicker(staffId);
 }
 
 async function archiveStaff(id) {
@@ -1095,6 +1402,13 @@ function openStaffModal(id) {
         style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit"
         placeholder="Internal notes about this person…">${esc(s?.admin_notes||'')}</textarea>
     </div>
+    ${s?.staff_notes ? '<div style="margin-bottom:14px"><label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#92400e;font-weight:700;display:block;margin-bottom:5px">📝 Notes from ' + esc(s.preferred_name||s.name) + ' <span style="font-weight:400;color:#9ca3af">(written by staff)</span></label><div style="padding:10px 12px;background:#fefce8;border:1px solid #fde68a;border-radius:7px;font-size:.875rem;color:#78350f;line-height:1.6;white-space:pre-wrap">' + esc(s.staff_notes) + '</div></div>' : ''}
+    <div style="margin-bottom:14px">
+      <label style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#166534;font-weight:700;display:block;margin-bottom:5px">💬 Notes to ${esc(s?.preferred_name||s?.name||'Staff')} <span style="font-weight:400;color:#9ca3af">(visible to staff in their portal)</span></label>
+      <textarea id="sf-shared-notes" rows="3"
+        style="width:100%;padding:9px 12px;border:1.5px solid #86efac;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit;background:#f0fdf4"
+        placeholder="Schedule notes, reminders, feedback they should see…">${esc(s?.shared_notes||'')}</textarea>
+    </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="saveStaffModal(${id||'null'})">${s?'Save Changes':'Add Staff Member'}</button>
       <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
@@ -1119,6 +1433,7 @@ async function saveStaffModal(id) {
     pin:              document.getElementById('sf-pin').value.trim() || '0000',
     comms_preference: document.getElementById('sf-comms').value,
     admin_notes:      document.getElementById('sf-anotes').value.trim(),
+    shared_notes:     document.getElementById('sf-shared-notes').value.trim(),
   };
   try {
     if (id) {
@@ -1142,8 +1457,28 @@ async function loadStaffPortal() {
   if (!grid) return;
   grid.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af">Loading your gigs…</div>';
   try {
-    const res = await fetch('/api/staff-assignments?staff_id=' + currentUser.staffId);
-    const data = await res.json();
+    const [assignRes, staffRes] = await Promise.all([
+      fetch('/api/staff-assignments?staff_id=' + currentUser.staffId),
+      fetch('/api/staff/' + currentUser.staffId)
+    ]);
+    const data = await assignRes.json();
+    const staffRecord = await staffRes.json();
+
+    // Show note from Joe if present
+    const noteEl = document.getElementById('portal-joe-note');
+    if (noteEl) {
+      if (staffRecord.shared_notes) {
+        noteEl.innerHTML = `
+          <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:12px 16px;margin-bottom:16px">
+            <div style="font-size:.7rem;text-transform:uppercase;font-weight:700;color:#166534;margin-bottom:4px">💬 Note from Joe</div>
+            <div style="font-size:.875rem;color:#14532d;line-height:1.6;white-space:pre-wrap">${esc(staffRecord.shared_notes)}</div>
+          </div>`;
+        noteEl.style.display = 'block';
+      } else {
+        noteEl.style.display = 'none';
+      }
+    }
+
     renderPortalGigs(data.myGigs || [], data.openGigs || []);
   } catch(e) {
     grid.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626">Failed to load. Try refreshing.</div>';
@@ -1177,7 +1512,7 @@ function renderPortalGigs(myGigs, openGigs) {
 
 function gigCard(g, isAssigned) {
   const dateStr = g.event_date
-    ? new Date(g.event_date+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})
+    ? new Date(String(g.event_date).split('T')[0]+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})
     : 'TBD';
   const checklistStatuses = ['upcoming','on_my_way','arrived','completed'];
   const checklistLabels   = { upcoming:'📅 Upcoming', on_my_way:'🚗 On My Way', arrived:'📍 Arrived', completed:'✅ Done' };
@@ -1228,7 +1563,7 @@ function gigCard(g, isAssigned) {
 
 function openGigCard(g) {
   const dateStr = g.event_date
-    ? new Date(g.event_date+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})
+    ? new Date(String(g.event_date).split('T')[0]+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})
     : 'TBD';
   return `
   <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:12px;border-left:4px solid #e5e7eb">
@@ -1248,11 +1583,16 @@ function openGigCard(g) {
 
 async function updateChecklist(logId, assignmentId, bookingId, staffId, status) {
   try {
-    await fetch('/api/staff-assignments', {
+    const res = await fetch('/api/staff-assignments', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ action:'update_checklist', log_id:logId||undefined, assignment_id:assignmentId, booking_id:bookingId, staff_id:staffId, status })
     });
-    loadStaffPortal();
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({}));
+      alert('Checklist update failed: ' + (err.error || res.status));
+      return;
+    }
+    await loadStaffPortal();
   } catch(e) { alert('Update failed: ' + e.message); }
 }
 
@@ -1438,14 +1778,25 @@ async function saveStaffPreferences() {
 // ══════════════════════════════════════════════════
 // CATALOGUE
 // ══════════════════════════════════════════════════
+let catSlots = []; // service staff slot definitions
+let catSkillTags = []; // all known skill tags (loaded from DB or fallback)
+let catServiceAddons = {}; // { service_id: [addon_id, ...] }
+let catServiceEventTypes = {}; // { service_id: [event_type_id, ...] }
+
 async function loadCatalogue() {
   document.getElementById('cat-loading').style.display = 'block';
   document.getElementById('cat-content').style.display = 'none';
   try {
-    const res = await fetch('/api/services');
-    const data = await res.json();
+    const [svcRes, slotsRes] = await Promise.all([
+      fetch('/api/services'),
+      fetch('/api/staff-assignments?service_slots=true')
+    ]);
+    const data = await svcRes.json();
     catServices = data.services || [];
-    catAddons = data.addons || [];
+    catAddons   = data.addons   || [];
+    catSlots    = (await slotsRes.json()).slots || [];
+    catServiceAddons = data.service_addons || {};
+    catServiceEventTypes = data.service_event_types || {};
     renderCatalogue();
     document.getElementById('cat-loading').style.display = 'none';
     document.getElementById('cat-content').style.display = 'block';
@@ -1455,34 +1806,97 @@ async function loadCatalogue() {
 }
 
 function renderCatalogue() {
-  const catOrder = ['shows','performers','experiences','camps'];
-  const catLabels = { shows:'🎭 Shows', performers:'🤹 Performers', experiences:'🎊 Experiences', camps:'🏕 Camps' };
-  let html = '';
+  const catOrder  = ['shows','performers','experiences','library'];
+  const catLabels = { shows:'🎭 Shows', performers:'🤹 Performers', experiences:'🎊 Experiences', library:'📚 Library Programs' };
 
+  // Build slot map by service_id
+  const slotMap = {};
+  catSlots.forEach(sl => {
+    if (!slotMap[sl.service_id]) slotMap[sl.service_id] = [];
+    slotMap[sl.service_id].push(sl);
+  });
+
+  const allTagOptions = SKILL_PRESETS.map(t => `<option value="${t}">${t}</option>`).join('');
+
+  const slotRowHtml = (serviceId, sl, i) => `
+    <div class="slot-row" style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
+      <select class="slot-tag" style="padding:3px 6px;border:1px solid #e5e7eb;border-radius:5px;font-size:.75rem;flex:1">
+        ${SKILL_PRESETS.map(t => `<option value="${t}" ${sl&&sl.tag_required===t?'selected':''}>${t}</option>`).join('')}
+      </select>
+      <input type="number" class="slot-count" value="${sl?sl.slot_count||1:1}" min="1" max="10"
+        style="width:40px;padding:3px 5px;border:1px solid #e5e7eb;border-radius:5px;font-size:.75rem;text-align:center"/>
+      <button onclick="this.closest('.slot-row').remove()"
+        style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.9rem;padding:0 2px;line-height:1">×</button>
+    </div>`;
+
+  let html = '';
   catOrder.forEach(cat => {
     const svcs = catServices.filter(s => s.category === cat);
     if (!svcs.length) return;
-    html += `<div class="cat-section"><h3>${catLabels[cat]||cat}</h3>
-    <table class="cat-table">
-      <thead><tr><th style="width:52px">Icon</th><th>Name</th><th style="width:90px">Price $</th><th style="width:80px">Mins</th><th>Guest Note</th><th style="width:60px;text-align:center">Active</th></tr></thead>
-      <tbody>`;
+    html += `<div class="cat-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <h3>${catLabels[cat]||cat}</h3>
+        <button class="btn btn-outline btn-sm" onclick="addNewService('${cat}')">+ Add Service</button>
+      </div>
+      <table class="cat-table">
+        <thead><tr>
+          <th style="width:46px">Icon</th><th>Name</th>
+          <th style="width:80px">Price $</th><th style="width:70px">Mins</th>
+          <th>Guest Note</th>
+          <th style="width:160px">Staff Requirements</th>
+          <th style="width:180px">Add-ons Available</th>
+          <th style="width:160px">Shown For</th>
+          <th style="width:50px;text-align:center">Active</th>
+        </tr></thead>
+        <tbody>`;
     svcs.forEach(s => {
+      const svcSlots = slotMap[s.service_id] || [];
+      const slotRows = svcSlots.map((sl, i) => slotRowHtml(s.service_id, sl, i)).join('');
       html += `<tr data-service-id="${s.service_id}" data-category="${s.category}">
-        <td><input type="text" value="${esc(s.icon||'🎪')}" style="width:46px;text-align:center" data-field="icon"/></td>
-        <td><input type="text" value="${esc(s.name)}" data-field="name"/></td>
+        <td><input type="text" value="${esc(s.icon||'🎪')}" style="width:40px;text-align:center" data-field="icon"/></td>
+        <td><input type="text" value="${esc(s.name)}" data-field="name" style="width:100%"/></td>
         <td><input type="number" value="${Number(s.price).toFixed(0)}" data-field="price"/></td>
         <td><input type="number" value="${s.duration_minutes||120}" data-field="duration_minutes"/></td>
-        <td><input type="text" value="${esc(s.guest_suggestion||'')}" data-field="guest_suggestion"/></td>
+        <td><input type="text" value="${esc(s.guest_suggestion||'')}" data-field="guest_suggestion" style="width:100%"/></td>
+        <td>
+          <div class="slot-container" data-svc="${s.service_id}">
+            ${slotRows || ''}
+          </div>
+          <button onclick="addSlotRowInline(this)" style="font-size:.7rem;color:#7c3aed;background:none;border:none;cursor:pointer;font-weight:700;padding:2px 0">+ Add Role</button>
+        </td>
+        <td>
+          <div class="svc-addon-container" data-svc="${s.service_id}" style="display:flex;flex-wrap:wrap;gap:3px;min-height:20px">
+            ${(catServiceAddons[s.service_id] || []).map(aid => {
+              const a = catAddons.find(x => x.addon_id === aid);
+              return a ? `<span class="svc-addon-chip" data-addon-id="${aid}" style="background:#ede9fe;color:#7c3aed;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:3px" onclick="removeServiceAddon(this)">${esc(a.name)}<span style="opacity:.5;font-size:.8rem">×</span></span>` : '';
+            }).join('')}
+          </div>
+          <button onclick="openAddonPicker('${s.service_id}',this)" style="font-size:.7rem;color:#7c3aed;background:none;border:none;cursor:pointer;font-weight:700;padding:2px 0;margin-top:2px">+ Add Add-on</button>
+        </td>
+        <td>
+          <div class="svc-et-container" data-svc="${s.service_id}" style="display:flex;flex-wrap:wrap;gap:3px;min-height:20px">
+            ${(catServiceEventTypes[s.service_id] || []).map(etId => {
+              const et = EVENT_TYPE_DEFS.find(x => x.id === etId);
+              return et ? `<span class="svc-et-chip" data-et-id="${etId}" style="background:#dbeafe;color:#1d4ed8;border-radius:12px;padding:2px 7px;font-size:.7rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:2px" onclick="removeServiceEt(this)">${et.icon} ${esc(et.label)}<span style="opacity:.5;font-size:.75rem">×</span></span>` : '';
+            }).join('')}
+          </div>
+          <button onclick="openEtPicker('${s.service_id}',this)" style="font-size:.7rem;color:#1d4ed8;background:none;border:none;cursor:pointer;font-weight:700;padding:2px 0;margin-top:2px">+ Add Event Type</button>
+        </td>
         <td style="text-align:center"><input type="checkbox" ${s.active?'checked':''} data-field="active"/></td>
       </tr>`;
     });
     html += `</tbody></table></div>`;
   });
 
-  html += `<div class="cat-section"><h3>➕ Add-ons</h3>
-  <table class="cat-table">
-    <thead><tr><th>Name</th><th style="width:90px">Price $</th><th style="width:60px;text-align:center">Active</th></tr></thead>
-    <tbody>`;
+  // Add-ons section
+  html += `<div class="cat-section">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <h3>➕ Add-ons</h3>
+      <button class="btn btn-outline btn-sm" onclick="addNewAddon()">+ Add Add-on</button>
+    </div>
+    <table class="cat-table">
+      <thead><tr><th>Name</th><th style="width:90px">Price $</th><th style="width:50px;text-align:center">Active</th></tr></thead>
+      <tbody id="addons-tbody">`;
   catAddons.forEach(a => {
     html += `<tr data-addon-id="${a.addon_id}">
       <td><input type="text" value="${esc(a.name)}" data-field="name"/></td>
@@ -1492,7 +1906,228 @@ function renderCatalogue() {
   });
   html += `</tbody></table></div>`;
 
+  // Skill Tags manager
+  const exclusiveTags = SKILL_PRESETS.filter(t => EXCLUSIVE_TAGS.has(t));
+  const stackableTags = SKILL_PRESETS.filter(t => !EXCLUSIVE_TAGS.has(t));
+  html += `<div class="cat-section">
+    <h3>🏷 Skill Tags</h3>
+    <p class="text-muted" style="margin-bottom:12px;font-size:.82rem">Tags are used on staff profiles and booking staff requirements. Exclusive tags = one performer per gig. Stackable = combinable.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <div style="font-size:.7rem;text-transform:uppercase;font-weight:700;color:#7c3aed;margin-bottom:6px">🎩 Exclusive (one per gig)</div>
+        <div id="exclusive-tags" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px">
+          ${exclusiveTags.map(t => `<span class="cat-tag cat-tag-excl">${esc(t)}<button onclick="removeSkillTag('${t.replace(/'/g,"\\'")}',true)" title="Remove">×</button></span>`).join('')}
+        </div>
+        <div style="display:flex;gap:6px">
+          <input id="new-excl-tag" type="text" placeholder="New exclusive tag…" style="flex:1;padding:6px 10px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.82rem"
+            onkeydown="if(event.key==='Enter')addSkillTag('excl')"/>
+          <button class="btn btn-outline btn-sm" onclick="addSkillTag('excl')">Add</button>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:.7rem;text-transform:uppercase;font-weight:700;color:#059669;margin-bottom:6px">🔁 Stackable (combinable)</div>
+        <div id="stackable-tags" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px">
+          ${stackableTags.map(t => `<span class="cat-tag cat-tag-stack">${esc(t)}<button onclick="removeSkillTag('${t.replace(/'/g,"\\'")}',false)" title="Remove">×</button></span>`).join('')}
+        </div>
+        <div style="display:flex;gap:6px">
+          <input id="new-stack-tag" type="text" placeholder="New stackable tag…" style="flex:1;padding:6px 10px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.82rem"
+            onkeydown="if(event.key==='Enter')addSkillTag('stack')"/>
+          <button class="btn btn-outline btn-sm" onclick="addSkillTag('stack')">Add</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
   document.getElementById('cat-content').innerHTML = html;
+}
+
+function addSlotRowInline(btn) {
+  const container = btn.previousElementSibling;
+  const div = document.createElement('div');
+  div.className = 'slot-row';
+  div.style.cssText = 'display:flex;align-items:center;gap:5px;margin-bottom:3px';
+  div.innerHTML = `
+    <select class="slot-tag" style="padding:3px 6px;border:1px solid #e5e7eb;border-radius:5px;font-size:.75rem;flex:1">
+      ${SKILL_PRESETS.map(t => `<option value="${t}">${t}</option>`).join('')}
+    </select>
+    <input type="number" class="slot-count" value="1" min="1" max="10"
+      style="width:40px;padding:3px 5px;border:1px solid #e5e7eb;border-radius:5px;font-size:.75rem;text-align:center"/>
+    <button onclick="this.closest('.slot-row').remove()"
+      style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.9rem;padding:0 2px;line-height:1">×</button>`;
+  container.appendChild(div);
+}
+
+function addNewService(category) {
+  const serviceId = 'svc_' + Date.now();
+  const tbody = document.querySelector(`.cat-section [data-category="${category}"]`)?.closest('table')?.querySelector('tbody')
+    || document.querySelector(`.cat-section table tbody`);
+  if (!tbody) return;
+  const row = document.createElement('tr');
+  row.dataset.serviceId = serviceId;
+  row.dataset.category  = category;
+  row.innerHTML = `
+    <td><input type="text" value="🎪" style="width:40px;text-align:center" data-field="icon"/></td>
+    <td><input type="text" value="New Service" data-field="name" style="width:100%"/></td>
+    <td><input type="number" value="0" data-field="price"/></td>
+    <td><input type="number" value="60" data-field="duration_minutes"/></td>
+    <td><input type="text" value="" data-field="guest_suggestion" style="width:100%"/></td>
+    <td><div class="slot-container" data-svc="${serviceId}"></div>
+        <button onclick="addSlotRowInline(this)" style="font-size:.7rem;color:#7c3aed;background:none;border:none;cursor:pointer;font-weight:700;padding:2px 0">+ Add Role</button></td>
+    <td style="text-align:center"><input type="checkbox" checked data-field="active"/></td>`;
+  tbody.appendChild(row);
+  row.querySelector('[data-field="name"]').focus();
+}
+
+function addNewAddon() {
+  const addonId = 'addon_' + Date.now();
+  const tbody = document.getElementById('addons-tbody');
+  if (!tbody) return;
+  const row = document.createElement('tr');
+  row.dataset.addonId = addonId;
+  row.innerHTML = `
+    <td><input type="text" value="New Add-on" data-field="name"/></td>
+    <td><input type="number" value="0" data-field="price"/></td>
+    <td style="text-align:center"><input type="checkbox" checked data-field="active"/></td>`;
+  tbody.appendChild(row);
+  row.querySelector('[data-field="name"]').focus();
+}
+
+function openAddonPicker(serviceId, btn) {
+  // Get current selections from DOM chips
+  const container = btn.previousElementSibling;
+  const currentIds = [...container.querySelectorAll('.svc-addon-chip')].map(c => c.dataset.addonId);
+
+  document.getElementById('modal-title').textContent = 'Add-ons for this Service';
+  document.getElementById('modal-body').innerHTML = `
+    <p style="font-size:.82rem;color:#6b7280;margin-bottom:14px">Click add-ons to toggle them on/off for this service. Clients will only see these when booking.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px">
+      ${catAddons.map(a => {
+        const active = currentIds.includes(a.addon_id);
+        return `<button data-addon-id="${a.addon_id}"
+          onclick="toggleAddonForService(this,'${serviceId}')"
+          style="padding:6px 14px;border-radius:20px;font-size:.8rem;font-weight:700;cursor:pointer;
+            background:${active?'#7c3aed':'#f9fafb'};color:${active?'#fff':'#374151'};
+            border:${active?'none':'1.5px solid #e5e7eb'};transition:all .15s"
+          data-active="${active}">${esc(a.name)} — $${Number(a.price).toFixed(0)}${active?' ✓':''}</button>`;
+      }).join('')}
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary btn-sm" onclick="applyAddonPicker('${serviceId}')">Done</button>
+    </div>`;
+  document.getElementById('booking-modal').classList.add('open');
+}
+
+function toggleAddonForService(btn) {
+  const active = btn.dataset.active === 'true';
+  btn.dataset.active = (!active).toString();
+  if (!active) {
+    btn.style.background = '#7c3aed'; btn.style.color = '#fff'; btn.style.border = 'none';
+    btn.textContent = btn.textContent.replace(' ✓','') + ' ✓';
+  } else {
+    btn.style.background = '#f9fafb'; btn.style.color = '#374151'; btn.style.border = '1.5px solid #e5e7eb';
+    btn.textContent = btn.textContent.replace(' ✓','');
+  }
+}
+
+function applyAddonPicker(serviceId) {
+  const selectedIds = [...document.querySelectorAll('#modal-body button[data-addon-id][data-active="true"]')]
+    .map(b => b.dataset.addonId);
+
+  // Update the chip container in the catalogue table
+  const container = document.querySelector(`.svc-addon-container[data-svc="${serviceId}"]`);
+  if (container) {
+    container.innerHTML = selectedIds.map(aid => {
+      const a = catAddons.find(x => x.addon_id === aid);
+      return a ? `<span class="svc-addon-chip" data-addon-id="${aid}" style="background:#ede9fe;color:#7c3aed;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:3px" onclick="removeServiceAddon(this)">${esc(a.name)}<span style="opacity:.5;font-size:.8rem">×</span></span>` : '';
+    }).join('');
+  }
+  closeModal();
+}
+
+function removeServiceAddon(chip) {
+  chip.remove();
+}
+
+function openEtPicker(serviceId, btn) {
+  const container = btn.previousElementSibling;
+  const currentIds = [...container.querySelectorAll('.svc-et-chip')].map(c => c.dataset.etId);
+
+  document.getElementById('modal-title').textContent = 'Event Types — where this service appears';
+  document.getElementById('modal-body').innerHTML = `
+    <p style="font-size:.82rem;color:#6b7280;margin-bottom:14px">Select which event types show this service in the booking form.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px">
+      ${EVENT_TYPE_DEFS.map(et => {
+        const active = currentIds.includes(et.id);
+        return `<button data-et-id="${et.id}"
+          onclick="toggleEtForService(this)"
+          style="padding:8px 14px;border-radius:20px;font-size:.82rem;font-weight:700;cursor:pointer;
+            background:${active?'#1d4ed8':'#f9fafb'};color:${active?'#fff':'#374151'};
+            border:${active?'none':'1.5px solid #e5e7eb'};transition:all .15s"
+          data-active="${active}">${et.icon} ${esc(et.label)}${active?' ✓':''}</button>`;
+      }).join('')}
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary btn-sm" onclick="applyEtPicker('${serviceId}')">Done</button>
+    </div>`;
+  document.getElementById('booking-modal').classList.add('open');
+}
+
+function toggleEtForService(btn) {
+  const active = btn.dataset.active === 'true';
+  btn.dataset.active = (!active).toString();
+  if (!active) {
+    btn.style.background = '#1d4ed8'; btn.style.color = '#fff'; btn.style.border = 'none';
+    btn.textContent = btn.textContent.replace(' ✓','') + ' ✓';
+  } else {
+    btn.style.background = '#f9fafb'; btn.style.color = '#374151'; btn.style.border = '1.5px solid #e5e7eb';
+    btn.textContent = btn.textContent.replace(' ✓','');
+  }
+}
+
+function applyEtPicker(serviceId) {
+  const selectedIds = [...document.querySelectorAll('#modal-body button[data-et-id][data-active="true"]')]
+    .map(b => b.dataset.etId);
+  const container = document.querySelector(`.svc-et-container[data-svc="${serviceId}"]`);
+  if (container) {
+    container.innerHTML = selectedIds.map(etId => {
+      const et = EVENT_TYPE_DEFS.find(x => x.id === etId);
+      return et ? `<span class="svc-et-chip" data-et-id="${etId}" style="background:#dbeafe;color:#1d4ed8;border-radius:12px;padding:2px 7px;font-size:.7rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:2px" onclick="removeServiceEt(this)">${et.icon} ${esc(et.label)}<span style="opacity:.5;font-size:.75rem">×</span></span>` : '';
+    }).join('');
+  }
+  closeModal();
+}
+
+function removeServiceEt(chip) {
+  chip.remove();
+}
+
+function addSkillTag(type) {
+  const inputId = type === 'excl' ? 'new-excl-tag' : 'new-stack-tag';
+  const containerId = type === 'excl' ? 'exclusive-tags' : 'stackable-tags';
+  const input = document.getElementById(inputId);
+  const name = input?.value.trim();
+  if (!name) return;
+  if (SKILL_PRESETS.includes(name)) { alert('Tag already exists.'); return; }
+  const isExcl = type === 'excl';
+  SKILL_PRESETS.push(name);
+  if (isExcl) EXCLUSIVE_TAGS.add(name);
+  const container = document.getElementById(containerId);
+  const span = document.createElement('span');
+  span.className = `cat-tag ${isExcl ? 'cat-tag-excl' : 'cat-tag-stack'}`;
+  span.innerHTML = `${esc(name)}<button onclick="removeSkillTag('${name.replace(/'/g,"\\'")}',${isExcl})" title="Remove">×</button>`;
+  container.appendChild(span);
+  input.value = '';
+}
+
+function removeSkillTag(name, exclusive) {
+  const idx = SKILL_PRESETS.indexOf(name);
+  if (idx !== -1) SKILL_PRESETS.splice(idx, 1);
+  if (exclusive) EXCLUSIVE_TAGS.delete(name);
+  // Remove the tag chip from the DOM
+  const containerId = exclusive ? 'exclusive-tags' : 'stackable-tags';
+  document.querySelectorAll(`#${containerId} .cat-tag`).forEach(el => {
+    if (el.textContent.trim().replace('×','').trim() === name) el.remove();
+  });
 }
 
 async function saveCatalogue() {
@@ -1500,6 +2135,7 @@ async function saveCatalogue() {
   btn.disabled = true; btn.textContent = 'Saving…';
 
   try {
+    // Save services
     for (const row of document.querySelectorAll('#cat-content tr[data-service-id]')) {
       const payload = { service_id: row.dataset.serviceId, category: row.dataset.category };
       row.querySelectorAll('[data-field]').forEach(f => {
@@ -1510,6 +2146,8 @@ async function saveCatalogue() {
       });
       await fetch('/api/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
     }
+
+    // Save add-ons
     for (const row of document.querySelectorAll('#cat-content tr[data-addon-id]')) {
       const payload = { type:'addon', addon_id: row.dataset.addonId };
       row.querySelectorAll('[data-field]').forEach(f => {
@@ -1520,6 +2158,51 @@ async function saveCatalogue() {
       });
       await fetch('/api/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
     }
+
+    // Save staff slot requirements — collect all, send full replace
+    const allSlots = [];
+    document.querySelectorAll('.slot-container').forEach(container => {
+      const serviceId = container.dataset.svc;
+      container.querySelectorAll('.slot-row').forEach(row => {
+        const tag   = row.querySelector('.slot-tag')?.value;
+        const count = parseInt(row.querySelector('.slot-count')?.value) || 1;
+        if (tag && serviceId) allSlots.push({ service_id: serviceId, tag_required: tag, slot_count: count });
+      });
+    });
+
+    // Also send service IDs that now have zero slots so old ones get cleared
+    const allServiceIds = [...document.querySelectorAll('#cat-content tr[data-service-id]')].map(r => r.dataset.serviceId);
+    const serviceIdsInSlots = new Set(allSlots.map(s => s.service_id));
+    allServiceIds.forEach(id => { if (!serviceIdsInSlots.has(id)) allSlots.push({ service_id: id, tag_required: '__CLEAR__', slot_count: 0 }); });
+
+    await fetch('/api/staff-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save_service_slots', slots: allSlots })
+    });
+
+    // Save service-addon mappings
+    for (const container of document.querySelectorAll('.svc-addon-container[data-svc]')) {
+      const serviceId = container.dataset.svc;
+      const addonIds = [...container.querySelectorAll('.svc-addon-chip')].map(c => c.dataset.addonId);
+      await fetch('/api/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'service_addons', service_id: serviceId, addon_ids: addonIds })
+      });
+    }
+
+    // Save service event type mappings
+    for (const container of document.querySelectorAll('.svc-et-container[data-svc]')) {
+      const serviceId = container.dataset.svc;
+      const etIds = [...container.querySelectorAll('.svc-et-chip')].map(c => c.dataset.etId);
+      await fetch('/api/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'service_event_types', service_id: serviceId, event_type_ids: etIds })
+      });
+    }
+
     flash('cat-saved');
   } catch(e) { alert('Save failed: ' + e.message); }
 
@@ -1533,7 +2216,7 @@ function renderAnalytics() {
   const now = new Date();
   const thisMonth = allBookings.filter(b => {
     if (!b.event_date) return false;
-    const d = new Date(b.event_date + 'T00:00:00');
+    const d = new Date(String(b.event_date).split('T')[0] + 'T00:00:00');
     return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
   });
   const confirmed = allBookings.filter(b => ['confirmed','completed'].includes(b.status));
@@ -1578,9 +2261,16 @@ function renderAnalytics() {
 // ══════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════
+function parseDate(d) {
+  if (!d) return null;
+  const dateOnly = String(d).split('T')[0]; // strip time component from ISO timestamps
+  return new Date(dateOnly + 'T00:00:00');
+}
+
 function fmtDate(d) {
-  if (!d) return '—';
-  return new Date(d + (d.includes('T')?'':'T00:00:00'))
+  const dt = parseDate(d);
+  if (!dt || isNaN(dt)) return '—';
+  return dt
     .toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 }
 

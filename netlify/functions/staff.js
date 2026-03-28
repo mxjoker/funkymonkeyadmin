@@ -46,6 +46,7 @@ async function ensureTable(client) {
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS skills JSONB DEFAULT '[]'",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS staff_notes TEXT DEFAULT ''",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS admin_notes TEXT DEFAULT ''",
+    "ALTER TABLE staff ADD COLUMN IF NOT EXISTS shared_notes TEXT DEFAULT ''",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()",
@@ -160,6 +161,7 @@ exports.handler = async (event) => {
         skills:            'skills',
         admin_notes:       'admin_notes',
         staff_notes:       'staff_notes',
+        shared_notes:      'shared_notes',
         active:            'active',
         sort_order:        'sort_order',
       };

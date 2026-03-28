@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Funky Monkey — Staff Portal</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#0F0A1E;min-height:100vh;color:#f3e8ff}
+
+/* ── Login screen ── */
+#login-screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(135deg,#0F0A1E 0%,#1a1035 100%)}
+#login-box{background:#1a1035;border:1px solid rgba(168,85,247,.2);border-radius:20px;padding:40px 32px;width:100%;max-width:360px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+.login-logo{font-size:3rem;margin-bottom:8px}
+.login-title{font-size:1.5rem;font-weight:900;color:#fff;margin-bottom:4px}
+.login-sub{font-size:.85rem;color:#a78bca;margin-bottom:28px}
+#login-pin{width:100%;padding:14px;background:#0F0A1E;border:2px solid rgba(168,85,247,.3);border-radius:10px;font-size:1.5rem;color:#fff;text-align:center;letter-spacing:.3em;margin-bottom:14px;font-family:monospace}
+#login-pin:focus{outline:none;border-color:#a855f7}
+#login-btn{width:100%;background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;border:none;border-radius:10px;padding:14px;font-size:1rem;font-weight:800;cursor:pointer;transition:opacity .2s}
+#login-btn:hover{opacity:.9}
+#login-err{color:#f87171;font-size:.82rem;margin-top:10px;display:none}
+.login-hint{font-size:.75rem;color:rgba(167,139,202,.5);margin-top:18px}
+
+/* ── App ── */
+#app{display:none;min-height:100vh;max-width:680px;margin:0 auto;padding:0 0 80px}
+
+/* ── Top bar ── */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(168,85,247,.15);position:sticky;top:0;background:#0F0A1E;z-index:50}
+.topbar-logo{display:flex;align-items:center;gap:10px}
+.topbar-logo .mark{font-size:1.4rem}
+.topbar-logo .name{font-size:.9rem;font-weight:800;color:#fff}
+.topbar-actions{display:flex;gap:8px}
+
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:8px;font-weight:700;cursor:pointer;transition:all .15s;font-size:.82rem;padding:8px 14px;gap:5px}
+.btn-primary{background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff}
+.btn-primary:hover{opacity:.9}
+.btn-outline{background:transparent;border:1.5px solid rgba(168,85,247,.4);color:#c084fc}
+.btn-outline:hover{border-color:#a855f7;background:rgba(168,85,247,.08)}
+.btn-success{background:#059669;color:#fff}
+.btn-danger{background:#dc2626;color:#fff}
+.btn-sm{padding:5px 10px;font-size:.78rem}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+</style>
+</head>
+<body>
+
+<!-- ── Login ── -->
+<div id="login-screen">
+  <div id="login-box">
+    <div class="login-logo">🐒</div>
+    <div class="login-title">Staff Portal</div>
+    <div class="login-sub">Funky Monkey Events</div>
+    <input id="login-pin" type="password" inputmode="numeric" maxlength="10"
+      placeholder="••••" autocomplete="current-password"
+      onkeydown="if(event.key==='Enter')doLogin()"/>
+    <button id="login-btn" onclick="doLogin()">Log In</button>
+    <div id="login-err">Incorrect PIN. Try again.</div>
+    <div class="login-hint">Enter your 4-digit staff PIN</div>
+  </div>
+</div>
+
+<!-- ── App ── -->
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-logo">
+      <span class="mark">🐒</span>
+      <div>
+        <div class="name">Funky Monkey</div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-outline btn-sm" onclick="openPreferences()">⚙️ Preferences</button>
+      <button class="btn btn-outline btn-sm" onclick="doSignOut()">Sign Out</button>
+    </div>
+  </div>
+
+  <div style="padding:20px">
+    <div style="margin-bottom:20px">
+      <h1 id="portal-greeting" style="font-size:1.4rem;font-weight:900;color:#fff"></h1>
+      <p style="font-size:.82rem;color:#a78bca;margin-top:3px">Staff Portal — Funky Monkey Events</p>
+    </div>
+    <div id="portal-joe-note" style="display:none"></div>
+    <div id="portal-content"></div>
+  </div>
+</div>
+
+<!-- ── Modal ── -->
+<div id="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;overflow-y:auto;padding:20px" onclick="if(event.target===this)closeModal()">
+  <div id="modal-box" style="background:#1a1035;border:1px solid rgba(168,85,247,.2);border-radius:16px;width:100%;max-width:520px;margin:0 auto;overflow:hidden">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid rgba(168,85,247,.15)">
+      <h2 id="modal-title" style="font-size:1rem;font-weight:800;color:#fff"></h2>
+      <button onclick="closeModal()" style="background:none;border:none;color:#a78bca;font-size:1.4rem;cursor:pointer;line-height:1">×</button>
+    </div>
+    <div id="modal-body" style="padding:20px"></div>
+  </div>
+</div>
+
+
+<script>
+// ═══════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════
+let currentUser = null; // { staffId, staffName, staffColor }
+let staffRecord = null; // full staff object for this user
+
+// ═══════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════
+function esc(str) {
+  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function parseDate(d) {
+  if (!d) return null;
+  // Strip time component if present (Neon returns full ISO timestamps)
+  const dateOnly = String(d).split('T')[0];
+  return new Date(dateOnly + 'T00:00:00');
+}
+
+function fmtDate(d) {
+  const dt = parseDate(d);
+  if (!dt || isNaN(dt)) return '—';
+  return dt.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+}
+
+function fmtDateShort(d) {
+  const dt = parseDate(d);
+  if (!dt || isNaN(dt)) return '—';
+  return dt.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'});
+}
+
+function fmtTime(t) {
+  if (!t) return '';
+  try {
+    const [h, m] = t.split(':').map(Number);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${ampm}`;
+  } catch { return t; }
+}
+
+// ═══════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = sessionStorage.getItem('fm_staff_auth');
+  if (saved) {
+    try {
+      currentUser = JSON.parse(saved);
+      showApp();
+    } catch { sessionStorage.removeItem('fm_staff_auth'); }
+  }
+});
+
+async function doLogin() {
+  const pin = document.getElementById('login-pin').value.trim();
+  const err = document.getElementById('login-err');
+  err.style.display = 'none';
+  if (!pin) return;
+
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true; btn.textContent = 'Checking…';
+
+  try {
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pin })
+    });
+    const data = await res.json();
+
+    if (data.success && data.role === 'staff') {
+      currentUser = { staffId: data.staffId, staffName: data.staffName, staffColor: data.staffColor || '#7c3aed' };
+      sessionStorage.setItem('fm_staff_auth', JSON.stringify(currentUser));
+      showApp();
+    } else if (data.success && data.role === 'admin') {
+      // Admin password entered — redirect to admin dashboard
+      window.location.href = '/admin.html';
+    } else {
+      err.style.display = 'block';
+    }
+  } catch {
+    err.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Log In';
+  }
+}
+
+function doSignOut() {
+  sessionStorage.removeItem('fm_staff_auth');
+  location.reload();
+}
+
+async function showApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  const greet = document.getElementById('portal-greeting');
+  if (greet) greet.textContent = 'Hey, ' + (currentUser.staffName || 'there') + '! 👋';
+  await loadPortal();
+}
+
+// ═══════════════════════════════════════
+// PORTAL — load gigs
+// ═══════════════════════════════════════
+async function loadPortal() {
+  const el = document.getElementById('portal-content');
+  el.innerHTML = '<div style="text-align:center;padding:48px;color:#a78bca">Loading your gigs…</div>';
+  try {
+    const [assignRes, staffRes] = await Promise.all([
+      fetch('/api/staff-assignments?staff_id=' + currentUser.staffId),
+      fetch('/api/staff/' + currentUser.staffId)
+    ]);
+    const data = await assignRes.json();
+    const sr = await staffRes.json();
+    staffRecord = sr;
+
+    // Show note from Joe above the gigs if present
+    const noteEl = document.getElementById('portal-joe-note');
+    if (noteEl) {
+      if (sr.shared_notes) {
+        noteEl.innerHTML = `
+          <div style="background:rgba(134,239,172,.1);border:1px solid rgba(134,239,172,.4);border-radius:10px;padding:12px 16px;margin-bottom:16px">
+            <div style="font-size:.68rem;text-transform:uppercase;font-weight:700;color:#86efac;margin-bottom:4px;letter-spacing:.07em">💬 Note from Joe</div>
+            <div style="font-size:.875rem;color:#f0fdf4;line-height:1.6;white-space:pre-wrap">${esc(sr.shared_notes)}</div>
+          </div>`;
+        noteEl.style.display = 'block';
+      } else {
+        noteEl.style.display = 'none';
+      }
+    }
+
+    renderGigs(data.myGigs || [], data.openGigs || []);
+  } catch(e) {
+    el.innerHTML = '<div style="text-align:center;padding:48px;color:#f87171">Failed to load. Try refreshing.</div>';
+  }
+}
+
+</script>
+
+<script>
+// ═══════════════════════════════════════
+// RENDER GIGS
+// ═══════════════════════════════════════
+function renderGigs(myGigs, openGigs) {
+  const el = document.getElementById('portal-content');
+  const assigned   = myGigs.filter(g => g.status === 'assigned');
+  const interested = myGigs.filter(g => g.status === 'interested' || g.status === 'backup');
+  let html = '';
+
+  if (assigned.length) {
+    html += sectionHeader('✅ My Confirmed Gigs', '#10b981');
+    html += assigned.map(g => gigCard(g, true)).join('');
+  }
+  if (interested.length) {
+    html += sectionHeader('👋 Expressed Interest', '#f59e0b');
+    html += interested.map(g => gigCard(g, false)).join('');
+  }
+  if (openGigs.length) {
+    html += sectionHeader('📋 Open Gigs Matching My Skills', '#a78bca');
+    html += openGigs.map(g => openGigCard(g)).join('');
+  }
+  if (!html) {
+    html = `<div style="text-align:center;padding:60px 20px;color:#a78bca">
+      <div style="font-size:3.5rem;margin-bottom:14px">🎪</div>
+      <div style="font-weight:700;font-size:1.1rem;color:#c084fc;margin-bottom:8px">No upcoming gigs right now</div>
+      <div style="font-size:.85rem">Check back soon — Joe will send a notification when new gigs are available.</div>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+function sectionHeader(label, color) {
+  return `<div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;font-weight:800;color:${color};margin:24px 0 10px;padding-bottom:6px;border-bottom:1px solid rgba(168,85,247,.12)">${label}</div>`;
+}
+
+function gigCard(g, isAssigned) {
+  const dateStr = fmtDate(g.event_date);
+  const checklistStatuses = ['upcoming','on_my_way','arrived','completed'];
+  const checklistLabels   = { upcoming:'📅 Upcoming', on_my_way:'🚗 On My Way', arrived:'📍 Arrived', completed:'✅ Done' };
+  const curStatus = g.checklist_status || 'upcoming';
+  const curIdx    = checklistStatuses.indexOf(curStatus);
+
+  const borderColor = isAssigned ? '#10b981' : '#f59e0b';
+
+  const checklist = isAssigned ? `
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(168,85,247,.12)">
+      <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:#a78bca;font-weight:700;margin-bottom:8px">Day-of Checklist</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${checklistStatuses.map((s, i) => {
+          const isActive = s === curStatus;
+          const isPast   = i < curIdx;
+          const bg = isActive ? '#7c3aed' : isPast ? '#059669' : 'transparent';
+          const border = isActive || isPast ? 'none' : '1.5px solid rgba(168,85,247,.3)';
+          const color  = isActive || isPast ? '#fff' : '#c084fc';
+          const logId  = g.log_id || '';
+          const assignId = g.id;
+          const bookId   = g.booking_id;
+          const staffId  = currentUser.staffId;
+          return `<button style="padding:6px 11px;border-radius:7px;font-size:.75rem;font-weight:700;background:${bg};border:${border};color:${color};cursor:${isActive||isPast?'default':'pointer'}"
+            onclick="${isActive||isPast ? '' : `updateChecklist('${logId}','${assignId}','${bookId}','${staffId}','${s}')`}"
+            ${isActive||isPast ? 'disabled' : ''}>${checklistLabels[s]}</button>`;
+        }).join('')}
+      </div>
+      ${curStatus === 'completed'
+        ? `<button class="btn btn-outline btn-sm" style="margin-top:10px;border-color:#a855f7;color:#c084fc" onclick="openSurvey('${g.log_id}','${g.booking_id}')">📋 Submit Post-Gig Report</button>`
+        : ''}
+    </div>` : '';
+
+  const contactInfo = isAssigned ? `
+    <div style="margin-top:10px;padding:10px;background:rgba(168,85,247,.08);border-radius:8px;font-size:.8rem">
+      <div style="font-weight:700;color:#c084fc;margin-bottom:4px">👤 ${esc(g.client_name||'—')}</div>
+      ${g.client_phone?`<div><a href="tel:${g.client_phone}" style="color:#a78bca;text-decoration:none">📞 ${esc(g.client_phone)}</a></div>`:''}
+      ${g.client_email?`<div><a href="mailto:${g.client_email}" style="color:#a78bca;text-decoration:none;font-size:.75rem">✉️ ${esc(g.client_email)}</a></div>`:''}
+      ${g.client_notes?`<div style="margin-top:6px;color:#9ca3af;font-style:italic">${esc(g.client_notes)}</div>`:''}
+    </div>` : '';
+
+  return `
+  <div style="background:#1a1035;border:1px solid rgba(168,85,247,.15);border-left:4px solid ${borderColor};border-radius:12px;padding:16px;margin-bottom:14px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+      <div>
+        <div style="font-weight:800;color:#fff;font-size:.95rem">${esc(g.service_name)}</div>
+        <div style="font-size:.75rem;color:#a78bca;margin-top:3px">
+          <span style="background:rgba(168,85,247,.15);color:#c084fc;border-radius:4px;padding:1px 6px;font-weight:700">${esc(g.tag_filled)}</span>
+        </div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-weight:700;color:#fff;font-size:.85rem">${dateStr}</div>
+        ${g.event_time?`<div style="font-size:.75rem;color:#a78bca">${fmtTime(g.event_time)}</div>`:''}
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:.78rem;color:#a78bca;margin-top:10px">
+      <div>📍 ${esc(g.event_zip||'OKC area')}${isAssigned&&g.event_location?' — '+esc(g.event_location):''}</div>
+      <div>👥 ${g.guest_count||'?'} guests</div>
+      <div>🎉 ${esc(g.event_type||'—')}</div>
+    </div>
+    ${contactInfo}
+    ${checklist}
+  </div>`;
+}
+
+function openGigCard(g) {
+  return `
+  <div style="background:#1a1035;border:1px solid rgba(168,85,247,.15);border-radius:12px;padding:16px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div>
+        <div style="font-weight:700;color:#fff">${esc(g.service_name)}</div>
+        <div style="font-size:.75rem;color:#a78bca;margin-top:3px">${fmtDateShort(g.event_date)} · ${esc(g.event_zip||'OKC area')} · ${g.guest_count||'?'} guests</div>
+        <div style="margin-top:6px"><span style="background:rgba(168,85,247,.15);color:#c084fc;border-radius:4px;padding:2px 8px;font-size:.73rem;font-weight:700">${esc(g.tag_required)}</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+        <button class="btn btn-primary btn-sm" onclick="expressInterest(${g.id},'${esc(g.tag_required)}','interested')">I'm Available</button>
+        <button class="btn btn-outline btn-sm" onclick="expressInterest(${g.id},'${esc(g.tag_required)}','backup')">Backup</button>
+      </div>
+    </div>
+  </div>`;
+}
+</script>
+
+<script>
+// ═══════════════════════════════════════
+// ACTIONS
+// ═══════════════════════════════════════
+async function expressInterest(bookingId, tagFilled, status) {
+  try {
+    const res = await fetch('/api/staff-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action:'express_interest', booking_id:bookingId, staff_id:currentUser.staffId, tag_filled:tagFilled, status })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({}));
+      alert('Failed: ' + (err.error || res.status));
+      return;
+    }
+    await loadPortal();
+  } catch(e) { alert('Failed: ' + e.message); }
+}
+
+async function updateChecklist(logId, assignmentId, bookingId, staffId, status) {
+  try {
+    const res = await fetch('/api/staff-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action:'update_checklist', log_id:logId||undefined, assignment_id:assignmentId, booking_id:bookingId, staff_id:staffId, status })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({}));
+      alert('Checklist update failed: ' + (err.error || res.status));
+      return;
+    }
+    await loadPortal();
+  } catch(e) { alert('Update failed: ' + e.message); }
+}
+
+// ═══════════════════════════════════════
+// SURVEY MODAL
+// ═══════════════════════════════════════
+function openSurvey(logId) {
+  document.getElementById('modal-title').textContent = '📋 Post-Gig Report';
+  document.getElementById('modal-body').innerHTML = `
+    <p style="color:#a78bca;font-size:.85rem;margin-bottom:18px">Joe reviews all reports. Fill in what's relevant.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+      ${field('Actual Guest Count','<input id="sv-guests" type="number" placeholder="e.g. 45">')}
+      ${field('Event Rating','<select id="sv-rating"><option value="">Select…</option><option value="5">⭐⭐⭐⭐⭐ Amazing</option><option value="4">⭐⭐⭐⭐ Great</option><option value="3">⭐⭐⭐ Good</option><option value="2">⭐⭐ Rough</option><option value="1">⭐ Difficult</option></select>')}
+      ${field('Balance Collected?','<select id="sv-balcollect"><option value="">Select…</option><option value="true">✅ Yes</option><option value="false">❌ No</option></select>')}
+      ${field('Amount Collected ($)','<input id="sv-balamount" type="number" step="0.01" placeholder="0.00">')}
+      ${field('Gas Level After','<select id="sv-gas"><option value="">N/A</option><option>Full</option><option>3/4</option><option>1/2</option><option>1/4</option><option value="Low">Low — needs fill</option></select>')}
+      ${field('Foam Fluid Needed?','<select id="sv-foam"><option value="">N/A</option><option value="true">⚠️ Yes — needs refill</option><option value="false">✅ No</option></select>')}
+      ${field('Empty Jugs Refilled?','<select id="sv-jugs"><option value="">N/A</option><option value="true">✅ Yes</option><option value="false">❌ No</option></select>')}
+    </div>
+    ${textarea('Notes / Highlights','sv-notes','How\'d it go? Anything worth sharing…')}
+    ${textarea('Issues / Problems','sv-issues','Anything to flag or fix next time…')}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
+      <button class="btn btn-primary" onclick="submitSurvey('${logId}')">Submit Report</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>`;
+  openModal();
+}
+
+function field(label, inputHtml) {
+  return `<div>
+    <label style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#a78bca;font-weight:700;display:block;margin-bottom:4px">${label}</label>
+    <div style="font-size:.85rem">${inputHtml.replace(/(<input|<select)/g, '$1 style="width:100%;padding:9px 12px;background:#0F0A1E;border:1.5px solid rgba(168,85,247,.25);border-radius:8px;color:#fff;font-size:.85rem"')}</div>
+  </div>`;
+}
+
+function textarea(label, id, placeholder) {
+  return `<div style="margin-bottom:12px">
+    <label style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#a78bca;font-weight:700;display:block;margin-bottom:4px">${label}</label>
+    <textarea id="${id}" rows="3" placeholder="${placeholder}" style="width:100%;padding:9px 12px;background:#0F0A1E;border:1.5px solid rgba(168,85,247,.25);border-radius:8px;color:#fff;font-size:.85rem;resize:vertical;font-family:inherit"></textarea>
+  </div>`;
+}
+
+async function submitSurvey(logId) {
+  const boolVal = id => { const v = document.getElementById(id).value; return v===''?undefined:v==='true'; };
+  const payload = {
+    action:'submit_survey', log_id:logId,
+    guest_count_actual: document.getElementById('sv-guests').value    || undefined,
+    event_rating:       document.getElementById('sv-rating').value    || undefined,
+    balance_collected:  boolVal('sv-balcollect'),
+    balance_amount:     document.getElementById('sv-balamount').value || undefined,
+    gas_level:          document.getElementById('sv-gas').value       || undefined,
+    foam_fluid_needed:  boolVal('sv-foam'),
+    empty_jugs_refilled:boolVal('sv-jugs'),
+    notes:              document.getElementById('sv-notes').value.trim()   || undefined,
+    issues:             document.getElementById('sv-issues').value.trim()  || undefined,
+  };
+  Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
+  try {
+    await fetch('/api/staff-assignments', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    closeModal();
+    alert('Report submitted! Thanks 🎉');
+    loadPortal();
+  } catch(e) { alert('Submit failed: ' + e.message); }
+}
+</script>
+
+<script>
+// ═══════════════════════════════════════
+// PREFERENCES MODAL
+// ═══════════════════════════════════════
+async function openPreferences() {
+  // Fetch own record fresh
+  let s = {};
+  try {
+    const res = await fetch('/api/staff/' + currentUser.staffId);
+    s = await res.json();
+    staffRecord = s;
+  } catch {}
+
+  document.getElementById('modal-title').textContent = '⚙️ My Preferences';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      ${prefField('Preferred Name','<input id="pf-pname" type="text" value="'+esc(s.preferred_name||s.name||'')+'" placeholder="'+esc(s.name||'')+'">')}
+      ${prefField('Pronouns','<input id="pf-pronouns" type="text" value="'+esc(s.pronouns||'')+'" placeholder="she/her">')}
+      ${prefField('Phone *','<input id="pf-phone" type="tel" value="'+esc(s.phone||'')+'">')}
+      ${prefField('Email *','<input id="pf-email" type="email" value="'+esc(s.email||'')+'">')}
+      <div style="grid-column:1/-1">
+        ${prefField('Comms Preference','<select id="pf-comms"><option value="email" '+(s.comms_preference==='email'||!s.comms_preference?'selected':'')+'>Email</option><option value="sms" '+(s.comms_preference==='sms'?'selected':'')+'>SMS (coming soon)</option><option value="call" '+(s.comms_preference==='call'?'selected':'')+'>Phone Call</option></select>')}
+      </div>
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#a78bca;font-weight:700;display:block;margin-bottom:4px">Notes to Joe</label>
+      <textarea id="pf-notes" rows="4" placeholder="Availability, questions, preferences…"
+        style="width:100%;padding:9px 12px;background:#0F0A1E;border:1.5px solid rgba(168,85,247,.25);border-radius:8px;color:#fff;font-size:.85rem;resize:vertical;font-family:inherit">${esc(s.staff_notes||'')}</textarea>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="savePreferences()">Save</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>`;
+  openModal();
+}
+
+function prefField(label, inputHtml) {
+  return `<div>
+    <label style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#a78bca;font-weight:700;display:block;margin-bottom:4px">${label}</label>
+    ${inputHtml.replace(/(<input|<select)/g, '$1 style="width:100%;padding:9px 12px;background:#0F0A1E;border:1.5px solid rgba(168,85,247,.25);border-radius:8px;color:#fff;font-size:.85rem"')}
+  </div>`;
+}
+
+async function savePreferences() {
+  const phone = document.getElementById('pf-phone').value.trim();
+  const email = document.getElementById('pf-email').value.trim();
+  if (!phone || !email) { alert('Phone and email are required.'); return; }
+  const payload = {
+    preferred_name:   document.getElementById('pf-pname').value.trim(),
+    pronouns:         document.getElementById('pf-pronouns').value.trim(),
+    phone, email,
+    comms_preference: document.getElementById('pf-comms').value,
+    staff_notes:      document.getElementById('pf-notes').value.trim(),
+  };
+  try {
+    const res = await fetch('/api/staff/' + currentUser.staffId, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error||'Save failed'); }
+    const updated = await res.json();
+    currentUser.staffName = updated.preferred_name || updated.name;
+    sessionStorage.setItem('fm_staff_auth', JSON.stringify(currentUser));
+    const greet = document.getElementById('portal-greeting');
+    if (greet) greet.textContent = 'Hey, ' + currentUser.staffName + '! 👋';
+    closeModal();
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+// ═══════════════════════════════════════
+// MODAL HELPERS
+// ═══════════════════════════════════════
+function openModal() {
+  document.getElementById('modal-overlay').style.display = 'block';
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').style.display = 'none';
+}
+</script>
+
+</body>
+</html>

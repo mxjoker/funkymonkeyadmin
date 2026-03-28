@@ -136,7 +136,11 @@ exports.handler = async (event) => {
       if (bookingId) {
         const { rows: assignments } = await client.query(
           `SELECT sa.*, s.name as staff_name, s.preferred_name, s.color, s.skills,
-                  gl.status as checklist_status, gl.id as log_id
+                  gl.id as log_id, gl.status as checklist_status,
+                  gl.survey_submitted_at, gl.guest_count_actual,
+                  gl.balance_collected, gl.balance_amount,
+                  gl.gas_level, gl.foam_fluid_needed, gl.empty_jugs_refilled,
+                  gl.event_rating, gl.notes as survey_notes, gl.issues as survey_issues
            FROM staff_assignments sa
            JOIN staff s ON s.id = sa.staff_id
            LEFT JOIN gig_logs gl ON gl.assignment_id = sa.id
@@ -153,6 +157,15 @@ exports.handler = async (event) => {
           [parseInt(bookingId)]
         );
         return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ assignments, slots }) };
+      }
+
+      // GET ?service_slots=true — return all service-level slot definitions
+      const serviceSlots = event.queryStringParameters?.service_slots;
+      if (serviceSlots) {
+        const { rows: slots } = await client.query(
+          'SELECT * FROM staff_slots ORDER BY service_id, sort_order'
+        );
+        return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ slots }) };
       }
 
       if (staffId) {
@@ -186,12 +199,19 @@ exports.handler = async (event) => {
           const { rows } = await client.query(
             `SELECT DISTINCT b.id, b.reference, b.service_name, b.event_date, b.event_time,
                     b.event_type, b.guest_count, b.event_zip, b.status as booking_status,
-                    ss.tag_required
+                    COALESCE(ss.tag_required, b.service_name) as tag_required
              FROM bookings b
-             JOIN staff_slots ss ON ss.service_id = b.service_id
+             LEFT JOIN staff_slots ss ON ss.service_id = b.service_id
              WHERE b.status = 'confirmed'
-               AND b.event_date >= CURRENT_DATE + INTERVAL '7 days'
-               AND ss.tag_required = ANY($1::text[])
+               AND b.event_date >= CURRENT_DATE
+               AND (
+                 -- Match via explicit staff_slots definition
+                 ss.tag_required = ANY($1::text[])
+                 OR
+                 -- Fallback: match service_name directly against staff tags
+                 -- (used when no staff_slots rows have been defined for this service)
+                 (ss.id IS NULL AND b.service_name = ANY($1::text[]))
+               )
                AND b.id NOT IN (
                  SELECT booking_id FROM staff_assignments WHERE staff_id = $2
                )
@@ -219,6 +239,39 @@ exports.handler = async (event) => {
     // ── POST /api/staff-assignments ──────────────────────────────────────────
     const action = body.action;
 
+    // action: save_service_slots — replace all slot definitions for affected services
+    if (action === 'save_service_slots') {
+      const { slots } = body; // [{ service_id, tag_required, slot_count }]
+      if (!Array.isArray(slots)) {
+        return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'slots array required' }) };
+      }
+
+      // Get unique service_ids being updated (including __CLEAR__ sentinels)
+      const serviceIds = [...new Set(slots.map(s => s.service_id))];
+
+      // Delete ALL existing slots for every service being touched
+      if (serviceIds.length) {
+        await client.query(
+          `DELETE FROM staff_slots WHERE service_id = ANY($1::text[])`,
+          [serviceIds]
+        );
+      }
+
+      // Insert real slots (skip __CLEAR__ sentinels which were just for deletion)
+      const realSlots = slots.filter(sl => sl.tag_required !== '__CLEAR__');
+      let sortOrder = 0;
+      for (const sl of realSlots) {
+        if (!sl.service_id || !sl.tag_required) continue;
+        await client.query(
+          `INSERT INTO staff_slots (service_id, tag_required, slot_count, exclusive, sort_order)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [sl.service_id, sl.tag_required, sl.slot_count || 1, !['Driver','Setup'].includes(sl.tag_required), sortOrder++]
+        );
+      }
+
+      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ success: true, saved: realSlots.length }) };
+    }
+
     // action: notify_staff — triggered when Joe confirms a booking
     // Finds all staff with matching tags and emails them the portal link
     if (action === 'notify_staff') {
@@ -229,17 +282,15 @@ exports.handler = async (event) => {
       const booking = bookings[0];
       if (!booking) return { statusCode: 404, headers: HEADERS, body: JSON.stringify({ error: 'Booking not found' }) };
 
-      // Get required slots for this service
+      // Get required tags — from staff_slots if defined, else fall back to service_name
       const { rows: slots } = await client.query(
         'SELECT * FROM staff_slots WHERE service_id=$1 ORDER BY sort_order',
         [booking.service_id]
       );
 
-      if (!slots.length) {
-        return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ notified: 0, message: 'No slots defined for this service' }) };
-      }
-
-      const tags = [...new Set(slots.map(s => s.tag_required))];
+      const tags = slots.length
+        ? [...new Set(slots.map(s => s.tag_required))]
+        : [booking.service_name]; // fallback: match staff who have this service as a skill tag
 
       // Find all active staff with any matching tag
       const { rows: allStaff } = await client.query('SELECT * FROM staff WHERE active=TRUE');

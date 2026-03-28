@@ -43,5 +43,10 @@
   to = "/.netlify/functions/staff-assignments"
   status = 200
 
+[[redirects]]
+  from = "/staff"
+  to = "/staff-portal.html"
+  status = 200
+
 [functions]
   node_bundler = "esbuild"
