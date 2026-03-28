@@ -131,4 +131,29 @@ async function ensureEmailLog(client) {
   `);
 }
 
-module.exports = { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog };
+// ── Ensure booking_changes table exists ───────────────────────────────────────
+async function ensureBookingChanges(client) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS booking_changes (
+      id         SERIAL PRIMARY KEY,
+      booking_id INTEGER NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+      action     VARCHAR(100) NOT NULL,
+      detail     TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS idx_booking_changes_booking_id
+    ON booking_changes(booking_id)
+  `);
+}
+
+// ── Log a booking change ───────────────────────────────────────────────────────
+async function logChange(client, bookingId, action, detail) {
+  await client.query(
+    `INSERT INTO booking_changes (booking_id, action, detail) VALUES ($1, $2, $3)`,
+    [bookingId, action, detail || '']
+  );
+}
+
+module.exports = { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange };
