@@ -155,7 +155,7 @@ tr:hover td{background:#fafaf8}
 .cal-cell.other{opacity:.3}
 .cal-cell .cn{font-weight:700;color:#6b7280;margin-bottom:4px;font-size:.75rem}
 .cal-cell.today .cn{color:#7c3aed}
-.cal-evt{background:#7c3aed;color:#fff;border-radius:4px;padding:2px 5px;font-size:.67rem;margin-bottom:2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .15s}
+.cal-evt{background:#7c3aed;color:#fff;border-radius:4px;padding:2px 5px;font-size:.67rem;margin-bottom:2px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;transition:background .15s;display:flex;align-items:center;gap:2px}
 .cal-evt:hover{background:#6d28d9}
 .cal-evt.confirmed{background:#059669}
 .cal-evt.pending{background:#3b82f6}
@@ -327,6 +327,7 @@ input,select,textarea{font-family:inherit}
       <div class="page-hdr">
         <h1>All Bookings</h1>
         <div class="filter-bar">
+          <button class="btn btn-outline btn-sm" onclick="exportBookingsCSV()" style="margin-right:8px">⬇ Export CSV</button>
           <select id="filter-status" onchange="renderBookingsTable()">
             <option value="">All Statuses</option>
             <option value="review">Review</option>
@@ -495,6 +496,7 @@ input,select,textarea{font-family:inherit}
 // ══════════════════════════════════════════════════
 let allBookings = [];
 let allStaff    = [];
+let calStaffMap = {}; // booking_id → [{initials, color}]
 let currentUser = null; // { role:'admin'|'staff', staffId, staffName, staffColor }
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth();
@@ -581,6 +583,7 @@ async function init() {
     if (greet) greet.textContent = 'Hey, ' + (currentUser.staffName || 'there') + '! 👋';
   } else {
     await Promise.all([loadBookings(), loadStaffList()]);
+    await loadCalStaffMap();
     showPage('dashboard');
   }
 }
@@ -590,6 +593,25 @@ async function loadStaffList() {
     const res = await fetch('/api/staff');
     allStaff = await res.json();
   } catch(e) { console.error('loadStaffList:', e); }
+}
+
+async function loadCalStaffMap() {
+  try {
+    // Fetch all assignments in one go for calendar rendering
+    const res = await fetch('/api/staff-assignments?all=true');
+    if (!res.ok) return;
+    const data = await res.json();
+    calStaffMap = {};
+    (data.assignments || []).forEach(a => {
+      if (a.status !== 'assigned') return;
+      if (!calStaffMap[a.booking_id]) calStaffMap[a.booking_id] = [];
+      // Avoid duplicates (same staff, multiple roles)
+      if (!calStaffMap[a.booking_id].find(x => x.staff_id === a.staff_id)) {
+        const initials = (a.staff_name || '??').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+        calStaffMap[a.booking_id].push({ staff_id: a.staff_id, initials, color: a.color || '#7c3aed' });
+      }
+    });
+  } catch(e) { /* fail silently — calendar works without staff initials */ }
 }
 
 async function loadBookings() {
@@ -657,6 +679,46 @@ function renderDashboard() {
 // ══════════════════════════════════════════════════
 // BOOKINGS TABLE
 // ══════════════════════════════════════════════════
+function exportBookingsCSV() {
+  const statusFilter = document.getElementById('filter-status')?.value || '';
+  const rows = allBookings.filter(b => !statusFilter || b.status === statusFilter);
+  const cols = [
+    ['Reference',      b => b.reference],
+    ['Status',         b => b.status],
+    ['Client Name',    b => b.client_name],
+    ['Client Email',   b => b.client_email],
+    ['Client Phone',   b => b.client_phone],
+    ['Service',        b => b.service_name],
+    ['Event Date',     b => b.event_date ? String(b.event_date).split('T')[0] : ''],
+    ['Event Time',     b => b.event_time],
+    ['Event Type',     b => b.event_type],
+    ['Guest Count',    b => b.guest_count],
+    ['ZIP',            b => b.event_zip],
+    ['Location',       b => b.event_location],
+    ['Child Name',     b => b.child_name || ''],
+    ['Total Price',    b => Number(b.total_price||0).toFixed(2)],
+    ['Deposit',        b => Number(b.deposit_amount||0).toFixed(2)],
+    ['Deposit Paid',   b => b.deposit_paid ? 'Yes' : 'No'],
+    ['Balance Due',    b => Number(b.balance_due||0).toFixed(2)],
+    ['Payment Method', b => b.payment_method],
+    ['Payment Ref',    b => b.payment_ref || ''],
+    ['Referral',       b => b.referral_source],
+    ['Admin Notes',    b => b.admin_notes],
+    ['Created',        b => b.created_at ? String(b.created_at).split('T')[0] : ''],
+  ];
+  const esc = v => '"' + String(v||'').replace(/"/g,'""') + '"';
+  const header = cols.map(([h]) => esc(h)).join(',');
+  const body = rows.map(b => cols.map(([,fn]) => esc(fn(b))).join(',')).join('\n');
+  const csv = header + '\n' + body;
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `funky-monkey-bookings-${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function renderBookingsTable() {
   const statusFilter = document.getElementById('filter-status').value;
   const search = (document.getElementById('filter-search').value || '').toLowerCase().trim();
@@ -718,10 +780,14 @@ function openBooking(id) {
       <div class="detail-field"><label>Phone</label><div class="dval"><a href="tel:${b.client_phone||''}">${esc(b.client_phone||'—')}</a></div></div>
       <div class="detail-field"><label>Email</label><div class="dval"><a href="mailto:${b.client_email||''}">${esc(b.client_email||'—')}</a></div></div>
       <div class="detail-field"><label>Referral</label><div class="dval">${esc(b.referral_source||'—')}</div></div>
+      <div class="detail-field"><label>Customer Type</label><div class="dval">${esc(b.customer_type||'—')}</div></div>
       <div class="detail-field"><label>Event Date</label><div class="dval">${fmtDate(b.event_date)}${b.event_time?' at '+fmtTime(b.event_time):''}</div></div>
       <div class="detail-field"><label>Event Type</label><div class="dval">${esc(b.event_type||'—')}</div></div>
       <div class="detail-field"><label>Guests</label><div class="dval">${b.guest_count||'—'}</div></div>
       <div class="detail-field"><label>ZIP / Location</label><div class="dval">${esc(b.event_zip||'—')}${b.event_location?' — '+esc(b.event_location):''}</div></div>
+      ${b.venue?`<div class="detail-field"><label>Venue</label><div class="dval">${esc(b.venue)}</div></div>`:''}
+      ${b.child_name?`<div class="detail-field"><label>🎂 Birthday Person</label><div class="dval">${esc(b.child_name)}</div></div>`:''}
+      ${b.guests_of_honour?`<div class="detail-field"><label>⭐ Guests of Honour</label><div class="dval">${esc(b.guests_of_honour)}</div></div>`:''}
     </div>
 
     ${b.notes?`<div style="margin-bottom:18px"><span class="section-label">Client Notes</span><p style="font-size:.875rem;color:#374151;line-height:1.6">${esc(b.notes)}</p></div>`:''}
@@ -779,8 +845,19 @@ function openBooking(id) {
           <label>Note (optional)</label>
           <input type="text" id="pay-note-${b.id}" placeholder="e.g. deposit, balance…" style="width:100%"/>
         </div>
+        <div class="pay-field" style="min-width:120px">
+          <label>Payment Ref</label>
+          <input type="text" id="pay-ref-${b.id}" value="${esc(b.payment_ref||'')}" placeholder="Check #, Venmo ID…" style="width:100%"/>
+        </div>
         <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordPayment('${b.id}')">Save Payment</button>
         <span class="save-flash" id="pay-flash-${b.id}">✓ Saved</span>
+      </div>
+      <div class="pay-row" style="margin-top:8px;align-items:center;gap:12px">
+        <label style="font-size:.78rem;font-weight:600;color:#6b7280;white-space:nowrap">⏰ Deposit deadline:</label>
+        <input type="date" id="pay-deadline-${b.id}" value="${b.confirmation_deadline?String(b.confirmation_deadline).split('T')[0]:''}"
+          style="padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:.82rem"
+          onchange="patch('${b.id}',{confirmation_deadline:this.value||null})"/>
+        <span style="font-size:.75rem;color:#9ca3af">Client must pay deposit by this date or booking may be released</span>
       </div>
     </div>
 
@@ -1062,6 +1139,7 @@ async function recordPayment(id) {
   const amt = document.getElementById('pay-amt-' + id).value;
   const method = document.getElementById('pay-meth-' + id).value;
   const note = document.getElementById('pay-note-' + id).value;
+  const ref  = document.getElementById('pay-ref-' + id)?.value || '';
 
   if (!amt || isNaN(Number(amt)) || Number(amt) <= 0) {
     document.getElementById('pay-amt-' + id).style.borderColor = '#dc2626';
@@ -1077,6 +1155,7 @@ async function recordPayment(id) {
       payment_amount: Number(amt),
       payment_method: method,
       payment_note: note,
+      payment_ref: ref,
       deposit_paid: true
     });
     await loadBookings();
@@ -1151,9 +1230,15 @@ function renderOneMonth(year, month, gridId, labelId) {
     const isToday = d===today.getDate()&&month===today.getMonth()&&year===today.getFullYear();
     const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const dayBkgs = allBookings.filter(b => b.event_date && b.event_date.startsWith(dateStr) && b.status !== 'cancelled');
-    const evts = dayBkgs.map(b =>
-      `<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${b.client_name} — ${b.service_name}">${b.service_name||b.client_name}</div>`
-    ).join('');
+    const evts = dayBkgs.map(b => {
+      const staffBadges = (calStaffMap[b.id] || []).map(s =>
+        `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:${s.color};color:#fff;font-size:9px;font-weight:800;border:1.5px solid #fff;margin-left:2px">${s.initials}</span>`
+      ).join('');
+      return `<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${b.client_name} — ${b.service_name}">
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.service_name||b.client_name}</span>
+        ${staffBadges}
+      </div>`;
+    }).join('');
     html += `<div class="cal-cell${isToday?' today':''}"><div class="cn">${d}</div>${evts}</div>`;
   }
   document.getElementById(gridId).innerHTML = html;

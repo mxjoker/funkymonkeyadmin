@@ -228,6 +228,11 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#7c3aed}
         <label>Additional Notes <span style="font-weight:400;color:#aaa">(optional)</span></label>
         <textarea id="ev-notes" rows="3" placeholder="Special requests, theme, setup needs…"></textarea>
       </div>
+      <div class="form-row" id="child-name-row">
+        <label>Birthday Person's Name <span style="font-weight:400;color:#aaa">(optional)</span></label>
+        <input type="text" id="ev-child" placeholder="e.g. Emma"/>
+        <div class="hint">We love to give them a special shout-out! 🎉</div>
+      </div>
 
       <div class="section-divider">👤 Your Contact Info</div>
       <div class="form-row">
@@ -1006,6 +1011,7 @@ async function submitBooking() {
     event_location: document.getElementById('ev-loc').value.trim(),
     guest_count: guests,
     notes: document.getElementById('ev-notes').value.trim(),
+    child_name: document.getElementById('ev-child')?.value.trim() || '',
     client_name: document.getElementById('c-name').value.trim(),
     client_phone: document.getElementById('c-phone').value.trim(),
     client_email: document.getElementById('c-email').value.trim(),

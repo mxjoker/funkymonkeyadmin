@@ -1,0 +1,18 @@
+# Netlify
+.netlify
+
+# Environment variables — NEVER commit these
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Mac
+.DS_Store
+netlify/.DS_Store
+
+# Lock files (optional — remove if you want to commit them)
+# package-lock.json
+# deno.lock

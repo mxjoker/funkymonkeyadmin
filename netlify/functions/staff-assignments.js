@@ -128,10 +128,23 @@ exports.handler = async (event) => {
     const body = event.body ? JSON.parse(event.body) : {};
 
     // ── GET /api/staff-assignments?booking_id=X ──────────────────────────────
-    // Returns all assignments + slots for a booking
     if (event.httpMethod === 'GET') {
       const bookingId = event.queryStringParameters?.booking_id;
       const staffId   = event.queryStringParameters?.staff_id;
+      const allFlag   = event.queryStringParameters?.all === 'true';
+
+      // ?all=true — lightweight fetch for calendar staff initials
+      if (allFlag) {
+        const { rows: assignments } = await client.query(
+          `SELECT sa.booking_id, sa.staff_id, sa.status,
+                  s.name as staff_name, s.preferred_name, s.color
+           FROM staff_assignments sa
+           JOIN staff s ON s.id = sa.staff_id
+           WHERE sa.status = 'assigned'
+           ORDER BY sa.booking_id`
+        );
+        return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ assignments }) };
+      }
 
       if (bookingId) {
         const { rows: assignments } = await client.query(

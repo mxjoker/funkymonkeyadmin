@@ -91,7 +91,13 @@ async function ensureTable(client) {
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_type_id VARCHAR(64) DEFAULT ''",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS is_custom_quote BOOLEAN DEFAULT FALSE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extra_hours INTEGER DEFAULT 0",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extra_hours_cost NUMERIC(10,2) DEFAULT 0"
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extra_hours_cost NUMERIC(10,2) DEFAULT 0",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS child_name VARCHAR(255) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS guests_of_honour VARCHAR(255) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS customer_type VARCHAR(64) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS venue VARCHAR(255) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS confirmation_deadline DATE",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_ref VARCHAR(255) DEFAULT ''"
   ];
   for (const sql of cols) {
     try { await client.query(sql); } catch (_) {}
@@ -154,7 +160,8 @@ exports.handler = async (event) => {
           event_date, event_time, event_zip, event_location,
           event_type, event_type_id, guest_count, notes,
           is_custom_quote, extra_hours, extra_hours_cost,
-          client_name, client_phone, client_email, referral_source
+          client_name, client_phone, client_email, referral_source,
+          child_name
         ) VALUES (
           $1, 'review',
           $2, $3, $4,
@@ -163,7 +170,8 @@ exports.handler = async (event) => {
           $12, $13, $14, $15,
           $16, $17, $18, $19,
           $20, $21, $22,
-          $23, $24, $25, $26
+          $23, $24, $25, $26,
+          $27
         ) RETURNING *
       `, [
         reference,
@@ -191,7 +199,8 @@ exports.handler = async (event) => {
         b.client_name || '',
         b.client_phone || '',
         b.client_email || '',
-        b.referral_source || ''
+        b.referral_source || '',
+        b.child_name || ''
       ]);
 
       const booking = rows[0];
