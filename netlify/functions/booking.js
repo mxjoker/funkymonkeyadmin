@@ -204,9 +204,99 @@ exports.handler = async (event) => {
         }
       }
 
-      // Send status change emails
+      // Fire automation rules for status changes (replaces old hardcoded statusEmail)
       if (u.status && ["confirmed", "cancelled", "completed"].includes(u.status)) {
-        await statusEmail(updated, u.status, stripeLink);
+        try {
+          const { Pool } = require('pg');
+          const autoPool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+          const autoClient = await autoPool.connect();
+          const { ensureTables: autoEnsure, sendAutomationEmail, triggerStatusChange } = (() => {
+            // Inline the automation trigger to avoid cross-function imports in Netlify
+            const autoFetch = async (rule, booking, stripe) => {
+              const RESEND_API_KEY = process.env.RESEND_API_KEY;
+              if (!RESEND_API_KEY) return;
+              const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
+              const toEmail = rule.recipient === 'admin' ? NOTIFY : booking.client_email;
+              if (!toEmail) return;
+              const firstName = (booking.client_name || '').split(' ')[0] || 'there';
+              const dateStr = booking.event_date
+                ? new Date(String(booking.event_date).split('T')[0] + 'T00:00:00')
+                    .toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
+                : 'TBD';
+              const depositLink = stripe
+                ? `<div style="text-align:center;margin:20px 0"><a href="${stripe}" style="background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px">💳 Pay Deposit — $${Number(booking.deposit_amount||100).toFixed(2)}</a></div>`
+                : '';
+              const render = (t) => t
+                .replace(/{{client_first_name}}/g, firstName)
+                .replace(/{{client_name}}/g, booking.client_name || '')
+                .replace(/{{service_name}}/g, booking.service_name || '')
+                .replace(/{{event_date}}/g, dateStr)
+                .replace(/{{event_time}}/g, booking.event_time || '')
+                .replace(/{{total_price}}/g, Number(booking.total_price||0).toFixed(2))
+                .replace(/{{deposit_amount}}/g, Number(booking.deposit_amount||100).toFixed(2))
+                .replace(/{{balance_due}}/g, Number(booking.balance_due||0).toFixed(2))
+                .replace(/{{reference}}/g, booking.reference || '')
+                .replace(/{{deposit_link}}/g, depositLink);
+              const wrap = (b) => `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0F0A1E;color:#F3E8FF;border-radius:16px;overflow:hidden"><div style="background:linear-gradient(135deg,#FF6B00,#FFD600);padding:20px 24px"><div style="font-size:22px;font-weight:900;color:#0F0A1E">🐒 Funky Monkey Events</div></div><div style="padding:24px">${b}</div></div>`;
+              await fetch('https://api.resend.com/emails', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ from: 'Funky Monkey Events <bookings@funkymonkeyevents.com>', to: toEmail, subject: render(rule.subject), html: wrap(render(rule.body_html)) })
+              });
+              await autoClient.query(
+                `INSERT INTO email_log (booking_id, rule_id, trigger_label, subject, recipient_email, recipient_label) VALUES ($1,$2,$3,$4,$5,$6)`,
+                [booking.id, rule.id, rule.name, render(rule.subject), toEmail, rule.recipient]
+              );
+            };
+            return { autoFetch };
+          })();
+
+          await autoClient.query(`CREATE TABLE IF NOT EXISTS email_log (id SERIAL PRIMARY KEY, booking_id INTEGER NOT NULL, rule_id INTEGER, trigger_label VARCHAR(255) NOT NULL, subject VARCHAR(500) NOT NULL, recipient_email VARCHAR(255) NOT NULL, recipient_label VARCHAR(32) DEFAULT 'client', sent_at TIMESTAMPTZ DEFAULT NOW(), status VARCHAR(32) DEFAULT 'sent')`);
+          const { rows: rules } = await autoClient.query(
+            `SELECT * FROM automation_rules WHERE active=TRUE AND trigger_event='status_change' AND trigger_status=$1 ORDER BY sort_order`,
+            [u.status]
+          );
+          for (const rule of rules) {
+            const firstName = (updated.client_name || '').split(' ')[0] || 'there';
+            const dateStr = updated.event_date
+              ? new Date(String(updated.event_date).split('T')[0] + 'T00:00:00')
+                  .toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
+              : 'TBD';
+            const depositLink = stripeLink
+              ? `<div style="text-align:center;margin:20px 0"><a href="${stripeLink}" style="background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px">💳 Pay Deposit — $${Number(updated.deposit_amount||100).toFixed(2)}</a></div>`
+              : '';
+            const render = (t) => t
+              .replace(/{{client_first_name}}/g, firstName)
+              .replace(/{{client_name}}/g, updated.client_name || '')
+              .replace(/{{service_name}}/g, updated.service_name || '')
+              .replace(/{{event_date}}/g, dateStr)
+              .replace(/{{event_time}}/g, updated.event_time || '')
+              .replace(/{{total_price}}/g, Number(updated.total_price||0).toFixed(2))
+              .replace(/{{deposit_amount}}/g, Number(updated.deposit_amount||100).toFixed(2))
+              .replace(/{{balance_due}}/g, Number(updated.balance_due||0).toFixed(2))
+              .replace(/{{reference}}/g, updated.reference || '')
+              .replace(/{{deposit_link}}/g, depositLink);
+            const wrap = (b) => `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0F0A1E;color:#F3E8FF;border-radius:16px;overflow:hidden"><div style="background:linear-gradient(135deg,#FF6B00,#FFD600);padding:20px 24px"><div style="font-size:22px;font-weight:900;color:#0F0A1E">🐒 Funky Monkey Events</div></div><div style="padding:24px">${b}</div></div>`;
+            const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
+            const toEmail = rule.recipient === 'admin' ? NOTIFY : updated.client_email;
+            if (toEmail && process.env.RESEND_API_KEY) {
+              await fetch('https://api.resend.com/emails', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ from: 'Funky Monkey Events <bookings@funkymonkeyevents.com>', to: toEmail, subject: render(rule.subject), html: wrap(render(rule.body_html)) })
+              });
+              await autoClient.query(
+                `INSERT INTO email_log (booking_id, rule_id, trigger_label, subject, recipient_email, recipient_label) VALUES ($1,$2,$3,$4,$5,$6)`,
+                [updated.id, rule.id, rule.name, render(rule.subject), toEmail, rule.recipient]
+              );
+            }
+          }
+          autoClient.release();
+        } catch(autoErr) {
+          console.error('Automation trigger error:', autoErr.message);
+          // Fall back to old status emails if automations fail
+          await statusEmail(updated, u.status, stripeLink);
+        }
       }
 
       return { statusCode: 200, headers: h, body: JSON.stringify(updated) };

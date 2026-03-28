@@ -273,6 +273,7 @@ input,select,textarea{font-family:inherit}
       <a id="nav-clients"   onclick="showPage('clients')"><span class="nav-icon">👥</span>Clients</a>
       <a id="nav-staff"     onclick="showPage('staff')"><span class="nav-icon">🎭</span>Staffing</a>
       <a id="nav-catalogue" onclick="showPage('catalogue')"><span class="nav-icon">🗂</span>Catalogue</a>
+      <a id="nav-automations" onclick="showPage('automations')"><span class="nav-icon">⚡</span>Automations</a>
       <a id="nav-analytics" onclick="showPage('analytics')"><span class="nav-icon">📈</span>Analytics</a>
       <a id="nav-portal"    style="display:none"></a>
     </nav>
@@ -429,6 +430,26 @@ input,select,textarea{font-family:inherit}
       <p class="text-muted" style="margin-bottom:20px">Changes save to the database and immediately appear in the booking form.</p>
       <div id="cat-loading" class="cat-loading"><div class="cat-spinner"></div>Loading…</div>
       <div id="cat-content" style="display:none"></div>
+    </div>
+
+    <!-- ══ AUTOMATIONS ══ -->
+    <div class="page" id="page-automations">
+      <div class="page-hdr">
+        <h1>Automations</h1>
+        <div class="page-hdr-actions">
+          <button class="btn btn-outline btn-sm" onclick="runScheduledNow()">▶ Run Scheduled Now</button>
+          <button class="btn btn-primary btn-sm" onclick="openRuleModal(null)">+ New Rule</button>
+        </div>
+      </div>
+      <p class="text-muted" style="margin-bottom:20px">Emails are sent automatically based on booking status changes or days relative to the event. Use <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{client_first_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{service_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{event_date}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_amount}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_link}}</code> in templates.</p>
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-hdr"><h2>Email Rules</h2></div>
+        <div id="auto-rules-body"><div style="text-align:center;padding:32px;color:#9ca3af">Loading…</div></div>
+      </div>
+      <div class="card">
+        <div class="card-hdr"><h2>Recent Emails Sent</h2></div>
+        <div id="auto-log-body"><div style="text-align:center;padding:32px;color:#9ca3af">Loading…</div></div>
+      </div>
     </div>
 
     <!-- ══ ANALYTICS ══ -->
@@ -611,6 +632,7 @@ function showPage(name) {
   document.getElementById('nav-' + name).classList.add('active');
   if (name === 'staff') renderStaff();
   if (name === 'catalogue') loadCatalogue();
+  if (name === 'automations') loadAutomations();
   closeNav(); // close drawer after navigation on mobile
 }
 
@@ -797,12 +819,30 @@ function openBooking(id) {
       </button>
       <button class="btn btn-danger btn-sm" onclick="confirmDelete('${b.id}')">🗑 Delete</button>
     </div>
+
+    ${currentUser?.role === 'admin' ? `
+    <div style="margin-top:20px;border-top:1px solid #e5e7eb;padding-top:18px">
+      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:#9ca3af;margin-bottom:10px">✅ Admin Checklist</div>
+      <div id="tasks-container-${b.id}"><div style="color:#9ca3af;font-size:.8rem">Loading…</div></div>
+    </div>
+    <div style="margin-top:18px;border-top:1px solid #e5e7eb;padding-top:18px">
+      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:#9ca3af;margin-bottom:10px">📧 Emails Sent</div>
+      <div id="email-log-${b.id}"><div style="color:#9ca3af;font-size:.8rem">Loading…</div></div>
+    </div>` : ''}
   `;
 
   document.getElementById('booking-modal').classList.add('open');
 
   // Load staff assignments after modal renders (admin only)
-  if (currentUser?.role === 'admin') loadStaffAssignments(b.id);
+  if (currentUser?.role === 'admin') {
+    loadStaffAssignments(b.id);
+    // Email log
+    const logContainer = document.getElementById('email-log-' + b.id);
+    if (logContainer) loadBookingEmailLog(b.id, logContainer);
+    // Task checklist
+    const taskContainer = document.getElementById('tasks-container-' + b.id);
+    if (taskContainer) { taskContainer.classList.add('tasks-container'); loadBookingTasks(b.id, taskContainer); }
+  }
 }
 
 function closeModal() {
@@ -2210,6 +2250,227 @@ async function saveCatalogue() {
 }
 
 // ══════════════════════════════════════════════════
+// ══════════════════════════════════════════════════
+// AUTOMATIONS
+// ══════════════════════════════════════════════════
+async function loadAutomations() {
+  const [rulesRes, logRes] = await Promise.all([
+    fetch('/api/automations'),
+    fetch('/api/automations?type=log')
+  ]);
+  const rules = await rulesRes.json();
+  const log   = await logRes.json();
+  renderAutoRules(rules);
+  renderAutoLog(log);
+}
+
+function renderAutoRules(rules) {
+  const el = document.getElementById('auto-rules-body');
+  if (!rules.length) { el.innerHTML = '<p style="padding:16px;color:#9ca3af">No rules yet. Click + New Rule to add one.</p>'; return; }
+  const triggerLabel = r => {
+    if (r.trigger_event === 'status_change')    return `When status → <strong>${r.trigger_status}</strong>`;
+    if (r.trigger_event === 'days_before_event') return `<strong>${r.trigger_days} days before</strong> event`;
+    if (r.trigger_event === 'days_after_event')  return `<strong>${r.trigger_days} days after</strong> event`;
+    if (r.trigger_event === 'deposit_paid')      return `When deposit paid`;
+    return r.trigger_event;
+  };
+  el.innerHTML = `<table class="data-table"><thead><tr>
+    <th style="width:40px">On</th><th>Rule Name</th><th>Trigger</th>
+    <th>To</th><th>Subject</th><th style="width:80px"></th>
+  </tr></thead><tbody>${rules.map(r => `
+    <tr style="opacity:${r.active?1:.45}">
+      <td><input type="checkbox" ${r.active?'checked':''} onchange="toggleRule(${r.id},this.checked)"></td>
+      <td><strong>${esc(r.name)}</strong></td>
+      <td style="font-size:.8rem">${triggerLabel(r)}</td>
+      <td><span style="font-size:.75rem;background:${r.recipient==='admin'?'#fef3c7':'#dbeafe'};color:${r.recipient==='admin'?'#92400e':'#1e40af'};padding:2px 8px;border-radius:10px;font-weight:600">${r.recipient}</span></td>
+      <td style="font-size:.8rem;color:#6b7280">${esc(r.subject).substring(0,60)}${r.subject.length>60?'…':''}</td>
+      <td style="text-align:right">
+        <button class="btn btn-outline btn-sm" style="padding:2px 8px" onclick="openRuleModal(${JSON.stringify(r).replace(/"/g,'&quot;')})">Edit</button>
+      </td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function renderAutoLog(log) {
+  const el = document.getElementById('auto-log-body');
+  if (!log.length) { el.innerHTML = '<p style="padding:16px;color:#9ca3af">No emails sent yet.</p>'; return; }
+  el.innerHTML = `<table class="data-table"><thead><tr>
+    <th>Sent</th><th>Booking</th><th>Client</th><th>Trigger</th><th>Subject</th><th>To</th>
+  </tr></thead><tbody>${log.map(e => `
+    <tr>
+      <td style="font-size:.75rem;color:#6b7280;white-space:nowrap">${new Date(e.sent_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
+      <td><a href="#" onclick="openBookingByRef('${esc(e.reference)}')" style="color:#7c3aed;font-weight:600">${esc(e.reference||'—')}</a></td>
+      <td style="font-size:.8rem">${esc(e.client_name||'—')}</td>
+      <td><span style="font-size:.72rem;background:${e.trigger_label==='Manual'?'#f3f4f6':'#f0fdf4'};color:${e.trigger_label==='Manual'?'#374151':'#166534'};padding:2px 7px;border-radius:10px;font-weight:600">${esc(e.trigger_label)}</span></td>
+      <td style="font-size:.8rem;color:#374151">${esc(e.subject).substring(0,55)}${e.subject.length>55?'…':''}</td>
+      <td style="font-size:.75rem;color:#6b7280">${esc(e.recipient_email)}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function openRuleModal(rule) {
+  const r = rule || { name:'', active:true, trigger_event:'status_change', trigger_status:'confirmed', trigger_days:null, recipient:'client', subject:'', body_html:'' };
+  document.getElementById('modal-title').textContent = r.id ? 'Edit Automation Rule' : 'New Automation Rule';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:grid;gap:12px">
+      <div><label class="form-label">Rule Name</label><input class="form-control" id="rule-name" value="${esc(r.name)}"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label class="form-label">Trigger</label>
+          <select class="form-control" id="rule-trigger" onchange="updateRuleTriggerUI()">
+            <option value="status_change" ${r.trigger_event==='status_change'?'selected':''}>Status changes to…</option>
+            <option value="days_before_event" ${r.trigger_event==='days_before_event'?'selected':''}>X days before event</option>
+            <option value="days_after_event" ${r.trigger_event==='days_after_event'?'selected':''}>X days after event</option>
+            <option value="deposit_paid" ${r.trigger_event==='deposit_paid'?'selected':''}>Deposit paid</option>
+          </select>
+        </div>
+        <div id="rule-trigger-detail">
+          ${r.trigger_event==='status_change'
+            ? `<label class="form-label">Status</label>
+               <select class="form-control" id="rule-status">
+                 ${['confirmed','cancelled','completed','pending'].map(s=>`<option value="${s}" ${r.trigger_status===s?'selected':''}>${s}</option>`).join('')}
+               </select>`
+            : r.trigger_event.startsWith('days_')
+            ? `<label class="form-label">Days</label><input class="form-control" id="rule-days" type="number" min="0" value="${r.trigger_days||1}">`
+            : '<div></div>'
+          }
+        </div>
+      </div>
+      <div><label class="form-label">Send to</label>
+        <select class="form-control" id="rule-recipient">
+          <option value="client" ${r.recipient==='client'?'selected':''}>Client</option>
+          <option value="admin" ${r.recipient==='admin'?'selected':''}>Me (Admin)</option>
+        </select>
+      </div>
+      <div><label class="form-label">Subject</label><input class="form-control" id="rule-subject" value="${esc(r.subject)}"></div>
+      <div><label class="form-label">Body (HTML allowed, use {{variables}})</label>
+        <textarea class="form-control" id="rule-body" rows="6" style="font-family:monospace;font-size:.8rem">${esc(r.body_html)}</textarea>
+      </div>
+      <div style="display:flex;gap:10px;padding-top:4px">
+        <button class="btn btn-primary" onclick="saveRule(${r.id||'null'})">Save Rule</button>
+        ${r.id?`<button class="btn btn-outline" style="color:#dc2626;border-color:#dc2626" onclick="deleteRule(${r.id})">Delete</button>`:''}
+      </div>
+    </div>`;
+  document.getElementById('booking-modal').classList.add('open');
+}
+
+function updateRuleTriggerUI() {
+  const trigger = document.getElementById('rule-trigger').value;
+  const det = document.getElementById('rule-trigger-detail');
+  if (trigger === 'status_change') {
+    det.innerHTML = `<label class="form-label">Status</label><select class="form-control" id="rule-status">${['confirmed','cancelled','completed','pending'].map(s=>`<option value="${s}">${s}</option>`).join('')}</select>`;
+  } else if (trigger.startsWith('days_')) {
+    det.innerHTML = `<label class="form-label">Days</label><input class="form-control" id="rule-days" type="number" min="0" value="1">`;
+  } else {
+    det.innerHTML = '<div></div>';
+  }
+}
+
+async function saveRule(ruleId) {
+  const trigger = document.getElementById('rule-trigger').value;
+  const rule = {
+    id: ruleId || undefined,
+    name:          document.getElementById('rule-name').value.trim(),
+    trigger_event: trigger,
+    trigger_status: trigger==='status_change' ? document.getElementById('rule-status')?.value : null,
+    trigger_days:   trigger.startsWith('days_') ? parseInt(document.getElementById('rule-days')?.value||1) : null,
+    recipient:     document.getElementById('rule-recipient').value,
+    subject:       document.getElementById('rule-subject').value.trim(),
+    body_html:     document.getElementById('rule-body').value.trim(),
+    active: true
+  };
+  try {
+    const res = await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'save_rule', rule }) });
+    if (!res.ok) throw new Error((await res.json()).error);
+    closeModal();
+    await loadAutomations();
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+async function toggleRule(ruleId, active) {
+  await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'save_rule', rule:{ id:ruleId, active } }) });
+}
+
+async function deleteRule(ruleId) {
+  if (!confirm('Deactivate this rule?')) return;
+  await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'delete_rule', rule_id:ruleId }) });
+  closeModal();
+  await loadAutomations();
+}
+
+async function runScheduledNow() {
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = 'Running…';
+  try {
+    const res = await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'run_scheduled' }) });
+    const data = await res.json();
+    alert(`Done — ${data.sent} scheduled email(s) sent.`);
+    await loadAutomations();
+  } catch(e) { alert('Error: ' + e.message); }
+  btn.disabled = false; btn.textContent = '▶ Run Scheduled Now';
+}
+
+// ══════════════════════════════════════════════════
+// PER-BOOKING EMAIL LOG
+// ══════════════════════════════════════════════════
+async function loadBookingEmailLog(bookingId, container) {
+  try {
+    const res = await fetch(`/api/automations?type=log&booking_id=${bookingId}`);
+    const log = await res.json();
+    if (!log.length) { container.innerHTML = '<p style="color:#9ca3af;font-size:.8rem;font-style:italic">No emails sent yet.</p>'; return; }
+    container.innerHTML = log.map(e => `
+      <div style="display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #f3f4f6;font-size:.78rem">
+        <div style="color:#9ca3af;white-space:nowrap;min-width:90px">${new Date(e.sent_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+        <div style="flex:1">
+          <div style="font-weight:600;color:#374151">${esc(e.subject)}</div>
+          <div style="color:#9ca3af">${esc(e.recipient_email)} · <span style="background:${e.trigger_label==='Manual'?'#f3f4f6':'#f0fdf4'};color:${e.trigger_label==='Manual'?'#374151':'#166534'};padding:1px 6px;border-radius:8px;font-size:.7rem;font-weight:600">${esc(e.trigger_label)}</span></div>
+        </div>
+      </div>`).join('');
+  } catch(e) { container.innerHTML = '<p style="color:#dc2626;font-size:.8rem">Failed to load.</p>'; }
+}
+
+// ══════════════════════════════════════════════════
+// PER-BOOKING TASK CHECKLIST
+// ══════════════════════════════════════════════════
+async function loadBookingTasks(bookingId, container) {
+  try {
+    const res = await fetch(`/api/automations?type=tasks&booking_id=${bookingId}`);
+    const tasks = await res.json();
+    renderBookingTasks(bookingId, tasks, container);
+  } catch(e) { container.innerHTML = '<p style="color:#dc2626;font-size:.8rem">Failed to load.</p>'; }
+}
+
+function renderBookingTasks(bookingId, tasks, container) {
+  container.innerHTML = `
+    ${tasks.map(t => `
+      <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f3f4f6" id="task-row-${t.id}">
+        <input type="checkbox" ${t.completed?'checked':''} onchange="completeTask(${t.id},this.checked,'${bookingId}')">
+        <span style="flex:1;font-size:.82rem;${t.completed?'text-decoration:line-through;color:#9ca3af':''}">${esc(t.task)}</span>
+        <button onclick="deleteTask(${t.id},'${bookingId}')" style="background:none;border:none;color:#d1d5db;cursor:pointer;font-size:.8rem;padding:0 4px">×</button>
+      </div>`).join('')}
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <input class="form-control" id="new-task-${bookingId}" placeholder="Add a task…" style="font-size:.8rem;padding:5px 10px" onkeydown="if(event.key==='Enter')addTask('${bookingId}')">
+      <button class="btn btn-outline btn-sm" onclick="addTask('${bookingId}')">Add</button>
+    </div>`;
+}
+
+async function addTask(bookingId) {
+  const input = document.getElementById('new-task-' + bookingId);
+  const task = input?.value.trim();
+  if (!task) return;
+  await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'save_task', booking_id:bookingId, task }) });
+  input.value = '';
+  const container = input.closest('.tasks-container');
+  await loadBookingTasks(bookingId, container);
+}
+
+async function completeTask(taskId, completed, bookingId) {
+  await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'complete_task', task_id:taskId, completed }) });
+}
+
+async function deleteTask(taskId, bookingId) {
+  await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'delete_task', task_id:taskId }) });
+  const row = document.getElementById('task-row-' + taskId);
+  if (row) row.remove();
+}
+
 // ANALYTICS
 // ══════════════════════════════════════════════════
 function renderAnalytics() {
