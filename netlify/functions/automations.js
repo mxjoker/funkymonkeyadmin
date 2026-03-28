@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const { wrap, render, sendEmail, logEmail } = require('./_email');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -14,8 +15,6 @@ const HEADERS = {
 
 const FROM = 'Funky Monkey Events <bookings@funkymonkeyevents.com>';
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
-
-// ── Ensure tables ─────────────────────────────────────────────────────────────
 async function ensureTables(client) {
   // automation_rules: defines when/what to send
   await client.query(`
@@ -112,70 +111,15 @@ async function ensureTables(client) {
   }
 }
 
-// ── Template engine ───────────────────────────────────────────────────────────
-function renderTemplate(html, booking, stripeLink) {
-  const dateStr = booking.event_date
-    ? new Date(String(booking.event_date).split('T')[0] + 'T00:00:00')
-        .toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
-    : 'TBD';
-  const firstName = (booking.client_name || '').split(' ')[0] || 'there';
-  const depositLink = stripeLink
-    ? `<div style="text-align:center;margin:20px 0"><a href="${stripeLink}" style="background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px">💳 Pay Deposit — $${Number(booking.deposit_amount||100).toFixed(2)}</a></div>`
-    : '';
-
-  return html
-    .replace(/{{client_first_name}}/g, firstName)
-    .replace(/{{client_name}}/g, booking.client_name || '')
-    .replace(/{{service_name}}/g, booking.service_name || '')
-    .replace(/{{event_date}}/g, dateStr)
-    .replace(/{{event_time}}/g, booking.event_time || '')
-    .replace(/{{event_zip}}/g, booking.event_zip || '')
-    .replace(/{{total_price}}/g, Number(booking.total_price||0).toFixed(2))
-    .replace(/{{deposit_amount}}/g, Number(booking.deposit_amount||100).toFixed(2))
-    .replace(/{{balance_due}}/g, Number(booking.balance_due||0).toFixed(2))
-    .replace(/{{reference}}/g, booking.reference || '')
-    .replace(/{{deposit_link}}/g, depositLink);
-}
-
-const emailWrap = (body) => `
-  <div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0F0A1E;color:#F3E8FF;border-radius:16px;overflow:hidden">
-    <div style="background:linear-gradient(135deg,#FF6B00,#FFD600);padding:20px 24px">
-      <div style="font-size:22px;font-weight:900;color:#0F0A1E">🐒 Funky Monkey Events</div>
-    </div>
-    <div style="padding:24px">${body}</div>
-    <div style="padding:16px 24px;border-top:1px solid rgba(255,255,255,.1);font-size:11px;color:#A78BCA;text-align:center">
-      Funky Monkey Events · OKC · (405) 431-6625
-    </div>
-  </div>`;
-
-// ── Send one automation email ─────────────────────────────────────────────────
+// ── Send one automation email (uses shared _email helpers) ───────────────────
 async function sendAutomationEmail(client, rule, booking, stripeLink) {
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  if (!RESEND_API_KEY) return;
-
   const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
   const toEmail = rule.recipient === 'admin' ? NOTIFY : booking.client_email;
   if (!toEmail) return;
-
-  const subject = renderTemplate(rule.subject, booking, stripeLink);
-  const html    = emailWrap(renderTemplate(rule.body_html, booking, stripeLink));
-
-  try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: FROM, to: toEmail, subject, html })
-    });
-    const data = await res.json();
-    if (data.error) console.error('Resend error:', JSON.stringify(data.error));
-
-    // Log it
-    await client.query(
-      `INSERT INTO email_log (booking_id, rule_id, trigger_label, subject, recipient_email, recipient_label)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
-      [booking.id, rule.id, rule.name, subject, toEmail, rule.recipient]
-    );
-  } catch(e) { console.error('sendAutomationEmail error:', e.message); }
+  const subject = render(rule.subject, booking, stripeLink);
+  const html    = wrap(render(rule.body_html, booking, stripeLink));
+  await sendEmail(toEmail, subject, html);
+  await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient);
 }
 
 // ── Trigger: status_change ────────────────────────────────────────────────────
@@ -326,16 +270,8 @@ exports.handler = async (event) => {
 
       const RESEND_API_KEY = process.env.RESEND_API_KEY;
       if (RESEND_API_KEY && booking.client_email) {
-        await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ from: FROM, to: booking.client_email, subject, html: emailWrap(html) })
-        });
-        await client.query(
-          `INSERT INTO email_log (booking_id, trigger_label, subject, recipient_email, recipient_label)
-           VALUES ($1,'Manual',$2,$3,'client')`,
-          [booking.id, subject, booking.client_email]
-        );
+        await sendEmail(booking.client_email, subject, wrap(html));
+        await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client');
       }
       return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ success: true }) };
     }
