@@ -811,45 +811,7 @@ function renderDashboard() {
     ? recent.map(b => bookingRow(b)).join('')
     : `<tr><td colspan="6" class="table-empty">No bookings yet</td></tr>`;
 
-  // Staffing warning — confirmed bookings within 14 days where assigned < required
-  const slotsRequired = {};
-  allServiceSlots.forEach(s => {
-    if (!s.exclusive) return; // stackable tags (Driver, Setup) don't add to headcount
-    slotsRequired[s.service_id] = (slotsRequired[s.service_id] || 0) + (s.slot_count || 1);
-  });
-  const now = new Date(); now.setHours(0,0,0,0);
-  const cutoff = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
-  const unstaffed = allBookings.filter(b => {
-    if (b.status !== 'confirmed') return false;
-    const d = new Date(b.event_date);
-    if (d < now || d > cutoff) return false;
-    const required = slotsRequired[b.service_id] || 0;
-    if (required === 0) return false; // no slots defined for this service, skip
-    const assigned = calStaffMap[b.id]?.length || 0;
-    return assigned < required;
-  }).sort((a,b) => new Date(a.event_date) - new Date(b.event_date));
-  const warnEl = document.getElementById('staffing-warnings');
-  if (unstaffed.length) {
-    warnEl.style.display = '';
-    warnEl.innerHTML = `
-      <div class="card-hdr" style="border-left:4px solid #f59e0b">
-        <h2>⚠️ Staffing Needed — ${unstaffed.length} event${unstaffed.length > 1 ? 's' : ''} within 14 days</h2>
-        <span style="font-size:.8rem;color:#888">Confirmed but no assigned staff</span>
-      </div>
-      <table>
-        <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th></tr></thead>
-        <tbody>${unstaffed.map(b => `
-          <tr style="cursor:pointer" onclick="openBooking('${b.id}')">
-            <td><code style="font-size:.75rem;color:#7c3aed">${esc(b.reference||'—')}</code></td>
-            <td>${esc(b.client_name)}</td>
-            <td>${esc(b.service_name)}</td>
-            <td>${fmtDate(b.event_date)}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>`;
-  } else {
-    warnEl.style.display = 'none';
-  }
+  renderActionNeeded();
 }
 
 // ══════════════════════════════════════════════════
