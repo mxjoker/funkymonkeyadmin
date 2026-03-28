@@ -309,11 +309,29 @@ Staff records currently have `admin_notes` (private) and `staff_notes` (staff �
 **9. Staffing warning on dashboard**
 Flag bookings within 14 days that have `confirmed` status but no assigned staff. Show a warning badge on the dashboard.
 
-**10. Booking change log / audit trail**
-Track every field change on a booking — what changed, old value, new value, when. Show in booking modal Activity tab (PPM has this). Add a `booking_changes` table.
+**10. Dashboard overhaul — Task Summary widget**
+Inspired by PPM's Task Manager. Replace or supplement the "Recent Bookings" panel with an action-oriented task summary showing counts of:
+- Bookings needing review (status = `review`)
+- Deposits not yet sent (status = `pending`, no `stripe_payment_link`)
+- Gigs within 14 days with no assigned staff
+Each item should be a clickable badge that deep-links to the relevant filtered view.
 
-**11. "Total staff required" counter in booking modal**
-Staffing section should show: X Still to Allocate / X Awaiting / X Confirmed — matching PPM's staffing summary.
+**11. Dashboard overhaul — KPI Stat Tiles**
+Inspired by PPM's Business Stats section. Add 4 stat tiles below the task summary:
+- Total Booking Value (month-to-date + YTD)
+- Average Price / Event
+- Inquiries (new bookings in review)
+- Confirmed Bookings
+All computable from the existing `bookings` table. Include % change vs prior month if feasible.
+
+**12. Dashboard overhaul — Upcoming Events sidebar**
+Inspired by PPM's right-column event feed. Show the next 10 upcoming confirmed events in chronological order with: date, client name, service name, and colored staff initials badges for assigned staff. Clicking an event opens the booking modal.
+
+**13. Booking change log / audit trail**
+Track every field change on a booking — what changed, old value, new value, when. Show in booking modal Activity tab (PPM has a "Changes" sub-tab for this). Add a `booking_changes` table.
+
+**14. "Total staff required" counter in booking modal**
+Staffing section should show: X Still to Allocate / X Awaiting / X Confirmed — matching PPM's staffing summary UI.
 
 ### 🟢 Lower Priority / Future
 
