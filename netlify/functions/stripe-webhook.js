@@ -1,27 +1,9 @@
 const { Client } = require("pg");
 const crypto = require("crypto");
+const { sendEmail, wrap, logEmail, logChange, ensureEmailLog, ensureBookingChanges } = require('./_email');
 
 const db = () => new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-const FROM = "Funky Monkey Events <bookings@funkymonkeyevents.com>";
 const NOTIFY = process.env.NOTIFY_EMAIL || "Joe.Coover@gmail.com";
-
-const sendEmail = async (to, subject, html) => {
-  if (!process.env.RESEND_API_KEY || !to) return;
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: FROM, to, subject, html })
-    });
-    const data = await res.json();
-    if (data.error) console.error("Resend error:", JSON.stringify(data));
-    else console.log("Email sent to:", to, "id:", data.id);
-  } catch(e) { console.error("Email error:", e.message); }
-};
-
-const wrap = (body) => `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0F0A1E;color:#F3E8FF;border-radius:16px;overflow:hidden">
-  <div style="background:linear-gradient(135deg,#FF6B00,#FFD600);padding:20px 24px"><div style="font-size:22px;font-weight:900;color:#0F0A1E">🐒 Funky Monkey Events</div></div>
-  <div style="padding:24px">${body}</div></div>`;
 
 const verifySig = (payload, sigHeader, secret) => {
   try {
@@ -51,6 +33,8 @@ exports.handler = async (event) => {
   const c = db();
   try {
     await c.connect();
+    await ensureEmailLog(c);
+    await ensureBookingChanges(c);
 
     // ── Checkout completed (deposit paid) ──────
     if (ev.type === "checkout.session.completed") {
@@ -100,6 +84,7 @@ exports.handler = async (event) => {
           [amountPaid, booking.id]
         );
         const b = updated.rows[0];
+        await logChange(c, b.id, 'Deposit paid via Stripe', `$${amountPaid.toFixed(2)}`);
 
         // Calculate balance due
         const total    = parseFloat(b.total_price)   || 0;
@@ -130,6 +115,7 @@ exports.handler = async (event) => {
             </div>
             <p style="color:#A78BCA;font-size:13px;text-align:center">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`)
         );
+        await logEmail(c, b.id, null, 'Deposit Paid', 'Deposit received — You\'re CONFIRMED! 🎊 Funky Monkey Events', b.client_email, 'client');
 
         // Admin notification email
         await sendEmail(
@@ -148,6 +134,7 @@ exports.handler = async (event) => {
               <a href="https://funkymonkeyadmin.netlify.app/admin.html" style="background:linear-gradient(135deg,#FF6B00,#FFD600);color:#0F0A1E;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:900;font-size:14px">View in Dashboard →</a>
             </div>`)
         );
+        await logEmail(c, b.id, null, 'Deposit Paid', `💰 Deposit In: ${b.client_name} — $${amountPaid.toFixed(2)}`, NOTIFY, 'admin');
 
         console.log(`Webhook: confirmed booking ${b.reference} (id:${b.id}) — deposit $${amountPaid}`);
 
