@@ -35,7 +35,7 @@ Three badges render at the top of the card:
 | `N No Deposit Link` | `booking.status === 'pending' && !booking.stripe_payment_link` | Red |
 | `N Unstaffed` | confirmed + event within next 14 days + assigned staff < exclusive slots required | Amber |
 
-"Exclusive slots required" uses the same logic already in `renderDashboard()`: sum `slot_count` for `allServiceSlots` rows where `service_id` matches and `exclusive === true`.
+"Exclusive slots required" uses the same logic already in `renderDashboard()`: sum `slot_count` for `allServiceSlots` rows where `service_id` matches and `exclusive === true`. If no `allServiceSlots` rows exist for a booking's `service_id`, required = 0 and the booking is treated as fully staffed (not flagged). The 14-day window and date comparison follow the existing `renderDashboard()` implementation exactly (`event_date` field, inclusive of today, cutoff = now + 14 days).
 
 Badges with count 0 are hidden (not rendered).
 
@@ -65,7 +65,7 @@ Each row calls `openBooking(b.id)` on click. Hover highlight matches the existin
 
 Below a `<hr>` divider at the bottom of the same card, the staffing detail table renders whenever `unstaffedCount > 0`. This is the same data as the old standalone warning panel — ref, client, service, date — with rows clickable to `openBooking()`. Hidden entirely when count is 0.
 
-The "Unstaffed" badge and the staffing detail table always show the same events; the badge is the count, the table is the detail.
+The "Unstaffed" badge and the staffing detail table always show the same events; the badge is the count, the table is the persistent detail. This is intentional — the detail table is always visible when unstaffed events exist (mirroring the old standalone panel), regardless of whether the badge is expanded.
 
 ---
 
