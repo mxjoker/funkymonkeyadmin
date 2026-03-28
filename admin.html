@@ -310,6 +310,7 @@ input,select,textarea{font-family:inherit}
           <div class="s-val" id="st-revenue">—</div>
         </div>
       </div>
+      <div id="staffing-warnings" style="display:none" class="card" style="border-left:4px solid #f59e0b"></div>
       <div class="card">
         <div class="card-hdr">
           <h2>Recent Bookings</h2>
@@ -497,6 +498,7 @@ input,select,textarea{font-family:inherit}
 let allBookings = [];
 let allStaff    = [];
 let calStaffMap = {}; // booking_id → [{initials, color}]
+let allServiceSlots = []; // service_id slot requirements from staff_slots table
 let currentUser = null; // { role:'admin'|'staff', staffId, staffName, staffColor }
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth();
@@ -582,8 +584,9 @@ async function init() {
     const greet = document.getElementById('portal-greeting');
     if (greet) greet.textContent = 'Hey, ' + (currentUser.staffName || 'there') + '! 👋';
   } else {
-    await Promise.all([loadBookings(), loadStaffList()]);
+    await Promise.all([loadBookings(), loadStaffList(), loadServiceSlots()]);
     await loadCalStaffMap();
+    renderDashboard();
     showPage('dashboard');
   }
 }
@@ -593,6 +596,15 @@ async function loadStaffList() {
     const res = await fetch('/api/staff');
     allStaff = await res.json();
   } catch(e) { console.error('loadStaffList:', e); }
+}
+
+async function loadServiceSlots() {
+  try {
+    const res = await fetch('/api/staff-assignments?service_slots=true');
+    if (!res.ok) return;
+    const data = await res.json();
+    allServiceSlots = data.slots || [];
+  } catch(e) { console.error('loadServiceSlots:', e); }
 }
 
 async function loadCalStaffMap() {
@@ -674,6 +686,46 @@ function renderDashboard() {
   document.getElementById('dash-tbody').innerHTML = recent.length
     ? recent.map(b => bookingRow(b)).join('')
     : `<tr><td colspan="6" class="table-empty">No bookings yet</td></tr>`;
+
+  // Staffing warning — confirmed bookings within 14 days where assigned < required
+  const slotsRequired = {};
+  allServiceSlots.forEach(s => {
+    if (!s.exclusive) return; // stackable tags (Driver, Setup) don't add to headcount
+    slotsRequired[s.service_id] = (slotsRequired[s.service_id] || 0) + (s.slot_count || 1);
+  });
+  const now = new Date(); now.setHours(0,0,0,0);
+  const cutoff = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const unstaffed = allBookings.filter(b => {
+    if (b.status !== 'confirmed') return false;
+    const d = new Date(b.event_date);
+    if (d < now || d > cutoff) return false;
+    const required = slotsRequired[b.service_id] || 0;
+    if (required === 0) return false; // no slots defined for this service, skip
+    const assigned = calStaffMap[b.id]?.length || 0;
+    return assigned < required;
+  }).sort((a,b) => new Date(a.event_date) - new Date(b.event_date));
+  const warnEl = document.getElementById('staffing-warnings');
+  if (unstaffed.length) {
+    warnEl.style.display = '';
+    warnEl.innerHTML = `
+      <div class="card-hdr" style="border-left:4px solid #f59e0b">
+        <h2>⚠️ Staffing Needed — ${unstaffed.length} event${unstaffed.length > 1 ? 's' : ''} within 14 days</h2>
+        <span style="font-size:.8rem;color:#888">Confirmed but no assigned staff</span>
+      </div>
+      <table>
+        <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th></tr></thead>
+        <tbody>${unstaffed.map(b => `
+          <tr style="cursor:pointer" onclick="openBooking('${b.id}')">
+            <td><code style="font-size:.75rem;color:#7c3aed">${esc(b.reference||'—')}</code></td>
+            <td>${esc(b.client_name)}</td>
+            <td>${esc(b.service_name)}</td>
+            <td>${fmtDate(b.event_date)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } else {
+    warnEl.style.display = 'none';
+  }
 }
 
 // ══════════════════════════════════════════════════
@@ -868,6 +920,7 @@ function openBooking(id) {
         <span class="section-label" style="margin-bottom:0">👥 Staff Assignment</span>
         <button class="btn btn-outline btn-sm" id="notify-btn-${b.id}" onclick="notifyStaff('${b.id}')">📣 Notify Matching Staff</button>
       </div>
+      <div id="staff-summary-${b.id}"></div>
       <div id="staff-assign-body-${b.id}" style="font-size:.85rem;color:#6b7280">Loading…</div>
       <div style="margin-top:12px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
         <div>
@@ -905,7 +958,12 @@ function openBooking(id) {
     <div style="margin-top:18px;border-top:1px solid #e5e7eb;padding-top:18px">
       <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:#9ca3af;margin-bottom:10px">📧 Emails Sent</div>
       <div id="email-log-${b.id}"><div style="color:#9ca3af;font-size:.8rem">Loading…</div></div>
-    </div>` : ''}
+    </div>
+    <div style="margin-top:18px;border-top:1px solid #e5e7eb;padding-top:18px">
+      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:#9ca3af;margin-bottom:10px">📋 Activity</div>
+      <div id="activity-log-${b.id}"><div style="color:#9ca3af;font-size:.8rem">Loading…</div></div>
+    </div>
+  ` : ''}
   `;
 
   document.getElementById('booking-modal').classList.add('open');
@@ -916,6 +974,8 @@ function openBooking(id) {
     // Email log
     const logContainer = document.getElementById('email-log-' + b.id);
     if (logContainer) loadBookingEmailLog(b.id, logContainer);
+    const activityContainer = document.getElementById('activity-log-' + b.id);
+    if (activityContainer) loadBookingActivity(b.id, activityContainer);
     // Task checklist
     const taskContainer = document.getElementById('tasks-container-' + b.id);
     if (taskContainer) { taskContainer.classList.add('tasks-container'); loadBookingTasks(b.id, taskContainer); }
@@ -935,7 +995,29 @@ async function loadStaffAssignments(bookingId) {
   if (!el) return;
   try {
     const res = await fetch('/api/staff-assignments?booking_id=' + bookingId);
-    const { assignments } = await res.json();
+    const { assignments, slots } = await res.json();
+
+    // Summary bar
+    const summaryEl = document.getElementById('staff-summary-' + bookingId);
+    if (summaryEl) {
+      const required = (slots || []).filter(s => s.exclusive).reduce((n, s) => n + (s.slot_count || 1), 0);
+      const assigned = (assignments || []).filter(a => a.status === 'assigned').length;
+      const awaiting = (assignments || []).filter(a => ['interested','backup'].includes(a.status)).length;
+      const needed   = Math.max(0, required - assigned);
+      if (required > 0) {
+        summaryEl.innerHTML = `
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+            <span style="background:${needed > 0 ? '#fef3c7' : '#f0fdf4'};color:${needed > 0 ? '#92400e' : '#166534'};border-radius:6px;padding:3px 10px;font-size:.78rem;font-weight:700">
+              ${needed > 0 ? `⚠️ ${needed} Still Needed` : '✅ Fully Staffed'}
+            </span>
+            <span style="background:#eff6ff;color:#1e40af;border-radius:6px;padding:3px 10px;font-size:.78rem;font-weight:700">${awaiting} Interested</span>
+            <span style="background:#f0fdf4;color:#166534;border-radius:6px;padding:3px 10px;font-size:.78rem;font-weight:700">${assigned} / ${required} Assigned</span>
+          </div>`;
+      } else {
+        summaryEl.innerHTML = '';
+      }
+    }
+
     if (!assignments || !assignments.length) {
       el.innerHTML = '<span style="color:#9ca3af;font-style:italic">No staff assigned yet.</span>';
       return;
@@ -2506,6 +2588,25 @@ async function loadBookingEmailLog(bookingId, container) {
         <div style="flex:1">
           <div style="font-weight:600;color:#374151">${esc(e.subject)}</div>
           <div style="color:#9ca3af">${esc(e.recipient_email)} · <span style="background:${e.trigger_label==='Manual'?'#f3f4f6':'#f0fdf4'};color:${e.trigger_label==='Manual'?'#374151':'#166534'};padding:1px 6px;border-radius:8px;font-size:.7rem;font-weight:600">${esc(e.trigger_label)}</span></div>
+        </div>
+      </div>`).join('');
+  } catch(e) { container.innerHTML = '<p style="color:#dc2626;font-size:.8rem">Failed to load.</p>'; }
+}
+
+async function loadBookingActivity(bookingId, container) {
+  try {
+    const res = await fetch(`/api/booking/${bookingId}?activity=true`);
+    const { changes } = await res.json();
+    if (!changes || !changes.length) {
+      container.innerHTML = '<p style="color:#9ca3af;font-size:.8rem;font-style:italic">No activity recorded.</p>';
+      return;
+    }
+    container.innerHTML = changes.map(e => `
+      <div style="display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #f3f4f6;font-size:.78rem">
+        <div style="color:#9ca3af;white-space:nowrap;min-width:90px">${new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+        <div style="flex:1">
+          <span style="font-weight:600;color:#374151">${esc(e.action)}</span>
+          ${e.detail ? `<span style="color:#9ca3af"> — ${esc(e.detail)}</span>` : ''}
         </div>
       </div>`).join('');
   } catch(e) { container.innerHTML = '<p style="color:#dc2626;font-size:.8rem">Failed to load.</p>'; }
