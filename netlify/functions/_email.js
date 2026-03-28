@@ -150,10 +150,14 @@ async function ensureBookingChanges(client) {
 
 // ── Log a booking change ───────────────────────────────────────────────────────
 async function logChange(client, bookingId, action, detail) {
-  await client.query(
-    `INSERT INTO booking_changes (booking_id, action, detail) VALUES ($1, $2, $3)`,
-    [bookingId, action, detail || '']
-  );
+  try {
+    await client.query(
+      `INSERT INTO booking_changes (booking_id, action, detail) VALUES ($1, $2, $3)`,
+      [bookingId, action, detail || '']
+    );
+  } catch(e) {
+    console.error('logChange error:', e.message);
+  }
 }
 
 module.exports = { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange };
