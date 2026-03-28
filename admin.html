@@ -499,6 +499,7 @@ let allBookings = [];
 let allStaff    = [];
 let calStaffMap = {}; // booking_id → [{initials, color}]
 let allServiceSlots = []; // service_id slot requirements from staff_slots table
+let activeActionBadge = null; // 'review' | 'deposit' | 'staffing' | null
 let currentUser = null; // { role:'admin'|'staff', staffId, staffName, staffColor }
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth();
@@ -673,6 +674,129 @@ function showPage(name) {
 // ══════════════════════════════════════════════════
 // DASHBOARD
 // ══════════════════════════════════════════════════
+function toggleActionBadge(type) {
+  activeActionBadge = (activeActionBadge === type) ? null : type;
+  renderActionNeeded();
+}
+
+function renderActionNeeded() {
+  const el = document.getElementById('action-needed');
+  if (!el) return;
+
+  // ── Compute counts ──────────────────────────────────────────────────────
+  const reviewList = allBookings.filter(b => b.status === 'review')
+    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+
+  const depositList = allBookings.filter(b => b.status === 'pending' && !b.stripe_payment_link)
+    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+
+  const slotsRequired = {};
+  allServiceSlots.forEach(s => {
+    if (!s.exclusive) return;
+    slotsRequired[s.service_id] = (slotsRequired[s.service_id] || 0) + (s.slot_count || 1);
+  });
+  const now = new Date(); now.setHours(0,0,0,0);
+  const cutoff = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const staffingList = allBookings.filter(b => {
+    if (b.status !== 'confirmed') return false;
+    const d = new Date(b.event_date);
+    if (d < now || d > cutoff) return false;
+    const required = slotsRequired[b.service_id] || 0;
+    if (required === 0) return false;
+    const assigned = calStaffMap[b.id]?.length || 0;
+    return assigned < required;
+  }).sort((a,b) => new Date(a.event_date) - new Date(b.event_date));
+
+  const allClear = reviewList.length === 0 && depositList.length === 0 && staffingList.length === 0;
+
+  // ── Badge helper ─────────────────────────────────────────────────────────
+  function badge(type, count, label) {
+    if (count === 0) return '';
+    const active = activeActionBadge === type;
+    const arrow = active ? '▲' : '→';
+    const styles = {
+      review:  'background:#fef3c7;border:1px solid #f59e0b;color:#92400e',
+      deposit: 'background:#fee2e2;border:1px solid #ef4444;color:#991b1b',
+    };
+    const activeStyle = active ? 'box-shadow:0 2px 6px rgba(245,158,11,.3);font-weight:900;' : '';
+    return `<div onclick="toggleActionBadge('${type}')" style="cursor:pointer;border-radius:6px;padding:6px 12px;font-size:.75rem;font-weight:700;${styles[type]};${activeStyle}">
+      ${count} ${label} ${arrow}
+    </div>`;
+  }
+
+  // ── Expanded mini-table helper ────────────────────────────────────────────
+  function miniTable(list, includeTotal) {
+    if (!list.length) return '';
+    const rows = list.map(b => {
+      const totalCell = includeTotal
+        ? `<td style="font-weight:600;color:#374151">$${Number(b.total_price||0).toLocaleString('en-US',{maximumFractionDigits:0})}</td>`
+        : '';
+      return `<tr style="cursor:pointer" onclick="openBooking('${b.id}')"
+                onmouseover="this.style.background='#fffbeb'" onmouseout="this.style.background=''">
+        <td><code style="font-size:.7rem;color:#7c3aed;background:#ede9fe;padding:1px 5px;border-radius:3px">${esc(b.reference||'—')}</code></td>
+        <td style="font-weight:600;color:#374151">${esc(b.client_name||'—')}</td>
+        <td style="color:#6b7280">${esc(b.service_name||'—')}</td>
+        <td style="color:#6b7280">${fmtDate(b.event_date)}</td>
+        ${totalCell}
+      </tr>`;
+    }).join('');
+    const totalHeader = includeTotal ? '<th style="text-align:left;padding:4px 6px;color:#9ca3af;font-size:.68rem;font-weight:600">Total</th>' : '';
+    return `<table style="width:100%;border-collapse:collapse;font-size:.75rem;margin-top:8px">
+      <thead><tr style="border-bottom:1px solid #f3f4f6">
+        <th style="text-align:left;padding:4px 6px;color:#9ca3af;font-size:.68rem;font-weight:600">Ref</th>
+        <th style="text-align:left;padding:4px 6px;color:#9ca3af;font-size:.68rem;font-weight:600">Client</th>
+        <th style="text-align:left;padding:4px 6px;color:#9ca3af;font-size:.68rem;font-weight:600">Service</th>
+        <th style="text-align:left;padding:4px 6px;color:#9ca3af;font-size:.68rem;font-weight:600">Date</th>
+        ${totalHeader}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  // ── Expanded section (below badges) ──────────────────────────────────────
+  let expandedHTML = '';
+  if (activeActionBadge === 'review' && reviewList.length) {
+    expandedHTML = `<div style="border-top:2px solid #f59e0b;margin-top:10px;padding-top:10px">
+      <div style="font-size:.68rem;font-weight:700;color:#b45309;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Needs Review — click any row to open</div>
+      ${miniTable(reviewList, true)}
+    </div>`;
+  } else if (activeActionBadge === 'deposit' && depositList.length) {
+    expandedHTML = `<div style="border-top:2px solid #ef4444;margin-top:10px;padding-top:10px">
+      <div style="font-size:.68rem;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">No Deposit Link — click any row to open</div>
+      ${miniTable(depositList, true)}
+    </div>`;
+  }
+
+  // ── Staffing detail (always visible when items exist) ─────────────────────
+  let staffingHTML = '';
+  if (staffingList.length) {
+    staffingHTML = `<div style="border-top:1px solid #f3f4f6;margin-top:12px;padding-top:10px">
+      <div style="font-size:.68rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">⚠️ Staffing Detail — ${staffingList.length} event${staffingList.length > 1 ? 's' : ''} within 14 days</div>
+      ${miniTable(staffingList, false)}
+    </div>`;
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  if (allClear) {
+    el.innerHTML = `<div style="padding:14px 16px">
+      <div style="font-size:.7rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">⚡ Action Needed</div>
+      <div style="color:#10b981;font-weight:700;font-size:.88rem;text-align:center;padding:8px 0">✅ All clear — nothing needs attention</div>
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = `<div style="padding:14px 16px">
+    <div style="font-size:.7rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">⚡ Action Needed</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${badge('review',  reviewList.length,  'Needs Review')}
+      ${badge('deposit', depositList.length, 'No Deposit Link')}
+      ${staffingList.length > 0 ? `<div style="border-radius:6px;padding:6px 12px;font-size:.75rem;font-weight:700;background:#fef3c7;border:1px solid #f59e0b;color:#92400e">${staffingList.length} Unstaffed ↓</div>` : ''}
+    </div>
+    ${expandedHTML}
+    ${staffingHTML}
+  </div>`;
+}
+
 function renderDashboard() {
   document.getElementById('st-total').textContent = allBookings.length;
   document.getElementById('st-review').textContent = allBookings.filter(b => b.status === 'review').length;
