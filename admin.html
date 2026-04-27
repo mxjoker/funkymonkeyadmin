@@ -1568,6 +1568,12 @@ async function renderStaff() {
         <div style="flex:1;min-width:0">
           <div style="font-weight:700;color:#1e1b4b;font-size:.95rem">${esc(s.preferred_name||s.name)}${s.name!==s.preferred_name&&s.preferred_name?'<span style="font-weight:400;color:#9ca3af;font-size:.78rem"> ('+esc(s.name)+')</span>':''}</div>
           <div class="staff-role">${esc(s.role)}${s.pronouns?' &middot; <em style="font-weight:400">'+esc(s.pronouns)+'</em>':''}</div>
+          ${(s.flat_rate > 0 || s.hourly_rate > 0)
+            ? `<div style="font-size:.72rem;color:#10b981;font-weight:600;margin-top:2px">
+                 ${s.pay_type === 'hourly' ? `$${Number(s.hourly_rate).toFixed(0)}/hr` : `$${Number(s.flat_rate).toFixed(0)} flat`}
+                 ${s.payment_method ? ` · ${esc(s.payment_method)}${s.payment_handle ? ' ' + esc(s.payment_handle) : ''}` : ''}
+               </div>`
+            : ''}
         </div>
       </div>
       <div style="font-size:.76rem;color:#6b7280;margin-bottom:10px;display:flex;flex-direction:column;gap:3px">
@@ -1786,11 +1792,48 @@ function openStaffModal(id) {
         style="width:100%;padding:9px 12px;border:1.5px solid #86efac;border-radius:7px;font-size:.875rem;resize:vertical;font-family:inherit;background:#f0fdf4"
         placeholder="Schedule notes, reminders, feedback they should see…">${esc(s?.shared_notes||'')}</textarea>
     </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <div style="margin-top:16px;border-top:1px solid #e5e7eb;padding-top:16px">
+      <div style="font-weight:700;color:#374151;font-size:.82rem;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em">💰 Pay Settings</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:.78rem;font-weight:600;color:#6b7280">Pay Type</label>
+          <select id="sm-pay-type" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px">
+            <option value="flat" ${(s?.pay_type||'flat')==='flat'?'selected':''}>Flat rate per gig</option>
+            <option value="hourly" ${s?.pay_type==='hourly'?'selected':''}>Hourly</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:.78rem;font-weight:600;color:#6b7280" id="sm-rate-label">${s?.pay_type==='hourly'?'Hourly Rate ($)':'Flat Rate ($)'}</label>
+          <input type="number" id="sm-pay-rate" min="0" step="0.01" value="${s?.pay_type==='hourly' ? (s?.hourly_rate||0) : (s?.flat_rate||0)}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px"/>
+        </div>
+        <div>
+          <label style="font-size:.78rem;font-weight:600;color:#6b7280">Payment Method</label>
+          <select id="sm-payment-method" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px">
+            <option value="" ${!s?.payment_method?'selected':''}>— Select —</option>
+            <option value="Venmo" ${s?.payment_method==='Venmo'?'selected':''}>Venmo</option>
+            <option value="Zelle" ${s?.payment_method==='Zelle'?'selected':''}>Zelle</option>
+            <option value="Check" ${s?.payment_method==='Check'?'selected':''}>Check</option>
+            <option value="Cash" ${s?.payment_method==='Cash'?'selected':''}>Cash</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:.78rem;font-weight:600;color:#6b7280">Handle / Details</label>
+          <input type="text" id="sm-payment-handle" value="${esc(s?.payment_handle||'')}" placeholder="@username or note" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px"/>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
       <button class="btn btn-primary" onclick="saveStaffModal(${id||'null'})">${s?'Save Changes':'Add Staff Member'}</button>
       <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
     </div>`;
   document.getElementById('booking-modal').classList.add('open');
+  const payTypeEl = document.getElementById('sm-pay-type');
+  const rateLabelEl = document.getElementById('sm-rate-label');
+  if (payTypeEl && rateLabelEl) {
+    payTypeEl.addEventListener('change', () => {
+      rateLabelEl.textContent = payTypeEl.value === 'hourly' ? 'Hourly Rate ($)' : 'Flat Rate ($)';
+    });
+  }
 }
 
 async function saveStaffModal(id) {
@@ -1812,6 +1855,13 @@ async function saveStaffModal(id) {
     admin_notes:      document.getElementById('sf-anotes').value.trim(),
     shared_notes:     document.getElementById('sf-shared-notes').value.trim(),
   };
+  const payType = document.getElementById('sm-pay-type')?.value || 'flat';
+  const payRate = parseFloat(document.getElementById('sm-pay-rate')?.value) || 0;
+  payload.pay_type        = payType;
+  payload.flat_rate       = payType === 'flat' ? payRate : 0;
+  payload.hourly_rate     = payType === 'hourly' ? payRate : 0;
+  payload.payment_method  = document.getElementById('sm-payment-method')?.value || '';
+  payload.payment_handle  = document.getElementById('sm-payment-handle')?.value || '';
   try {
     if (id) {
       await patchStaff(id, payload);
