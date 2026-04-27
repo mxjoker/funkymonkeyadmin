@@ -562,3 +562,61 @@ exports.handler = async (event) => {
     client.release();
   }
 };
+
+// Exported for use by bookings.js — fires automatically on new booking
+exports.notifyMatchingStaff = async function notifyMatchingStaff(booking) {
+  if (!booking || !booking.id) return;
+  const client = await pool.connect();
+  try {
+    await ensureTables(client);
+
+    const { rows: slots } = await client.query(
+      'SELECT * FROM staff_slots WHERE service_id=$1 ORDER BY sort_order',
+      [booking.service_id]
+    );
+
+    const tags = slots.length
+      ? [...new Set(slots.map(s => s.tag_required))]
+      : [booking.service_name];
+
+    const { rows: allStaff } = await client.query('SELECT * FROM staff WHERE active=TRUE');
+    const eligible = allStaff.filter(s => {
+      const skills = Array.isArray(s.skills) ? s.skills : JSON.parse(s.skills || '[]');
+      return skills.some(sk => tags.includes(sk.name));
+    });
+
+    const dateStr = booking.event_date
+      ? new Date(booking.event_date + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
+      : 'TBD';
+    const timeStr = booking.event_time || '';
+
+    for (const staff of eligible) {
+      const skills = Array.isArray(staff.skills) ? staff.skills : JSON.parse(staff.skills || '[]');
+      const matchedTags = skills.filter(sk => tags.includes(sk.name)).map(sk => sk.name);
+      await notify({
+        to_email: staff.email,
+        to_name: staff.preferred_name || staff.name,
+        subject: `🎪 Gig Available — ${booking.service_name} on ${dateStr}`,
+        html: wrap(`
+          <p style="font-size:16px;margin-bottom:16px">Hi <strong>${staff.preferred_name || staff.name}</strong>! 👋</p>
+          <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">A new gig is available and your skills match what's needed. Log in to the staff portal to express your interest!</p>
+          <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
+            <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</span><br><span style="font-weight:600">${booking.service_name}</span></div>
+            <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date & Time</span><br><span style="font-weight:600">${dateStr}${timeStr ? ' at ' + timeStr : ''}</span></div>
+            <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Area</span><br><span style="font-weight:600">${booking.event_zip || 'OKC area'}</span></div>
+            <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Your Matching Skills</span><br><span style="color:#FFD600;font-weight:700">${matchedTags.join(', ')}</span></div>
+          </div>
+          <div style="text-align:center;margin-bottom:20px">
+            <a href="${SITE}/admin.html" style="background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">Log In to Express Interest →</a>
+          </div>
+          <p style="font-size:12px;color:#A78BCA;text-align:center">Log in with your PIN · ${SITE}/admin.html</p>
+        `)
+      });
+    }
+    console.log(`notifyMatchingStaff: notified ${eligible.length} staff for booking ${booking.id}`);
+  } catch(e) {
+    console.error('notifyMatchingStaff error:', e.message);
+  } finally {
+    client.release();
+  }
+};

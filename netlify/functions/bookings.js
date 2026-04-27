@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const { notifyMatchingStaff } = require('./staff-assignments');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -207,6 +208,8 @@ exports.handler = async (event) => {
 
       // Send emails (fire and forget)
       sendEmails(booking).catch(e => console.error('Email error:', e));
+      // Notify matching staff automatically
+      notifyMatchingStaff(booking).catch(e => console.error('Staff notify error:', e));
 
       return {
         statusCode: 201,
