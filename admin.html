@@ -1164,8 +1164,15 @@ async function loadStaffAssignments(bookingId) {
   const el = document.getElementById('staff-assign-body-' + bookingId);
   if (!el) return;
   try {
-    const res = await fetch('/api/staff-assignments?booking_id=' + bookingId);
-    const { assignments, slots } = await res.json();
+    const [assignRes, payRes] = await Promise.all([
+      fetch('/api/staff-assignments?booking_id=' + bookingId),
+      fetch('/api/staff-payments?booking_id=' + bookingId)
+    ]);
+    const { assignments, slots } = await assignRes.json();
+    const { payments } = await payRes.json();
+    // index payments by staff_id for quick lookup
+    const payByStaff = {};
+    (payments || []).forEach(p => { payByStaff[p.staff_id] = p; });
 
     // Summary bar
     const summaryEl = document.getElementById('staff-summary-' + bookingId);
@@ -1231,6 +1238,48 @@ async function loadStaffAssignments(bookingId) {
         surveyHtml = `<div style="margin-top:6px;font-size:.75rem;color:#f59e0b;font-style:italic">⏳ Survey not yet submitted</div>`;
       }
 
+      // Pay info block (assigned staff only)
+      let payHtml = '';
+      if (a.status === 'assigned') {
+        const staffRecord = (allStaff || []).find(s => s.id === a.staff_id);
+        const pmt = payByStaff[a.staff_id];
+        if (pmt) {
+          const paidBadge = pmt.paid
+            ? `<span style="background:#f0fdf4;color:#166534;border-radius:10px;padding:1px 7px;font-size:.68rem;font-weight:700">✅ Paid $${Number(pmt.amount).toFixed(2)}</span>`
+            : `<span style="background:#fef3c7;color:#92400e;border-radius:10px;padding:1px 7px;font-size:.68rem;font-weight:700">⏳ Unpaid $${Number(pmt.amount).toFixed(2)}</span>`;
+          payHtml = `<div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            ${paidBadge}
+            ${!pmt.paid
+              ? `<button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:.72rem" onclick="markPaymentPaid(${pmt.id},'${bookingId}')">Mark Paid</button>`
+              : `<button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:.72rem" onclick="markPaymentUnpaid(${pmt.id},'${bookingId}')">Undo</button>`
+            }
+            ${pmt.payment_method ? `<span style="font-size:.68rem;color:#6b7280">${esc(pmt.payment_method)}${pmt.payment_handle?' '+esc(pmt.payment_handle):''}</span>` : ''}
+            ${pmt.note ? `<span style="font-size:.68rem;color:#6b7280;font-style:italic">${esc(pmt.note)}</span>` : ''}
+          </div>`;
+        } else {
+          const defaultAmount = staffRecord
+            ? (staffRecord.pay_type === 'hourly' ? '' : Number(staffRecord.flat_rate || 0).toFixed(2))
+            : '';
+          const defaultMethod = staffRecord?.payment_method || '';
+          payHtml = `<div style="margin-top:6px">
+            <div id="pay-form-${a.staff_id}-${bookingId}" style="display:none;margin-top:6px;padding:8px;background:#f3f4f6;border-radius:6px">
+              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                <input type="number" id="pay-amount-${a.staff_id}-${bookingId}" value="${defaultAmount}" placeholder="Amount $" min="0" step="0.01"
+                  style="width:90px;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:.78rem"/>
+                <input type="text" id="pay-note-${a.staff_id}-${bookingId}" placeholder="Note (optional)"
+                  style="flex:1;min-width:100px;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:.78rem"/>
+                <button class="btn btn-primary btn-sm" style="padding:3px 10px;font-size:.75rem"
+                  onclick="recordPayment(${a.staff_id},'${bookingId}','${esc(defaultMethod)}')">Save</button>
+                <button class="btn btn-outline btn-sm" style="padding:3px 8px;font-size:.75rem"
+                  onclick="document.getElementById('pay-form-${a.staff_id}-${bookingId}').style.display='none'">✕</button>
+              </div>
+            </div>
+            <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:.72rem;color:#7c3aed"
+              onclick="document.getElementById('pay-form-${a.staff_id}-${bookingId}').style.display='block'">💰 Record Payment</button>
+          </div>`;
+        }
+      }
+
       return `
         <div style="padding:8px 10px;background:#f9fafb;border-radius:8px;margin-bottom:8px">
           <div style="display:flex;align-items:center;gap:10px">
@@ -1245,6 +1294,7 @@ async function loadStaffAssignments(bookingId) {
             }
           </div>
           ${surveyHtml}
+          ${payHtml}
         </div>`;
     }).join('');
   } catch(e) {
@@ -1317,6 +1367,52 @@ async function notifyStaff(bookingId) {
     btn.textContent = '❌ ' + e.message;
     setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
   }
+}
+
+async function recordPayment(staffId, bookingId, defaultMethod) {
+  const amount = parseFloat(document.getElementById(`pay-amount-${staffId}-${bookingId}`)?.value) || 0;
+  const note   = document.getElementById(`pay-note-${staffId}-${bookingId}`)?.value || '';
+  const staffRecord = (allStaff || []).find(s => s.id === staffId);
+  try {
+    const res = await fetch('/api/staff-payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        staff_id: staffId,
+        booking_id: parseInt(bookingId),
+        amount,
+        pay_type: staffRecord?.pay_type || 'flat',
+        payment_method: staffRecord?.payment_method || defaultMethod,
+        note
+      })
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    await loadStaffAssignments(bookingId);
+  } catch(e) { alert('Error recording payment: ' + e.message); }
+}
+
+async function markPaymentPaid(paymentId, bookingId) {
+  try {
+    const res = await fetch('/api/staff-payments/' + paymentId, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paid: true })
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    await loadStaffAssignments(bookingId);
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function markPaymentUnpaid(paymentId, bookingId) {
+  try {
+    const res = await fetch('/api/staff-payments/' + paymentId, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paid: false })
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    await loadStaffAssignments(bookingId);
+  } catch(e) { alert('Error: ' + e.message); }
 }
 
 // ── Status ──
