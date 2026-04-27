@@ -44,6 +44,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/staff-payments"
+  to = "/.netlify/functions/staff-payments"
+  status = 200
+
+[[redirects]]
+  from = "/api/staff-payments/:id"
+  to = "/.netlify/functions/staff-payments/:id"
+  status = 200
+
+[[redirects]]
   from = "/api/automations"
   to = "/.netlify/functions/automations"
   status = 200
