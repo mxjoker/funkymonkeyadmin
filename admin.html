@@ -327,7 +327,7 @@ input,select,textarea{font-family:inherit}
           <button class="btn btn-primary btn-sm" onclick="showPage('bookings')">View All</button>
         </div>
         <table>
-          <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th></tr></thead>
+          <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Staff</th></tr></thead>
           <tbody id="dash-upcoming-tbody"></tbody>
         </table>
       </div>
@@ -830,7 +830,7 @@ function renderDashboard() {
     .sort((a,b) => new Date(a.event_date) - new Date(b.event_date))
     .slice(0, 10);
   document.getElementById('dash-upcoming-tbody').innerHTML = upcoming.length
-    ? upcoming.map(b => bookingRow(b)).join('')
+    ? upcoming.map(b => upcomingGigRow(b)).join('')
     : `<tr><td colspan="6" class="table-empty">No upcoming confirmed gigs</td></tr>`;
 
   renderActionNeeded();
@@ -905,6 +905,20 @@ function bookingRow(b, showViewBtn = false) {
     <td>${Number(b.total_price||0)>0?'$'+Number(b.total_price).toFixed(0):'<span class="text-muted">TBD</span>'}</td>
     <td><span class="badge badge-${b.status||'review'}">${b.status||'review'}</span></td>
     ${showViewBtn?`<td><button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openBooking('${b.id}')">View</button></td>`:''}
+  </tr>`;
+}
+
+function upcomingGigRow(b) {
+  const badges = (calStaffMap[b.id] || []).map(s =>
+    `<span title="${esc(s.initials)}" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:${s.color};color:#fff;font-size:9px;font-weight:800;border:1.5px solid #fff;margin-right:2px">${esc(s.initials)}</span>`
+  ).join('');
+  return `<tr style="cursor:pointer" onclick="openBooking('${b.id}')">
+    <td><code style="font-size:.75rem;color:#7c3aed">${b.reference||'—'}</code></td>
+    <td><div style="font-weight:600">${esc(b.client_name||'')}</div><div class="text-muted">${esc(b.client_email||'')}</div></td>
+    <td>${esc(b.service_name||'—')}</td>
+    <td>${fmtDate(b.event_date)}</td>
+    <td>${Number(b.total_price||0)>0?'$'+Number(b.total_price).toFixed(0):'<span class="text-muted">TBD</span>'}</td>
+    <td style="white-space:nowrap">${badges || '<span class="text-muted" style="font-size:.75rem">—</span>'}</td>
   </tr>`;
 }
 
