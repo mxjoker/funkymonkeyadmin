@@ -2042,12 +2042,14 @@ async function loadStaffPortal() {
   if (!grid) return;
   grid.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af">Loading your gigs…</div>';
   try {
-    const [assignRes, staffRes] = await Promise.all([
+    const [assignRes, staffRes, payRes] = await Promise.all([
       fetch('/api/staff-assignments?staff_id=' + currentUser.staffId),
-      fetch('/api/staff/' + currentUser.staffId)
+      fetch('/api/staff/' + currentUser.staffId),
+      fetch('/api/staff-payments?staff_id=' + currentUser.staffId)
     ]);
     const data = await assignRes.json();
     const staffRecord = await staffRes.json();
+    const { payments: myPayments } = await payRes.json().catch(() => ({ payments: [] }));
 
     // Show note from Joe if present
     const noteEl = document.getElementById('portal-joe-note');
@@ -2065,6 +2067,50 @@ async function loadStaffPortal() {
     }
 
     renderPortalGigs(data.myGigs || [], data.openGigs || []);
+
+    // Pay rate banner — prepend before gig cards
+    const portalGigsEl = document.getElementById('portal-gigs');
+    if (portalGigsEl) {
+      const payBanner = (staffRecord && (Number(staffRecord.flat_rate) > 0 || Number(staffRecord.hourly_rate) > 0))
+        ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 16px;margin-bottom:16px">
+             <span style="font-weight:700;color:#166534">💰 Your Pay Rate: </span>
+             <span style="color:#166534">${staffRecord.pay_type === 'hourly'
+               ? `$${Number(staffRecord.hourly_rate).toFixed(2)}/hr`
+               : `$${Number(staffRecord.flat_rate).toFixed(2)} flat per gig`}
+             </span>
+             ${staffRecord.payment_method ? `<span style="color:#6b7280;margin-left:12px">Paid via ${esc(staffRecord.payment_method)}${staffRecord.payment_handle ? ' ' + esc(staffRecord.payment_handle) : ''}</span>` : ''}
+           </div>`
+        : '';
+
+      // Payment history card — append after gig cards
+      let payHistoryHtml = '';
+      if (myPayments && myPayments.length) {
+        const unpaidTotal = myPayments.filter(p => !p.paid).reduce((s, p) => s + Number(p.amount || 0), 0);
+        payHistoryHtml = `<div class="card" style="margin-top:16px">
+          <div class="card-hdr"><h2>💵 My Payments</h2></div>
+          <div style="padding:12px 16px">
+            ${unpaidTotal > 0 ? `<div style="margin-bottom:10px;font-size:.85rem;color:#92400e;background:#fef3c7;border-radius:6px;padding:6px 12px;font-weight:600">⏳ $${unpaidTotal.toFixed(2)} pending</div>` : ''}
+            ${myPayments.map(p => {
+              const matchedGig = (data.myGigs || []).find(g => g.booking_id === p.booking_id);
+              return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6">
+                <div>
+                  <div style="font-weight:600;font-size:.85rem">${matchedGig ? esc(matchedGig.service_name) : 'Booking #' + p.booking_id}</div>
+                  ${p.note ? `<div style="font-size:.72rem;color:#6b7280">${esc(p.note)}</div>` : ''}
+                </div>
+                <div style="text-align:right">
+                  <div style="font-weight:700;color:#374151">$${Number(p.amount).toFixed(2)}</div>
+                  <div style="font-size:.72rem">${p.paid
+                    ? `<span style="color:#10b981;font-weight:700">✅ Paid</span>`
+                    : `<span style="color:#f59e0b;font-weight:700">⏳ Pending</span>`}</div>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }
+
+      portalGigsEl.innerHTML = payBanner + portalGigsEl.innerHTML + payHistoryHtml;
+    }
   } catch(e) {
     grid.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626">Failed to load. Try refreshing.</div>';
   }
