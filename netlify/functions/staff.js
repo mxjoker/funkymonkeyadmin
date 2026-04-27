@@ -50,6 +50,11 @@ async function ensureTable(client) {
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()",
+    "ALTER TABLE staff ADD COLUMN IF NOT EXISTS pay_type VARCHAR(20) DEFAULT 'flat'",
+    "ALTER TABLE staff ADD COLUMN IF NOT EXISTS flat_rate NUMERIC(10,2) DEFAULT 0",
+    "ALTER TABLE staff ADD COLUMN IF NOT EXISTS hourly_rate NUMERIC(10,2) DEFAULT 0",
+    "ALTER TABLE staff ADD COLUMN IF NOT EXISTS payment_method VARCHAR(64) DEFAULT ''",
+    "ALTER TABLE staff ADD COLUMN IF NOT EXISTS payment_handle VARCHAR(255) DEFAULT ''",
   ];
   for (const sql of migrations) {
     try { await client.query(sql); } catch (_) {}
@@ -164,6 +169,11 @@ exports.handler = async (event) => {
         shared_notes:      'shared_notes',
         active:            'active',
         sort_order:        'sort_order',
+        pay_type:          'pay_type',
+        flat_rate:         'flat_rate',
+        hourly_rate:       'hourly_rate',
+        payment_method:    'payment_method',
+        payment_handle:    'payment_handle',
       };
 
       const sets = [], vals = [];
