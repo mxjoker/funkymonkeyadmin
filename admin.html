@@ -293,8 +293,14 @@ input,select,textarea{font-family:inherit}
       </div>
       <div class="stats-grid">
         <div class="stat-card accent">
-          <div class="s-label">Total Bookings</div>
-          <div class="s-val" id="st-total">—</div>
+          <div class="s-label">Revenue This Month</div>
+          <div class="s-val" id="st-mtd-rev">—</div>
+          <div class="s-sub" id="st-mtd-rev-sub"></div>
+        </div>
+        <div class="stat-card blue">
+          <div class="s-label">Avg Price / Event</div>
+          <div class="s-val" id="st-avg">—</div>
+          <div class="s-sub">Confirmed &amp; completed</div>
         </div>
         <div class="stat-card amber">
           <div class="s-label">Needs Review</div>
@@ -302,12 +308,9 @@ input,select,textarea{font-family:inherit}
           <div class="s-sub">Awaiting your response</div>
         </div>
         <div class="stat-card green">
-          <div class="s-label">Confirmed</div>
+          <div class="s-label">Confirmed This Month</div>
           <div class="s-val" id="st-confirmed">—</div>
-        </div>
-        <div class="stat-card blue">
-          <div class="s-label">Revenue (Confirmed)</div>
-          <div class="s-val" id="st-revenue">—</div>
+          <div class="s-sub" id="st-confirmed-sub"></div>
         </div>
       </div>
       <div id="action-needed" class="card"></div>
@@ -808,13 +811,58 @@ function renderActionNeeded() {
 }
 
 function renderDashboard() {
-  document.getElementById('st-total').textContent = allBookings.length;
-  document.getElementById('st-review').textContent = allBookings.filter(b => b.status === 'review').length;
-  document.getElementById('st-confirmed').textContent = allBookings.filter(b => b.status === 'confirmed').length;
-  const rev = allBookings
-    .filter(b => ['confirmed','completed'].includes(b.status))
+  const now = new Date();
+  const thisMonth = now.getMonth();
+  const thisYear  = now.getFullYear();
+  const lastMonthDate = new Date(thisYear, thisMonth - 1, 1);
+  const lastMonth = lastMonthDate.getMonth();
+  const lastYear  = lastMonthDate.getFullYear();
+
+  function eventMonth(b) {
+    if (!b.event_date) return null;
+    const d = new Date(String(b.event_date).split('T')[0] + 'T00:00:00');
+    return { m: d.getMonth(), y: d.getFullYear() };
+  }
+
+  const confirmed = allBookings.filter(b => ['confirmed','completed'].includes(b.status));
+
+  const mtdRev = confirmed
+    .filter(b => { const em = eventMonth(b); return em && em.m === thisMonth && em.y === thisYear; })
     .reduce((s,b) => s + Number(b.total_price||0), 0);
-  document.getElementById('st-revenue').textContent = '$' + rev.toLocaleString('en-US',{maximumFractionDigits:0});
+
+  const priorRev = confirmed
+    .filter(b => { const em = eventMonth(b); return em && em.m === lastMonth && em.y === lastYear; })
+    .reduce((s,b) => s + Number(b.total_price||0), 0);
+
+  const ytdRev = confirmed
+    .filter(b => { const em = eventMonth(b); return em && em.y === thisYear; })
+    .reduce((s,b) => s + Number(b.total_price||0), 0);
+
+  const avg = confirmed.length ? confirmed.reduce((s,b) => s + Number(b.total_price||0), 0) / confirmed.length : 0;
+
+  const confirmedThisMonth = confirmed
+    .filter(b => { const em = eventMonth(b); return em && em.m === thisMonth && em.y === thisYear; }).length;
+
+  const confirmedPriorMonth = confirmed
+    .filter(b => { const em = eventMonth(b); return em && em.m === lastMonth && em.y === lastYear; }).length;
+
+  function pctChange(current, prior) {
+    if (prior === 0) return current > 0 ? '↑ new' : '';
+    const pct = Math.round((current - prior) / prior * 100);
+    return pct >= 0 ? `↑ ${pct}% vs last mo` : `↓ ${Math.abs(pct)}% vs last mo`;
+  }
+
+  document.getElementById('st-mtd-rev').textContent = '$' + mtdRev.toLocaleString('en-US',{maximumFractionDigits:0});
+  const ytdStr = 'YTD: $' + ytdRev.toLocaleString('en-US',{maximumFractionDigits:0});
+  const mRevChange = pctChange(mtdRev, priorRev);
+  document.getElementById('st-mtd-rev-sub').textContent = mRevChange ? `${ytdStr} · ${mRevChange}` : ytdStr;
+
+  document.getElementById('st-avg').textContent = avg > 0 ? '$' + avg.toLocaleString('en-US',{maximumFractionDigits:0}) : '—';
+
+  document.getElementById('st-review').textContent = allBookings.filter(b => b.status === 'review').length;
+
+  document.getElementById('st-confirmed').textContent = confirmedThisMonth;
+  document.getElementById('st-confirmed-sub').textContent = pctChange(confirmedThisMonth, confirmedPriorMonth);
 
   const recent = [...allBookings]
     .filter(b => ['review','pending'].includes(b.status))
