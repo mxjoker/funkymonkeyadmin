@@ -142,13 +142,18 @@ exports.handler = async (event) => {
 
       // Auto-generate Stripe link when confirmed
       if (u.status === "confirmed") {
-        stripeLink = await createStripeLink(updated);
-        if (stripeLink) {
-          const r2 = await c.query(
-            `UPDATE bookings SET stripe_payment_link=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
-            [stripeLink, parseInt(id)]
-          );
-          updated = r2.rows[0];
+        const depositAmount = Number(updated.deposit_amount || 0);
+        if (depositAmount > 0) {
+          stripeLink = await createStripeLink(updated);
+          if (stripeLink) {
+            const r2 = await c.query(
+              `UPDATE bookings SET stripe_payment_link=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
+              [stripeLink, parseInt(id)]
+            );
+            updated = r2.rows[0];
+          }
+        } else {
+          console.log(`Skipping Stripe link generation for booking ${updated.id} — deposit_amount is ${depositAmount}`);
         }
       }
 
