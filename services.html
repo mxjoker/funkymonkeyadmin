@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Our Services — Funky Monkey Events</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #0F0A1E 0%, #1A1035 100%);
+      color: #F3E8FF;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+      padding: 40px 20px;
+    }
+
+    h1 {
+      font-size: 3rem;
+      font-weight: 900;
+      background: linear-gradient(135deg, #FF6B00, #FFD600);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 10px;
+    }
+
+    .tagline {
+      font-size: 1.2rem;
+      color: #A78BCA;
+      margin-bottom: 30px;
+    }
+
+    /* Search and Filters */
+    .controls {
+      background: rgba(255,255,255,0.05);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 30px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .search-box {
+      flex: 1;
+      min-width: 200px;
+      padding: 12px 16px;
+      border: 2px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.05);
+      color: #F3E8FF;
+      font-size: 1rem;
+    }
+
+    .search-box::placeholder {
+      color: #A78BCA;
+    }
+
+    .filter-btn {
+      padding: 10px 20px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.05);
+      color: #F3E8FF;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .filter-btn:hover {
+      background: rgba(255,255,255,0.1);
+      border-color: #FFD600;
+    }
+
+    .filter-btn.active {
+      background: linear-gradient(135deg, #FF6B00, #FFD600);
+      border-color: transparent;
+      color: #0F0A1E;
+    }
+
+    /* Category Tabs */
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 30px;
+      border-bottom: 2px solid rgba(255,255,255,0.1);
+      overflow-x: auto;
+    }
+
+    .tab {
+      padding: 12px 24px;
+      background: none;
+      border: none;
+      color: #A78BCA;
+      font-weight: 700;
+      font-size: 1rem;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .tab:hover {
+      color: #F3E8FF;
+    }
+
+    .tab.active {
+      color: #FFD600;
+      border-bottom-color: #FFD600;
+    }
+
+    /* Services Grid */
+    .services-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 24px;
+      margin-bottom: 40px;
+    }
+
+    .service-card {
+      background: rgba(255,255,255,0.05);
+      border: 2px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 24px;
+      transition: all 0.3s;
+      cursor: pointer;
+    }
+
+    .service-card:hover {
+      transform: translateY(-4px);
+      border-color: #FFD600;
+      box-shadow: 0 8px 24px rgba(255,214,0,0.2);
+    }
+
+    .service-icon {
+      font-size: 3rem;
+      margin-bottom: 12px;
+    }
+
+    .service-name {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #F3E8FF;
+      margin-bottom: 8px;
+    }
+
+    .service-price {
+      font-size: 1.8rem;
+      font-weight: 900;
+      background: linear-gradient(135deg, #10B981, #06B6D4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 12px;
+    }
+
+    .service-meta {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 12px;
+      font-size: 0.875rem;
+      color: #A78BCA;
+    }
+
+    .service-meta span {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .service-suggestion {
+      color: #9CA3AF;
+      font-size: 0.875rem;
+      font-style: italic;
+      margin-bottom: 16px;
+    }
+
+    .book-btn {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(135deg, #7C3AED, #A855F7);
+      border: none;
+      border-radius: 10px;
+      color: white;
+      font-weight: 700;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .book-btn:hover {
+      transform: scale(1.02);
+      box-shadow: 0 4px 12px rgba(124,58,237,0.4);
+    }
+
+    .no-results {
+      text-align: center;
+      padding: 60px 20px;
+      color: #A78BCA;
+    }
+
+    .no-results-icon {
+      font-size: 4rem;
+      margin-bottom: 16px;
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 40px 20px;
+      border-top: 2px solid rgba(255,255,255,0.1);
+      color: #A78BCA;
+      font-size: 0.875rem;
+    }
+
+    @media (max-width: 768px) {
+      h1 { font-size: 2rem; }
+      .services-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🐒 Our Services</h1>
+      <p class="tagline">Professional entertainment for every occasion</p>
+    </header>
+
+    <!-- Search and Filters -->
+    <div class="controls">
+      <input type="text" id="search" class="search-box" placeholder="Search services...">
+      <button class="filter-btn" data-price="all" onclick="filterByPrice('all')">All Prices</button>
+      <button class="filter-btn" data-price="low" onclick="filterByPrice('low')">Under $200</button>
+      <button class="filter-btn" data-price="mid" onclick="filterByPrice('mid')">$200-$500</button>
+      <button class="filter-btn" data-price="high" onclick="filterByPrice('high')">$500+</button>
+    </div>
+
+    <!-- Category Tabs -->
+    <div class="tabs">
+      <button class="tab active" onclick="filterByCategory('all')">All Services</button>
+      <button class="tab" onclick="filterByCategory('shows')">🎭 Shows</button>
+      <button class="tab" onclick="filterByCategory('performers')">🎪 Performers</button>
+      <button class="tab" onclick="filterByCategory('experiences')">🎉 Experiences</button>
+      <button class="tab" onclick="filterByCategory('library')">📚 Library</button>
+    </div>
+
+    <!-- Services Grid -->
+    <div class="services-grid" id="services-grid">
+      <div class="no-results">
+        <div class="no-results-icon">⏳</div>
+        <p>Loading services...</p>
+      </div>
+    </div>
+
+    <footer>
+      <p>Funky Monkey Events · Oklahoma City · (405) 431-6625</p>
+      <p style="margin-top:8px">
+        <a href="/booking-form.html" style="color:#7C3AED;text-decoration:none;font-weight:700">← Back to Booking Form</a>
+      </p>
+    </footer>
+  </div>
+
+  <script>
+    let allServices = [];
+    let currentCategory = 'all';
+    let currentPriceFilter = 'all';
+    let searchTerm = '';
+
+    async function loadServices() {
+      try {
+        const res = await fetch('/api/services');
+        const data = await res.json();
+        allServices = data.services.filter(s => s.active);
+        renderServices();
+      } catch(e) {
+        document.getElementById('services-grid').innerHTML = `
+          <div class="no-results">
+            <div class="no-results-icon">❌</div>
+            <p>Failed to load services. Please try again.</p>
+          </div>`;
+      }
+    }
+
+    function renderServices() {
+      const filtered = allServices.filter(s => {
+        // Category filter
+        if (currentCategory !== 'all' && s.category !== currentCategory) return false;
+        
+        // Price filter
+        const price = Number(s.price);
+        if (currentPriceFilter === 'low' && price >= 200) return false;
+        if (currentPriceFilter === 'mid' && (price < 200 || price > 500)) return false;
+        if (currentPriceFilter === 'high' && price <= 500) return false;
+        
+        // Search filter
+        if (searchTerm && !s.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+        
+        return true;
+      });
+
+      const grid = document.getElementById('services-grid');
+      
+      if (filtered.length === 0) {
+        grid.innerHTML = `
+          <div class="no-results">
+            <div class="no-results-icon">🔍</div>
+            <p>No services found matching your filters.</p>
+            <p style="margin-top:8px;font-size:0.875rem">Try adjusting your search or filters.</p>
+          </div>`;
+        return;
+      }
+
+      grid.innerHTML = filtered.map(s => {
+        const duration = s.duration_minutes ? `⏱ ${Math.floor(s.duration_minutes / 60)}h ${s.duration_minutes % 60}m` : '';
+        const priceDisplay = Number(s.price) > 0 ? `$${Number(s.price).toFixed(0)}` : 'Custom Quote';
+        
+        return `
+          <div class="service-card" onclick="bookService('${s.service_id}')">
+            <div class="service-icon">${s.icon || '🎪'}</div>
+            <div class="service-name">${esc(s.name)}</div>
+            <div class="service-price">${priceDisplay}</div>
+            ${duration || s.guest_suggestion ? `
+              <div class="service-meta">
+                ${duration ? `<span>${duration}</span>` : ''}
+                ${s.guest_suggestion ? `<span>👥 ${esc(s.guest_suggestion)}</span>` : ''}
+              </div>
+            ` : ''}
+            <button class="book-btn">Book This Service →</button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function filterByCategory(cat) {
+      currentCategory = cat;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+      renderServices();
+    }
+
+    function filterByPrice(range) {
+      currentPriceFilter = range;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+      renderServices();
+    }
+
+    function bookService(serviceId) {
+      window.location.href = `/booking-form.html?service=${serviceId}`;
+    }
+
+    function esc(str) {
+      return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // Search input handler
+    document.getElementById('search').addEventListener('input', (e) => {
+      searchTerm = e.target.value;
+      renderServices();
+    });
+
+    // Load services on page load
+    loadServices();
+  </script>
+</body>
+</html>

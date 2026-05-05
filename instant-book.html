@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Instant Book — Foam Party | Funky Monkey Events</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #0F0A1E 0%, #1A1035 100%);
+      color: #F3E8FF;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+      padding: 40px 20px;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 900;
+      background: linear-gradient(135deg, #FF6B00, #FFD600);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 16px;
+    }
+
+    .tagline {
+      font-size: 1.2rem;
+      color: #A78BCA;
+      margin-bottom: 24px;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .feature {
+      background: rgba(255,255,255,0.05);
+      padding: 12px;
+      border-radius: 10px;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+
+    /* Main Card */
+    .card {
+      background: rgba(255,255,255,0.05);
+      border: 2px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 32px;
+      margin-bottom: 24px;
+    }
+
+    .price-block {
+      text-align: center;
+      margin-bottom: 32px;
+      padding: 20px;
+      background: rgba(16,185,129,0.1);
+      border-radius: 12px;
+      border: 2px solid rgba(16,185,129,0.3);
+    }
+
+    .price {
+      font-size: 3rem;
+      font-weight: 900;
+      background: linear-gradient(135deg, #10B981, #06B6D4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .price-label {
+      color: #A78BCA;
+      font-size: 0.875rem;
+      margin-top: 4px;
+    }
+
+    /* Date Picker */
+    .form-group {
+      margin-bottom: 24px;
+    }
+
+    label {
+      display: block;
+      font-weight: 700;
+      color: #F3E8FF;
+      margin-bottom: 8px;
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    input[type="date"],
+    input[type="time"],
+    input[type="text"],
+    input[type="email"],
+    input[type="tel"],
+    input[type="number"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 14px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.05);
+      color: #F3E8FF;
+      font-size: 1rem;
+      font-family: inherit;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 100px;
+    }
+
+    input::placeholder,
+    textarea::placeholder {
+      color: #A78BCA;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 16px;
+      border: none;
+      border-radius: 10px;
+      font-weight: 900;
+      font-size: 1.1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #7C3AED, #A855F7);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 16px rgba(124,58,237,0.4);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-success {
+      background: linear-gradient(135deg, #10B981, #06B6D4);
+      color: white;
+    }
+
+    /* Response Messages */
+    .response-box {
+      padding: 20px;
+      border-radius: 12px;
+      margin-top: 24px;
+      display: none;
+    }
+
+    .response-box.available {
+      background: rgba(16,185,129,0.1);
+      border: 2px solid #10B981;
+      display: block;
+    }
+
+    .response-box.unavailable {
+      background: rgba(251,191,36,0.1);
+      border: 2px solid #FCD34D;
+      display: block;
+    }
+
+    .response-title {
+      font-weight: 700;
+      font-size: 1.2rem;
+      margin-bottom: 12px;
+    }
+
+    .response-text {
+      color: #A78BCA;
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    /* Request Form */
+    #request-form {
+      display: none;
+      margin-top: 24px;
+    }
+
+    #request-form.show {
+      display: block;
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .success-message {
+      text-align: center;
+      padding: 60px 20px;
+    }
+
+    .success-icon {
+      font-size: 4rem;
+      margin-bottom: 16px;
+    }
+
+    footer {
+      text-align: center;
+      padding: 20px;
+      color: #A78BCA;
+      font-size: 0.875rem;
+    }
+
+    @media (max-width: 640px) {
+      h1 { font-size: 2rem; }
+      .price { font-size: 2.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🎉 Book Your Foam Party</h1>
+      <p class="tagline">The ultimate outdoor party experience</p>
+      <div class="features">
+        <div class="feature">✅ Up to 50 kids</div>
+        <div class="feature">⏱ 1 hour of foam fun</div>
+        <div class="feature">📦 All equipment included</div>
+        <div class="feature">🧹 Setup & cleanup</div>
+      </div>
+    </header>
+
+    <div class="card">
+      <div class="price-block">
+        <div class="price">$250</div>
+        <div class="price-label">$100 deposit to book</div>
+      </div>
+
+      <!-- Date/Time Selection -->
+      <div class="form-group">
+        <label>📅 When is your party?</label>
+        <input type="date" id="event-date" min="">
+      </div>
+
+      <div class="form-group">
+        <label>⏰ What time?</label>
+        <input type="time" id="event-time" value="14:00">
+      </div>
+
+      <button class="btn btn-primary" id="check-btn" onclick="checkAvailability()">
+        Check Availability
+      </button>
+
+      <!-- Response Box (Available) -->
+      <div id="available-box" class="response-box available">
+        <div class="response-title">✅ Perfect! We're available!</div>
+        <p class="response-text">Secure your date with a $100 deposit. Balance of $150 due at the event.</p>
+        <button class="btn btn-success" onclick="proceedToStripe()">
+          💳 Pay Deposit — $100
+        </button>
+      </div>
+
+      <!-- Response Box (Busy) -->
+      <div id="busy-box" class="response-box unavailable">
+        <div class="response-title">📋 We have a few events scheduled that day</div>
+        <p class="response-text">
+          Let us confirm we can make it to your event and we'll get back to you within <strong>2 hours</strong>!
+        </p>
+      </div>
+    </div>
+
+    <!-- Request Form (shows when busy) -->
+    <div id="request-form" class="card">
+      <h2 style="margin-bottom:24px;font-size:1.5rem">Tell us about your event</h2>
+      
+      <div class="form-group">
+        <label>Your Name</label>
+        <input type="text" id="name" placeholder="Jane Smith" required>
+      </div>
+
+      <div class="form-group">
+        <label>Phone</label>
+        <input type="tel" id="phone" placeholder="(405) 555-1234" required>
+      </div>
+
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="email" placeholder="jane@example.com" required>
+      </div>
+
+      <div class="form-group">
+        <label>Event Type</label>
+        <select id="event-type">
+          <option>Birthday Party</option>
+          <option>School Event</option>
+          <option>Community Event</option>
+          <option>Corporate Event</option>
+          <option>Other</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Guest Count</label>
+        <input type="number" id="guests" placeholder="30" min="1">
+      </div>
+
+      <div class="form-group">
+        <label>ZIP Code</label>
+        <input type="text" id="zip" placeholder="73013" maxlength="5">
+      </div>
+
+      <div class="form-group">
+        <label>Location / Venue</label>
+        <input type="text" id="location" placeholder="Backyard, school, park, etc.">
+      </div>
+
+      <div class="form-group">
+        <label>Notes / Questions (optional)</label>
+        <textarea id="notes" placeholder="Any special requests or questions?"></textarea>
+      </div>
+
+      <button class="btn btn-primary" id="submit-btn" onclick="submitRequest()">
+        Submit Request
+      </button>
+    </div>
+
+    <!-- Success Message -->
+    <div id="success-message" style="display:none">
+      <div class="card success-message">
+        <div class="success-icon">🎉</div>
+        <h2 style="margin-bottom:16px">Thanks! We're on it.</h2>
+        <p style="color:#A78BCA;line-height:1.6">
+          We'll text or call you at <strong id="confirm-phone"></strong> within the next <strong>2 hours</strong> to confirm.
+        </p>
+        <p style="color:#A78BCA;margin-top:12px;font-size:0.875rem">
+          Expect a message from Funky Monkey Events!
+        </p>
+      </div>
+    </div>
+
+    <footer>
+      <p>Questions? Call us at <strong>(405) 431-6625</strong></p>
+      <p style="margin-top:8px">
+        <a href="/booking-form.html" style="color:#7C3AED;text-decoration:none;font-weight:700">← Book Different Service</a>
+      </p>
+    </footer>
+  </div>
+
+  <script>
+    // Set min date to today
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('event-date').min = today;
+
+    let selectedDate = '';
+    let selectedTime = '';
+    let availabilityResult = null;
+
+    async function checkAvailability() {
+      const dateInput = document.getElementById('event-date');
+      const timeInput = document.getElementById('event-time');
+      const checkBtn = document.getElementById('check-btn');
+
+      selectedDate = dateInput.value;
+      selectedTime = timeInput.value;
+
+      if (!selectedDate) {
+        alert('Please select a date');
+        return;
+      }
+
+      checkBtn.disabled = true;
+      checkBtn.textContent = 'Checking...';
+
+      try {
+        // Check if there are any foam party bookings on this date
+        const res = await fetch(`/api/bookings?service_id=foam-party&date=${selectedDate}`);
+        const data = await res.json();
+        
+        const existingBookings = data.bookings.filter(b => 
+          ['confirmed', 'pending'].includes(b.status)
+        );
+
+        const availableBox = document.getElementById('available-box');
+        const busyBox = document.getElementById('busy-box');
+        const requestForm = document.getElementById('request-form');
+
+        if (existingBookings.length === 0) {
+          // Path A: Available for instant booking
+          availableBox.style.display = 'block';
+          busyBox.style.display = 'none';
+          requestForm.classList.remove('show');
+          availabilityResult = 'available';
+        } else {
+          // Path B: Has bookings, need to check logistics
+          availableBox.style.display = 'none';
+          busyBox.style.display = 'block';
+          requestForm.classList.add('show');
+          availabilityResult = 'busy';
+        }
+
+      } catch(e) {
+        alert('Failed to check availability. Please try again.');
+      } finally {
+        checkBtn.disabled = false;
+        checkBtn.textContent = 'Check Availability';
+      }
+    }
+
+    async function proceedToStripe() {
+      // Create booking first, then redirect to Stripe
+      const booking = {
+        service_id: 'foam-party',
+        service_name: 'Foam Party Experience',
+        service_price: 250,
+        deposit_amount: 100,
+        balance_due: 150,
+        event_date: selectedDate,
+        event_time: selectedTime,
+        status: 'pending',
+        source: 'instant-book'
+      };
+
+      try {
+        const res = await fetch('/api/bookings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(booking)
+        });
+
+        const data = await res.json();
+        
+        if (data.stripe_payment_link) {
+          window.location.href = data.stripe_payment_link;
+        } else {
+          alert('Payment link generation failed. Please contact us at (405) 431-6625');
+        }
+      } catch(e) {
+        alert('Booking failed. Please try again or call (405) 431-6625');
+      }
+    }
+
+    async function submitRequest() {
+      const submitBtn = document.getElementById('submit-btn');
+      const name = document.getElementById('name').value.trim();
+      const phone = document.getElementById('phone').value.trim();
+      const email = document.getElementById('email').value.trim();
+
+      if (!name || !phone || !email) {
+        alert('Please fill in your name, phone, and email');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting...';
+
+      const booking = {
+        service_id: 'foam-party',
+        service_name: 'Foam Party Experience',
+        service_price: 250,
+        deposit_amount: 100,
+        balance_due: 150,
+        event_date: selectedDate,
+        event_time: selectedTime,
+        event_type: document.getElementById('event-type').value,
+        guest_count: document.getElementById('guests').value || null,
+        event_zip: document.getElementById('zip').value,
+        event_location: document.getElementById('location').value,
+        client_name: name,
+        client_phone: phone,
+        client_email: email,
+        notes: document.getElementById('notes').value,
+        status: 'review',
+        source: 'instant-book-conflict',
+        admin_notes: `INSTANT BOOK ATTEMPT: Customer requested same day as existing booking(s). Needs logistics check within 2 hours.`
+      };
+
+      try {
+        const res = await fetch('/api/bookings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(booking)
+        });
+
+        if (res.ok) {
+          // Show success message
+          document.getElementById('confirm-phone').textContent = phone;
+          document.querySelector('.container').innerHTML = document.getElementById('success-message').innerHTML;
+        } else {
+          alert('Submission failed. Please try again or call (405) 431-6625');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Submit Request';
+        }
+      } catch(e) {
+        alert('Submission failed. Please try again or call (405) 431-6625');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Request';
+      }
+    }
+  </script>
+</body>
+</html>
