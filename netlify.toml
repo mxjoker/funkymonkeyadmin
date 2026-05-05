@@ -59,9 +59,23 @@
   status = 200
 
 [[redirects]]
+  from = "/api/payroll/:id"
+  to = "/.netlify/functions/payroll/:id"
+  status = 200
+
+[[redirects]]
+  from = "/api/payroll"
+  to = "/.netlify/functions/payroll"
+  status = 200
+
+[[redirects]]
   from = "/staff"
   to = "/staff-portal.html"
   status = 200
 
 [functions]
   node_bundler = "esbuild"
+
+[[functions]]
+  path = "netlify/functions/payroll-scheduled.js"
+  schedule = "0 0 * * 6"  # Every Saturday at midnight (UTC)
