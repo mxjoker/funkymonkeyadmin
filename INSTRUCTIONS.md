@@ -1,5 +1,5 @@
 # Funky Monkey Events — Admin Platform Instructions
-*Last updated: March 2026*
+*Last updated: May 6, 2026 — Added confirmation page, booking lookup, W-9/Invoice/COI downloads*
 
 ---
 
@@ -27,9 +27,13 @@ Funky Monkey Events is a booking + operations platform for Joe Coover's entertai
 /
 ├── admin.html                          ← Admin dashboard (3200+ lines)
 ├── booking-form.html                   ← Public-facing 4-step booking form
+├── confirmation.html                   ← NEW: Booking confirmation page (post-submit + post-payment)
+├── my-booking.html                     ← NEW: Client booking lookup (reference + email verification)
 ├── staff-portal.html                   ← Standalone staff portal (PIN login)
 ├── services.html                       ← NEW: Standalone service catalog with search/filters
 ├── instant-book.html                   ← NEW: Foam party instant booking page
+├── docs/
+│   └── w9.pdf                         ← Joe's W-9 tax form (for client download)
 ├── netlify.toml                        ← Route redirects + scheduled functions
 ├── package.json                        ← Dependencies (pg only)
 └── netlify/functions/
@@ -44,7 +48,7 @@ Funky Monkey Events is a booking + operations platform for Joe Coover's entertai
     ├── staff-payments.js               ← Staff payment tracking (per-gig)
     ├── payroll.js                      ← NEW: Weekly payroll runs (generate, approve, pay)
     ├── payroll-scheduled.js            ← NEW: Auto-generate payroll every Saturday midnight
-    ├── create-stripe-link.js           ← Generates Stripe Checkout Session
+    ├── create-stripe-link.js           ← Generates Stripe Checkout Session (redirects to confirmation.html)
     └── stripe-webhook.js               ← Handles checkout.session.completed → confirms booking
 ```
 
@@ -237,7 +241,9 @@ git push
 
 | Bug | File | Notes |
 |---|---|---|
-| *(no known bugs)* | — | — |
+| **Confirmation page shows "Booking not found"** | `bookings.js` | **BLOCKING** — GET endpoint doesn't support `?reference=` parameter. Need to add query filter before `staff_view` check. See line 127. |
+| Dead "view all services" link | `booking-form.html` | Link exists but services page not built yet — see roadmap |
+| Staff assignment UI missing | `admin.html` | UI for assigning staff to bookings disappeared in recent update — backend intact in `staff-assignments.js` |
 
 ---
 
@@ -245,6 +251,9 @@ git push
 
 | Feature | Status | Date |
 |---|---|---|
+| W-9, Invoice, COI download buttons | ✅ COMPLETED — confirmation.html created | May 6, 2026 |
+| Client-facing booking lookup | ✅ COMPLETED — my-booking.html created | May 6, 2026 |
+| Confirmation page after booking/payment | ✅ COMPLETED — redirects from form + Stripe | May 6, 2026 |
 | "Browse all services" link → `services.html` created | ✅ COMPLETED | May 2026 |
 | Stripe deposit "Invalid amount" bug | ✅ FIXED — Validation guard added | May 2026 |
 | Auto-staff notification on booking confirm | ✅ IMPLEMENTED in booking.js | May 2026 |
@@ -266,20 +275,26 @@ git push
 
 ### 🔴 High Priority — Missing Core Features
 
-**1. W-9, Invoice, and Insurance Request buttons on confirmation**
-After a booking is confirmed (or deposit paid), the client confirmation page / booking modal should have buttons:
-- **Download W-9** — link to a static PDF of Joe's W-9
-- **Request Certificate of Insurance** — sends Joe an email notification that the client needs a COI, or shows a contact form
-- **Download Invoice** — generates a simple PDF invoice for the booking (reference, service, total, deposit paid, balance due)
-These can be added to both the Stripe success page and the booking modal in admin.
+**1. Staff assignment UI in admin**
+Backend is ready in `staff-assignments.js`. Need UI in booking detail modal to:
+- Show required skill slots for this booking
+- Assign staff to each slot
+- Change assignment status (interested → assigned)
+- Unassign staff
 
-**2. Client-facing booking lookup**
-Let clients check and update their own booking by reference number.
-- Public page at `/my-booking.html` or `/booking-form.html?lookup=1`
-- Client enters reference number + email to verify
-- Shows: status, date, service, deposit status, balance due
-- Allows limited edits: event date change request, notes update, contact info correction
-- Sends Joe a notification when client makes changes
+**2. Generate Invoice from Booking Data**
+Create PDF invoice generation:
+- Pull booking details (service, addons, deposit, balance)
+- Include Joe's business info (EIN, address, contact)
+- Professional invoice template with itemization
+- Download directly from admin or client confirmation page
+- Store generated invoices for record-keeping
+
+**3. Enhanced COI Request System**
+Currently the "Request Insurance Certificate" button just shows an alert. Enhance to:
+- Send email notification to Joe when requested from confirmation/my-booking pages
+- Log COI request in database with timestamp and client details
+- (Future) Auto-populate COI template with event details (venue, date, coverage amounts)
 
 ### 🟡 Medium Priority
 

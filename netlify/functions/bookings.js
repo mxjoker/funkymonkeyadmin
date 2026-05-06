@@ -127,6 +127,20 @@ exports.handler = async (event) => {
 
     // GET all bookings
     if (event.httpMethod === 'GET') {
+      // GET single booking by reference
+      if (event.queryStringParameters?.reference) {
+        const ref = event.queryStringParameters.reference.toUpperCase();
+        const { rows } = await client.query(
+          'SELECT * FROM bookings WHERE reference = $1',
+          [ref]
+        );
+        return { 
+          statusCode: 200, 
+          headers, 
+          body: JSON.stringify({ bookings: rows }) 
+        };
+      }
+      
       // staff_view=true — strip client contact, financials, admin notes
       if (event.queryStringParameters?.staff_view === 'true') {
         const { rows } = await client.query(
