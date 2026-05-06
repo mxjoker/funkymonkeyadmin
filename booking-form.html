@@ -1014,7 +1014,15 @@ async function submitBooking() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Submission failed');
-    document.getElementById('booking-ref').textContent = data.reference || 'Submitted!';
+    
+    const reference = data.reference || 'Submitted!';
+    document.getElementById('booking-ref').textContent = reference;
+    
+    // Redirect to confirmation page after 2 seconds
+    setTimeout(() => {
+      window.location.href = `/confirmation.html?ref=${reference}`;
+    }, 2000);
+    
     document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
     document.getElementById('step-success').classList.add('active');
     window.scrollTo(0,0);

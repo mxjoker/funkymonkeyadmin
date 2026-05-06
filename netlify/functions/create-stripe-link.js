@@ -38,7 +38,7 @@ exports.handler = async (event) => {
     // Create Stripe Checkout Session
     const params = new URLSearchParams({
       "mode": "payment",
-      "success_url": `https://funkymonkeyadmin.netlify.app/booking-form.html?paid=1`,
+      "success_url": `https://funkymonkeyadmin.netlify.app/confirmation.html?ref=${bookingRef || bookingId}`,
       "cancel_url": `https://funkymonkeyadmin.netlify.app/booking-form.html?cancelled=1`,
       "customer_email": email || "",
       "client_reference_id": bookingRef || String(bookingId),
