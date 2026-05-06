@@ -214,6 +214,22 @@ async function loadPortal() {
     const sr = await staffRes.json();
     staffRecord = sr;
 
+    // Load earnings data
+    const [earningsRes, unpaidRes] = await Promise.all([
+      fetch('/api/payroll?staff_id=' + currentUser.staffId),
+      fetch('/api/staff-payments?staff_id=' + currentUser.staffId + '&unpaid=true')
+    ]);
+    const { runs: payrollRuns } = await earningsRes.json();
+    const { payments: unpaid } = await unpaidRes.json();
+
+    // Calculate current week unpaid
+    const currentWeekTotal = (unpaid || []).reduce((sum, p) => sum + Number(p.amount), 0);
+
+    // Get last payment
+    const lastPaid = (payrollRuns || []).find(r => r.status === 'paid');
+    const lastPaymentAmount = lastPaid ? lastPaid.staff_total : 0;
+    const lastPaymentDate = lastPaid ? new Date(lastPaid.paid_at).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) : 'None yet';
+
     // Show note from Joe above the gigs if present
     const noteEl = document.getElementById('portal-joe-note');
     if (noteEl) {
@@ -229,6 +245,7 @@ async function loadPortal() {
       }
     }
 
+    renderEarnings(currentWeekTotal, lastPaymentAmount, lastPaymentDate, payrollRuns || []);
     renderGigs(data.myGigs || [], data.openGigs || []);
   } catch(e) {
     el.innerHTML = '<div style="text-align:center;padding:48px;color:#f87171">Failed to load. Try refreshing.</div>';
@@ -238,6 +255,63 @@ async function loadPortal() {
 </script>
 
 <script>
+// ═══════════════════════════════════════
+// RENDER EARNINGS
+// ═══════════════════════════════════════
+function renderEarnings(currentWeekTotal, lastPaymentAmount, lastPaymentDate, payrollRuns) {
+  let html = `
+    <div style="background:#fff;border-radius:16px;padding:24px;margin-bottom:24px;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
+      <h3 style="font-size:1.3rem;font-weight:700;color:#1e1b4b;margin-bottom:20px">💵 My Earnings</h3>
+      
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px">
+        <div style="background:#fef3c7;padding:16px;border-radius:10px;border:2px solid #fbbf24">
+          <div style="color:#92400e;font-size:0.75rem;text-transform:uppercase;font-weight:700;margin-bottom:4px">Current Week (Unpaid)</div>
+          <div style="font-size:1.8rem;font-weight:900;color:#78350f">$${currentWeekTotal.toFixed(2)}</div>
+        </div>
+        <div style="background:#f0fdf4;padding:16px;border-radius:10px;border:2px solid #86efac">
+          <div style="color:#166534;font-size:0.75rem;text-transform:uppercase;font-weight:700;margin-bottom:4px">Last Payment</div>
+          <div style="font-size:1.8rem;font-weight:900;color:#14532d">$${lastPaymentAmount.toFixed(2)}</div>
+          <div style="color:#16a34a;font-size:0.75rem;margin-top:2px">${lastPaymentDate}</div>
+        </div>
+      </div>
+
+      <details>
+        <summary style="cursor:pointer;font-weight:600;color:#7c3aed;margin-bottom:12px">📊 View Payment History</summary>
+        <div style="margin-top:12px">
+          ${payrollRuns.length === 0 ? '<p style="color:#9ca3af;font-size:0.875rem">No payment history yet.</p>' : `
+            <table style="width:100%;font-size:0.875rem">
+              <thead>
+                <tr style="border-bottom:2px solid #e5e7eb">
+                  <th style="text-align:left;padding:8px;color:#6b7280;font-size:0.75rem;text-transform:uppercase">Week Ending</th>
+                  <th style="text-align:right;padding:8px;color:#6b7280;font-size:0.75rem;text-transform:uppercase">Amount</th>
+                  <th style="text-align:right;padding:8px;color:#6b7280;font-size:0.75rem;text-transform:uppercase">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${payrollRuns.map(r => `
+                  <tr style="border-bottom:1px solid #f3f4f6">
+                    <td style="padding:10px">${new Date(r.week_ending).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</td>
+                    <td style="padding:10px;text-align:right;font-weight:700">$${r.staff_total.toFixed(2)}</td>
+                    <td style="padding:10px;text-align:right">
+                      ${r.status === 'paid' 
+                        ? '<span style="color:#10b981;font-weight:600">✅ Paid</span>' 
+                        : '<span style="color:#f59e0b;font-weight:600">⏳ Pending</span>'}
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          `}
+        </div>
+      </details>
+    </div>
+  `;
+
+  // Prepend earnings before gigs
+  const contentEl = document.getElementById('portal-content');
+  contentEl.innerHTML = html + (contentEl.innerHTML || '');
+}
+
 // ═══════════════════════════════════════
 // RENDER GIGS
 // ═══════════════════════════════════════
@@ -266,7 +340,9 @@ function renderGigs(myGigs, openGigs) {
       <div style="font-size:.85rem">Check back soon — Joe will send a notification when new gigs are available.</div>
     </div>`;
   }
-  el.innerHTML = html;
+  
+  // Append gigs to existing content (earnings is already there)
+  el.innerHTML += html;
 }
 
 function sectionHeader(label, color) {

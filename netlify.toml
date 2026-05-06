@@ -76,6 +76,5 @@
 [functions]
   node_bundler = "esbuild"
 
-[[functions]]
-  path = "netlify/functions/payroll-scheduled.js"
+[functions."payroll-scheduled"]
   schedule = "0 0 * * 6"  # Every Saturday at midnight (UTC)

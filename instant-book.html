@@ -171,19 +171,21 @@
       padding: 20px;
       border-radius: 12px;
       margin-top: 24px;
-      display: none;
+      display: none;  /* Hidden by default */
     }
 
     .response-box.available {
       background: rgba(16,185,129,0.1);
       border: 2px solid #10B981;
-      display: block;
     }
 
     .response-box.unavailable {
       background: rgba(251,191,36,0.1);
       border: 2px solid #FCD34D;
-      display: block;
+    }
+
+    .response-box.show {
+      display: block;  /* Show when this class is added */
     }
 
     .response-title {
@@ -249,8 +251,8 @@
       <h1>🎉 Book Your Foam Party</h1>
       <p class="tagline">The ultimate outdoor party experience</p>
       <div class="features">
-        <div class="feature">✅ Up to 50 kids</div>
-        <div class="feature">⏱ 1 hour of foam fun</div>
+        <div class="feature">✅ Up to 30 kids</div>
+        <div class="feature">⏱ 45 minutes of foam fun</div>
         <div class="feature">📦 All equipment included</div>
         <div class="feature">🧹 Setup & cleanup</div>
       </div>
@@ -258,7 +260,7 @@
 
     <div class="card">
       <div class="price-block">
-        <div class="price">$250</div>
+        <div class="price">$385</div>
         <div class="price-label">$100 deposit to book</div>
       </div>
 
@@ -280,7 +282,7 @@
       <!-- Response Box (Available) -->
       <div id="available-box" class="response-box available">
         <div class="response-title">✅ Perfect! We're available!</div>
-        <p class="response-text">Secure your date with a $100 deposit. Balance of $150 due at the event.</p>
+        <p class="response-text">Secure your date with a $100 deposit. Balance of $285 due at the event.</p>
         <button class="btn btn-success" onclick="proceedToStripe()">
           💳 Pay Deposit — $100
         </button>
@@ -399,7 +401,7 @@
 
       try {
         // Check if there are any foam party bookings on this date
-        const res = await fetch(`/api/bookings?service_id=foam-party&date=${selectedDate}`);
+        const res = await fetch(`/api/bookings?service_id=foam_single&date=${selectedDate}`);
         const data = await res.json();
         
         const existingBookings = data.bookings.filter(b => 
@@ -412,14 +414,14 @@
 
         if (existingBookings.length === 0) {
           // Path A: Available for instant booking
-          availableBox.style.display = 'block';
-          busyBox.style.display = 'none';
+          availableBox.classList.add('show');
+          busyBox.classList.remove('show');
           requestForm.classList.remove('show');
           availabilityResult = 'available';
         } else {
           // Path B: Has bookings, need to check logistics
-          availableBox.style.display = 'none';
-          busyBox.style.display = 'block';
+          availableBox.classList.remove('show');
+          busyBox.classList.add('show');
           requestForm.classList.add('show');
           availabilityResult = 'busy';
         }
@@ -435,11 +437,11 @@
     async function proceedToStripe() {
       // Create booking first, then redirect to Stripe
       const booking = {
-        service_id: 'foam-party',
-        service_name: 'Foam Party Experience',
-        service_price: 250,
+        service_id: 'foam_single',
+        service_name: 'Foam Party — Single Cannon',
+        service_price: 385,
         deposit_amount: 100,
-        balance_due: 150,
+        balance_due: 285,
         event_date: selectedDate,
         event_time: selectedTime,
         status: 'pending',
@@ -480,11 +482,11 @@
       submitBtn.textContent = 'Submitting...';
 
       const booking = {
-        service_id: 'foam-party',
-        service_name: 'Foam Party Experience',
-        service_price: 250,
+        service_id: 'foam_single',
+        service_name: 'Foam Party — Single Cannon',
+        service_price: 385,
         deposit_amount: 100,
-        balance_due: 150,
+        balance_due: 285,
         event_date: selectedDate,
         event_time: selectedTime,
         event_type: document.getElementById('event-type').value,

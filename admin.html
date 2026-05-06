@@ -273,6 +273,7 @@ input,select,textarea{font-family:inherit}
       <a id="nav-clients"   onclick="showPage('clients')"><span class="nav-icon">👥</span>Clients</a>
       <a id="nav-staff"     onclick="showPage('staff')"><span class="nav-icon">🎭</span>Staffing</a>
       <a id="nav-catalogue" onclick="showPage('catalogue')"><span class="nav-icon">🗂</span>Catalogue</a>
+      <a id="nav-payroll" onclick="showPage('payroll')"><span class="nav-icon">💰</span>Payroll</a>
       <a id="nav-automations" onclick="showPage('automations')"><span class="nav-icon">⚡</span>Automations</a>
       <a id="nav-analytics" onclick="showPage('analytics')"><span class="nav-icon">📈</span>Analytics</a>
       <a id="nav-portal"    style="display:none"></a>
@@ -280,6 +281,11 @@ input,select,textarea{font-family:inherit}
     <div class="sidebar-footer">
       Funky Monkey Events · OKC<br>
       (405) 431-6625
+      <div style="margin-top:12px">
+        <button class="btn btn-outline btn-sm" onclick="sessionStorage.clear();location.reload()" style="width:100%;font-size:0.875rem">
+          🚪 Sign Out
+        </button>
+      </div>
     </div>
   </div>
 
@@ -415,12 +421,6 @@ input,select,textarea{font-family:inherit}
         <button class="btn btn-primary btn-sm" onclick="openAddStaff()">+ Add Staff</button>
       </div>
       <div class="staff-grid" id="staff-grid"></div>
-      <div class="card" style="margin-top:16px">
-        <div class="card-hdr"><h2>💰 Unpaid Payments</h2></div>
-        <div id="unpaid-payments-body" style="padding:12px 16px">
-          <span style="color:#9ca3af;font-style:italic">Loading…</span>
-        </div>
-      </div>
     </div>
 
     <!-- ══ STAFF PORTAL (staff login view) ══ -->
@@ -435,8 +435,53 @@ input,select,textarea{font-family:inherit}
           <button class="btn btn-outline btn-sm" onclick="sessionStorage.clear();location.reload()">Sign Out</button>
         </div>
       </div>
+      <!-- MY EARNINGS -->
+      <div id="portal-earnings" style="background:#fff;border-radius:16px;padding:24px;margin-bottom:24px;box-shadow:0 2px 8px rgba(0,0,0,0.1);display:none">
+        <h3 style="font-size:1.3rem;font-weight:700;color:#1e1b4b;margin-bottom:20px">💵 My Earnings</h3>
+        <div id="earnings-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px"></div>
+        <details>
+          <summary style="cursor:pointer;font-weight:600;color:#7c3aed;margin-bottom:12px">📊 View Payment History</summary>
+          <div id="earnings-history" style="margin-top:12px"></div>
+        </details>
+      </div>
       <div id="portal-joe-note" style="display:none"></div>
       <div id="portal-gigs"></div>
+    </div>
+
+    <!-- ══ PAYROLL ══ -->
+    <div class="page" id="page-payroll">
+      <div class="page-hdr">
+        <h1>💰 Payroll</h1>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="generatePayroll()">Generate This Week's Payroll</button>
+        </div>
+      </div>
+      <!-- Current Week Summary -->
+      <div class="dash-card" style="margin-bottom:24px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <h3 style="font-size:1.1rem;font-weight:700">📊 Current Week (Unpaid)</h3>
+          <span id="current-week-label" style="color:#9ca3af;font-size:0.875rem">Loading...</span>
+        </div>
+        <div id="current-week-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
+          <div style="background:#f9fafb;padding:16px;border-radius:10px">
+            <div style="color:#6b7280;font-size:0.75rem;text-transform:uppercase;font-weight:700;margin-bottom:4px">Total Unpaid</div>
+            <div id="unpaid-total" style="font-size:2rem;font-weight:900;color:#1e1b4b">$0</div>
+          </div>
+          <div style="background:#f9fafb;padding:16px;border-radius:10px">
+            <div style="color:#6b7280;font-size:0.75rem;text-transform:uppercase;font-weight:700;margin-bottom:4px">Staff Count</div>
+            <div id="unpaid-staff" style="font-size:2rem;font-weight:900;color:#1e1b4b">0</div>
+          </div>
+          <div style="background:#f9fafb;padding:16px;border-radius:10px">
+            <div style="color:#6b7280;font-size:0.75rem;text-transform:uppercase;font-weight:700;margin-bottom:4px">Gigs Count</div>
+            <div id="unpaid-gigs" style="font-size:2rem;font-weight:900;color:#1e1b4b">0</div>
+          </div>
+        </div>
+      </div>
+      <!-- Payroll Runs Table -->
+      <div class="dash-card">
+        <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:16px">Recent Payroll Runs</h3>
+        <div id="payroll-runs-table"></div>
+      </div>
     </div>
 
     <!-- ══ CATALOGUE ══ -->
@@ -592,23 +637,16 @@ window.addEventListener('DOMContentLoaded', () => {
 // ══════════════════════════════════════════════════
 async function init() {
   if (currentUser?.role === 'staff') {
-    // Hide admin-only nav items for staff login
-    ['dashboard','bookings','calendar','clients','catalogue','analytics'].forEach(p => {
-      const el = document.getElementById('nav-' + p);
-      if (el) el.style.display = 'none';
-    });
-    // Load staff list so preferences modal can find this staff member
-    try { const r = await fetch('/api/staff'); allStaff = await r.json(); } catch {}
-    await loadStaffPortal();
-    showPage('portal');
-    const greet = document.getElementById('portal-greeting');
-    if (greet) greet.textContent = 'Hey, ' + (currentUser.staffName || 'there') + '! 👋';
-  } else {
-    await Promise.all([loadBookings(), loadStaffList(), loadServiceSlots()]);
-    await loadCalStaffMap();
-    renderDashboard();
-    showPage('dashboard');
+    // Redirect staff logins to the dedicated staff portal
+    window.location.href = '/staff-portal.html';
+    return;
   }
+  
+  // Admin-only initialization
+  await Promise.all([loadBookings(), loadStaffList(), loadServiceSlots()]);
+  await loadCalStaffMap();
+  renderDashboard();
+  showPage('dashboard');
 }
 
 async function loadStaffList() {
@@ -684,9 +722,10 @@ function showPage(name) {
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
   document.getElementById('nav-' + name).classList.add('active');
-  if (name === 'staff') { renderStaff(); loadUnpaidPayments(); }
+  if (name === 'staff') { renderStaff(); }
   if (name === 'catalogue') loadCatalogue();
   if (name === 'automations') loadAutomations();
+  if (name === 'payroll') loadPayroll();
   closeNav(); // close drawer after navigation on mobile
 }
 
@@ -1712,62 +1751,6 @@ async function renderStaff() {
   }).join('');
 }
 
-async function loadUnpaidPayments() {
-  const el = document.getElementById('unpaid-payments-body');
-  if (!el) return;
-  try {
-    const res = await fetch('/api/staff-payments?unpaid=true');
-    const { payments } = await res.json();
-    if (!payments || !payments.length) {
-      el.innerHTML = '<div style="color:#10b981;font-weight:600;padding:8px 0">✅ All payments settled</div>';
-      return;
-    }
-    const total = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-    el.innerHTML = `
-      <div style="margin-bottom:10px;font-size:.82rem;color:#6b7280">${payments.length} unpaid · Total owed: <strong style="color:#374151">$${total.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></div>
-      <table style="width:100%;border-collapse:collapse;font-size:.82rem">
-        <thead><tr style="border-bottom:1px solid #e5e7eb">
-          <th style="text-align:left;padding:4px 8px;color:#9ca3af;font-size:.72rem;font-weight:600">Staff</th>
-          <th style="text-align:left;padding:4px 8px;color:#9ca3af;font-size:.72rem;font-weight:600">Booking</th>
-          <th style="text-align:left;padding:4px 8px;color:#9ca3af;font-size:.72rem;font-weight:600">Amount</th>
-          <th style="text-align:left;padding:4px 8px;color:#9ca3af;font-size:.72rem;font-weight:600">Via</th>
-          <th style="padding:4px 8px"></th>
-        </tr></thead>
-        <tbody>
-          ${payments.map(p => {
-            const booking = allBookings.find(b => b.id === p.booking_id);
-            return `<tr style="border-bottom:1px solid #f3f4f6">
-              <td style="padding:6px 8px;font-weight:600">${esc(p.preferred_name || p.staff_name || '—')}</td>
-              <td style="padding:6px 8px;color:#6b7280">${booking
-                ? `<span style="cursor:pointer;color:#7c3aed;font-weight:600" onclick="openBooking('${p.booking_id}')">${esc(booking.reference)}</span>`
-                : '#' + p.booking_id}</td>
-              <td style="padding:6px 8px;font-weight:700;color:#374151">$${Number(p.amount).toFixed(2)}</td>
-              <td style="padding:6px 8px;color:#6b7280">${esc(p.payment_method || '—')}${p.payment_handle ? ' ' + esc(p.payment_handle) : ''}</td>
-              <td style="padding:6px 8px;text-align:right">
-                <button class="btn btn-primary btn-sm" style="padding:2px 10px;font-size:.72rem"
-                  onclick="markPaymentPaidFromOverview(${p.id})">Mark Paid</button>
-              </td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`;
-  } catch(e) {
-    el.innerHTML = '<span style="color:#dc2626">Failed to load payments.</span>';
-  }
-}
-
-async function markPaymentPaidFromOverview(paymentId) {
-  try {
-    const res = await fetch('/api/staff-payments/' + paymentId, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paid: true })
-    });
-    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
-    await loadUnpaidPayments();
-  } catch(e) { alert('Error: ' + e.message); }
-}
-
 // ── Staff skills ─────────────────────────────────────────────────────────────
 
 async function addSkill(id, skillName) {
@@ -2050,6 +2033,68 @@ async function loadStaffPortal() {
     const data = await assignRes.json();
     const staffRecord = await staffRes.json();
     const { payments: myPayments } = await payRes.json().catch(() => ({ payments: [] }));
+
+    // Earnings summary
+    const earningsEl = document.getElementById('portal-earnings');
+    if (earningsEl) {
+      try {
+        const [earningsRes, unpaidEarningsRes] = await Promise.all([
+          fetch(`/api/payroll?staff_id=${currentUser.staffId}`),
+          fetch(`/api/staff-payments?staff_id=${currentUser.staffId}&unpaid=true`)
+        ]);
+        const { runs: payrollRuns } = await earningsRes.json();
+        const { payments: unpaidEarnings } = await unpaidEarningsRes.json();
+        const currentWeekTotal = (unpaidEarnings || []).reduce((sum, p) => sum + Number(p.amount), 0);
+        const lastPaid = (payrollRuns || []).find(r => r.status === 'paid');
+        const lastPaymentAmount = lastPaid ? lastPaid.staff_total : 0;
+        const lastPaymentDate = lastPaid ? new Date(lastPaid.paid_at).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) : 'None yet';
+
+        document.getElementById('earnings-summary').innerHTML = `
+          <div style="background:#fef3c7;padding:16px;border-radius:10px;border:2px solid #fbbf24">
+            <div style="color:#92400e;font-size:0.75rem;text-transform:uppercase;font-weight:700;margin-bottom:4px">Current Week (Unpaid)</div>
+            <div style="font-size:1.8rem;font-weight:900;color:#78350f">$${currentWeekTotal.toFixed(2)}</div>
+          </div>
+          <div style="background:#f0fdf4;padding:16px;border-radius:10px;border:2px solid #86efac">
+            <div style="color:#166534;font-size:0.75rem;text-transform:uppercase;font-weight:700;margin-bottom:4px">Last Payment</div>
+            <div style="font-size:1.8rem;font-weight:900;color:#14532d">$${Number(lastPaymentAmount).toFixed(2)}</div>
+            <div style="color:#16a34a;font-size:0.75rem;margin-top:2px">${lastPaymentDate}</div>
+          </div>
+        `;
+
+        if (!payrollRuns || payrollRuns.length === 0) {
+          document.getElementById('earnings-history').innerHTML = '<p style="color:#9ca3af;font-size:0.875rem">No payment history yet.</p>';
+        } else {
+          document.getElementById('earnings-history').innerHTML = `
+            <table style="width:100%;font-size:0.875rem">
+              <thead>
+                <tr style="border-bottom:2px solid #e5e7eb">
+                  <th style="text-align:left;padding:8px;color:#6b7280;font-size:0.75rem;text-transform:uppercase">Week Ending</th>
+                  <th style="text-align:right;padding:8px;color:#6b7280;font-size:0.75rem;text-transform:uppercase">Amount</th>
+                  <th style="text-align:right;padding:8px;color:#6b7280;font-size:0.75rem;text-transform:uppercase">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${payrollRuns.map(r => `
+                  <tr style="border-bottom:1px solid #f3f4f6">
+                    <td style="padding:10px">${new Date(r.week_ending).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</td>
+                    <td style="padding:10px;text-align:right;font-weight:700">$${Number(r.staff_total).toFixed(2)}</td>
+                    <td style="padding:10px;text-align:right">
+                      ${r.status === 'paid'
+                        ? '<span style="color:#10b981;font-weight:600">✅ Paid</span>'
+                        : '<span style="color:#f59e0b;font-weight:600">⏳ Pending</span>'}
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          `;
+        }
+
+        earningsEl.style.display = 'block';
+      } catch(e) {
+        console.error('earnings load error:', e);
+      }
+    }
 
     // Show note from Joe if present
     const noteEl = document.getElementById('portal-joe-note');
@@ -3167,6 +3212,214 @@ function flash(id) {
   if (!el) return;
   el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ══════════════════════════════════════════════════
+// PAYROLL
+// ══════════════════════════════════════════════════
+
+async function loadPayroll() {
+  try {
+    const [runsRes, unpaidRes] = await Promise.all([
+      fetch('/api/payroll'),
+      fetch('/api/staff-payments?unpaid=true')
+    ]);
+
+    const { runs } = await runsRes.json();
+    const { payments: unpaid } = await unpaidRes.json();
+
+    const today = new Date();
+    const thisSunday = new Date(today);
+    thisSunday.setDate(today.getDate() + (7 - today.getDay()));
+    const thisMonday = new Date(thisSunday);
+    thisMonday.setDate(thisSunday.getDate() - 6);
+
+    const weekLabel = `${thisMonday.toLocaleDateString('en-US', {month:'short',day:'numeric'})} - ${thisSunday.toLocaleDateString('en-US', {month:'short',day:'numeric'})}`;
+    document.getElementById('current-week-label').textContent = weekLabel;
+
+    if (unpaid && unpaid.length) {
+      const total = unpaid.reduce((sum, p) => sum + Number(p.amount), 0);
+      const staffIds = new Set(unpaid.map(p => p.staff_id));
+
+      document.getElementById('unpaid-total').textContent = '$' + total.toFixed(2);
+      document.getElementById('unpaid-staff').textContent = staffIds.size;
+      document.getElementById('unpaid-gigs').textContent = unpaid.length;
+    }
+
+    const table = document.getElementById('payroll-runs-table');
+    if (!runs || runs.length === 0) {
+      table.innerHTML = '<p style="color:#9ca3af;padding:20px;text-align:center">No payroll runs yet. Click "Generate This Week\'s Payroll" to create one.</p>';
+      return;
+    }
+
+    const statusBadge = (status) => {
+      const colors = { draft: '#f59e0b', approved: '#3b82f6', paid: '#10b981' };
+      const labels = { draft: '📝 Draft', approved: '✓ Approved', paid: '✅ Paid' };
+      return `<span style="background:${colors[status]};color:#fff;padding:3px 10px;border-radius:12px;font-size:0.75rem;font-weight:700">${labels[status]}</span>`;
+    };
+
+    table.innerHTML = `
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Week Ending</th>
+            <th>Staff</th>
+            <th>Total</th>
+            <th>Status</th>
+            <th>Paid Date</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${runs.map(r => `
+            <tr>
+              <td>${new Date(r.week_ending).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'})}</td>
+              <td>${r.staff_count || 0}</td>
+              <td style="font-weight:700">$${Number(r.total_amount).toFixed(2)}</td>
+              <td>${statusBadge(r.status)}</td>
+              <td>${r.paid_at ? new Date(r.paid_at).toLocaleDateString('en-US', {month:'short',day:'numeric'}) : '—'}</td>
+              <td><button class="btn btn-outline btn-sm" onclick="viewPayrollRun(${r.id})">View</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+  } catch(e) {
+    console.error('loadPayroll error:', e);
+  }
+}
+
+async function generatePayroll() {
+  if (!confirm('Generate payroll for the current week?')) return;
+
+  try {
+    const today = new Date();
+    const thisSunday = new Date(today);
+    thisSunday.setDate(today.getDate() + (7 - today.getDay()));
+
+    const res = await fetch('/api/payroll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'generate',
+        week_ending: thisSunday.toISOString().split('T')[0]
+      })
+    });
+
+    const data = await res.json();
+
+    if (res.ok && data.run) {
+      alert(`Payroll created! ${data.count} payments totaling $${Number(data.run.total_amount).toFixed(2)}`);
+      await loadPayroll();
+    } else {
+      alert(data.error || data.message || 'Generation failed');
+    }
+  } catch(e) {
+    alert('Failed to generate payroll: ' + e.message);
+  }
+}
+
+async function viewPayrollRun(runId) {
+  try {
+    const res = await fetch(`/api/payroll/${runId}`);
+    const run = await res.json();
+
+    const statusColors = { draft: '#f59e0b', approved: '#3b82f6', paid: '#10b981' };
+    const staffGroups = run.staff_groups || [];
+
+    let actionsHtml = '';
+    if (run.status === 'draft') {
+      actionsHtml = `
+        <div style="display:flex;gap:8px;margin-top:20px">
+          <button class="btn btn-primary btn-sm" onclick="approvePayroll(${runId})">Approve & Lock</button>
+          <button class="btn btn-outline btn-sm" onclick="closeModal()">Cancel</button>
+        </div>
+      `;
+    } else if (run.status === 'approved') {
+      actionsHtml = `
+        <div style="display:flex;gap:8px;margin-top:20px">
+          <button class="btn btn-success btn-sm" onclick="markPayrollPaid(${runId})">Mark as Paid</button>
+          <button class="btn btn-outline btn-sm" onclick="closeModal()">Close</button>
+        </div>
+      `;
+    } else {
+      actionsHtml = `<button class="btn btn-outline btn-sm" style="margin-top:20px" onclick="closeModal()">Close</button>`;
+    }
+
+    document.getElementById('modal-title').textContent = `Payroll — Week Ending ${new Date(run.week_ending).toLocaleDateString('en-US', {month:'long',day:'numeric'})}`;
+    document.getElementById('modal-body').innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding:12px;background:#f9fafb;border-radius:10px">
+        <span style="background:${statusColors[run.status]};color:#fff;padding:4px 12px;border-radius:12px;font-size:0.875rem;font-weight:700">${run.status.toUpperCase()}</span>
+        <div style="flex:1;text-align:right;font-size:1.5rem;font-weight:900;color:#1e1b4b">$${Number(run.total_amount).toFixed(2)}</div>
+      </div>
+
+      ${staffGroups.map(sg => `
+        <div style="margin-bottom:24px;padding:16px;background:#f9fafb;border-radius:10px">
+          <div style="font-weight:700;font-size:1rem;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
+            <span>${esc(sg.preferred_name || sg.staff_name)}</span>
+            <span style="color:#7c3aed">$${sg.total.toFixed(2)}</span>
+          </div>
+          ${sg.items.map(item => `
+            <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:0.875rem;color:#6b7280;border-bottom:1px solid #e5e7eb">
+              <span>${item.reference} — ${esc(item.service_name)} — ${new Date(item.event_date).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
+              <span style="font-weight:600">$${Number(item.amount).toFixed(2)}</span>
+            </div>
+          `).join('')}
+        </div>
+      `).join('')}
+
+      ${actionsHtml}
+    `;
+
+    document.getElementById('booking-modal').classList.add('open');
+  } catch(e) {
+    alert('Failed to load payroll run: ' + e.message);
+  }
+}
+
+async function approvePayroll(runId) {
+  if (!confirm('Approve and lock this payroll run? This cannot be undone.')) return;
+
+  try {
+    const res = await fetch(`/api/payroll/${runId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'approved' })
+    });
+
+    if (res.ok) {
+      alert('Payroll approved!');
+      closeModal();
+      await loadPayroll();
+    } else {
+      alert('Failed to approve payroll');
+    }
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function markPayrollPaid(runId) {
+  if (!confirm('Mark this payroll as paid? This will update all staff_payments to paid=true.')) return;
+
+  try {
+    const res = await fetch(`/api/payroll/${runId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'paid' })
+    });
+
+    if (res.ok) {
+      alert('Payroll marked as paid!');
+      closeModal();
+      await loadPayroll();
+    } else {
+      alert('Failed to mark as paid');
+    }
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
 }
 </script>
 </body>

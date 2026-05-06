@@ -25,21 +25,26 @@ Funky Monkey Events is a booking + operations platform for Joe Coover's entertai
 
 ```
 /
-├── admin.html                          ← Admin dashboard (2600+ lines)
+├── admin.html                          ← Admin dashboard (3200+ lines)
 ├── booking-form.html                   ← Public-facing 4-step booking form
 ├── staff-portal.html                   ← Standalone staff portal (PIN login)
-├── netlify.toml                        ← Route redirects for all /api/* endpoints
+├── services.html                       ← NEW: Standalone service catalog with search/filters
+├── instant-book.html                   ← NEW: Foam party instant booking page
+├── netlify.toml                        ← Route redirects + scheduled functions
 ├── package.json                        ← Dependencies (pg only)
 └── netlify/functions/
     ├── _email.js                       ← SHARED: sendEmail, wrap, render, logEmail, fireStatusAutomations
     ├── auth.js                         ← Login: checks ADMIN_PASSWORD, then staff PINs
-    ├── bookings.js                     ← GET all bookings / POST new booking + emails
-    ├── booking.js                      ← PATCH (status, notes, payment) / DELETE single booking
-    ├── automations.js                  ← Automation rules, email log, booking tasks (per-booking checklist)
+    ├── bookings.js                     ← GET all bookings / POST new booking + AUTO-NOTIFY STAFF
+    ├── booking.js                      ← PATCH (status + STRIPE FIX + AUTO-NOTIFY) / DELETE
+    ├── automations.js                  ← Automation rules, email log, booking tasks
     ├── services.js                     ← GET+POST services, addons, service_addons, service_event_types
     ├── staff.js                        ← GET/POST/PATCH/DELETE staff records
-    ├── staff-assignments.js            ← Staff gig interest, assignment, checklist, surveys, ?all=true for calendar
-    ├── create-stripe-link.js           ← Generates Stripe Checkout Session, emails client
+    ├── staff-assignments.js            ← Staff gig interest, assignment, checklist, surveys
+    ├── staff-payments.js               ← Staff payment tracking (per-gig)
+    ├── payroll.js                      ← NEW: Weekly payroll runs (generate, approve, pay)
+    ├── payroll-scheduled.js            ← NEW: Auto-generate payroll every Saturday midnight
+    ├── create-stripe-link.js           ← Generates Stripe Checkout Session
     └── stripe-webhook.js               ← Handles checkout.session.completed → confirms booking
 ```
 
@@ -53,6 +58,9 @@ Funky Monkey Events is a booking + operations platform for Joe Coover's entertai
 | `/api/staff` | `staff.js` |
 | `/api/staff/:id` | `staff.js` |
 | `/api/staff-assignments` | `staff-assignments.js` |
+| `/api/staff-payments` | `staff-payments.js` |
+| `/api/payroll` | `payroll.js` |
+| `/api/payroll/:id` | `payroll.js` |
 | `/api/automations` | `automations.js` |
 | `/api/create-stripe-link` | `create-stripe-link.js` |
 | `/api/stripe-webhook` | `stripe-webhook.js` |
@@ -97,6 +105,15 @@ Every email sent: `id`, `booking_id`, `rule_id`, `trigger_label`, `subject`, `re
 
 ### `booking_tasks` table
 Per-booking admin checklist: `id`, `booking_id`, `task`, `completed`, `completed_at`, `sort_order`
+
+### `staff_payments` table
+Per-gig payment tracking: `id`, `staff_id`, `booking_id`, `assignment_id`, `service_id`, `service_name`, `event_date`, `reference`, `amount`, `pay_type`, `hours`, `paid`, `paid_at`, `payroll_run_id`, `created_at`
+
+### `payroll_runs` table
+Weekly payroll batches: `id`, `week_ending` (DATE), `status` (draft/approved/paid), `total_amount`, `notes`, `payment_method` (Check/Venmo/Cash/Mixed/Other), `created_at`, `approved_at`, `paid_at`, `created_by`
+
+### `payroll_line_items` table
+Individual payments within a run: `id`, `payroll_run_id`, `staff_payment_id`, `staff_id`, `amount`, `adjustment_amount`, `adjustment_note`, `created_at`
 
 All tables use `ensureTable()` / `ensureTables()` with auto-migration on first use.
 
@@ -208,9 +225,10 @@ git push
 | Clients | `page-clients` | CRM view built from bookings |
 | Staffing | `page-staff` | Staff cards + Staffing page with My Portal |
 | Catalogue | `page-catalogue` | Services, add-ons, staff slots, event type mappings |
+| Payroll | `page-payroll` | Weekly payroll runs (generate, approve, pay) |
 | Automations | `page-automations` | Email rules, email log, run scheduled |
 | Analytics | `page-analytics` | Revenue, referrals, service breakdown |
-| My Portal | `page-portal` | Staff-only: gigs, checklist, survey |
+| My Portal | `page-portal` | Staff-only: gigs, checklist, survey, earnings |
 
 
 ---
@@ -219,76 +237,43 @@ git push
 
 | Bug | File | Notes |
 |---|---|---|
-| "Browse all services" link on booking form | `booking-form.html` | Link exists on the services step but there's no services listing page built yet. Clicking it goes nowhere. Fix: either build a `/services` page or remove the link until it's ready. |
+| *(no known bugs)* | — | — |
 
 ---
 
 ## ✅ RECENTLY RESOLVED
 
-| Feature | Status |
-|---|---|
-| Stripe deposit "Invalid amount" | ✅ Fixed — guarded with `Number(deposit_amount) \|\| 100` |
-| Staff checklist buttons not clickable | ✅ Fixed — double-quoted JSON.stringify args inside HTML attributes broke onclick |
-| Autopilot email scheduler | ✅ Built — `automations.js`, configurable rules, template variables |
-| Per-booking email log | ✅ Built — shows in booking modal, logged to `email_log` table |
-| Per-booking admin task checklist | ✅ Built — add/complete/delete tasks per booking |
-| Email deduplication / double-send risk | ✅ Fixed — all email logic extracted to `_email.js`, single code path |
-| Dashboard recent bookings sort | ✅ Fixed — sorted by `created_at DESC` |
-| Services DB ↔ booking form sync | ✅ Done — 27 services, 39 addons, 60 event type links all match |
-| Staff slot orphaned service IDs | ✅ Fixed — migrated from old IDs to new ones |
-| `balloon_40` / `balloon_60` event type mapping | ✅ Fixed — mapped to kids_bday, family, community |
-| `.env` and `node_modules` committed to git | ✅ Fixed — proper `.gitignore` in place |
-| Calendar staff initials | ✅ Built — colored initials badges on each calendar event |
-| Export CSV | ✅ Built — exports visible bookings with 23 columns |
-| Payment ref field | ✅ Built — free-text field on Record Payment block |
-| Confirmation deadline | ✅ Built — date picker on payment block |
-| Child name / Birthday person field | ✅ Built — booking form + modal display |
-| Customer type + Venue fields | ✅ Built — display in booking modal |
-| Event type picker in Catalogue | ✅ Built — per-service chip picker, saves to `service_event_types` |
-| Post-gig survey visible in admin | ✅ Built — shows in booking modal staff assignment panel |
+| Feature | Status | Date |
+|---|---|---|
+| "Browse all services" link → `services.html` created | ✅ COMPLETED | May 2026 |
+| Stripe deposit "Invalid amount" bug | ✅ FIXED — Validation guard added | May 2026 |
+| Auto-staff notification on booking confirm | ✅ IMPLEMENTED in booking.js | May 2026 |
+| Staff payment tracking system | ✅ COMPLETED — staff_payments table + API | May 2026 |
+| Weekly payroll system with auto-generation | ✅ COMPLETED — Runs every Saturday | May 2026 |
+| Instant booking page for Foam Party | ✅ COMPLETED — instant-book.html | May 2026 |
+| Staff Requirements Editor | ✅ Already existed in Catalogue | May 2026 |
+| Staff checklist buttons not clickable | ✅ Fixed — double-quoted JSON.stringify args inside HTML attributes broke onclick | Mar 2026 |
+| Autopilot email scheduler | ✅ Built — `automations.js`, configurable rules, template variables | Mar 2026 |
+| Per-booking email log | ✅ Built — shows in booking modal, logged to `email_log` table | Mar 2026 |
+| Per-booking admin task checklist | ✅ Built — add/complete/delete tasks per booking | Mar 2026 |
+| Email deduplication / double-send risk | ✅ Fixed — all email logic extracted to `_email.js`, single code path | Mar 2026 |
+| Dashboard recent bookings sort | ✅ Fixed — sorted by `created_at DESC` | Mar 2026 |
+| Services DB ↔ booking form sync | ✅ Done — 27 services, 39 addons, 60 event type links all match | Mar 2026 |
 
 ---
 
 ## 🚀 FEATURE ROADMAP
 
-### 🔴 High Priority — Active Bugs / Missing Core Features
+### 🔴 High Priority — Missing Core Features
 
-**1. "Browse all services" link on booking form**
-The services step has a "View all services" link that leads nowhere. Options:
-- Build a `/services.html` standalone page with filterable service cards
-- Or remove the link until the page exists
-
-**2. W-9, Invoice, and Insurance Request buttons on confirmation**
+**1. W-9, Invoice, and Insurance Request buttons on confirmation**
 After a booking is confirmed (or deposit paid), the client confirmation page / booking modal should have buttons:
 - **Download W-9** — link to a static PDF of Joe's W-9
 - **Request Certificate of Insurance** — sends Joe an email notification that the client needs a COI, or shows a contact form
 - **Download Invoice** — generates a simple PDF invoice for the booking (reference, service, total, deposit paid, balance due)
 These can be added to both the Stripe success page and the booking modal in admin.
 
-**3. Automatic staff email notifications on new inquiries/bookings**
-When a new booking comes in, email matching staff automatically (not just when Joe clicks "Notify Staff").
-- `bookings.js` POST should call the `notify_staff` action in `staff-assignments.js` after saving
-- Match staff by their skill tags against the service's `staff_slots`
-- The frontend "📣 Notify Matching Staff" button already exists — just needs to fire automatically too
-
-**4. Staff payment tracking**
-Each staff member needs payment details and per-gig pay tracking:
-- Add fields to `staff` table: `hourly_rate`, `flat_rate`, `payment_method` (Venmo/check/Zelle), `payment_handle`
-- Add `staff_payments` table: `id`, `staff_id`, `booking_id`, `amount`, `paid`, `paid_at`, `payment_method`, `note`
-- Admin UI: "Staff Payments" section showing who's been paid, how much, mark as paid
-- Note: Some services pay differently — e.g. flat rate per gig vs hourly. Track `pay_type` per assignment.
-- Staff portal: Show staff their hourly rate, upcoming pay, and payment history
-
-**5. Instant booking / auto-confirm for select services (Foam Party first)**
-A "book now" flow where the client selects a date, the system checks the calendar, and if it's open the booking is immediately confirmed and deposit collected — no manual review by Joe.
-- **Phase 1 — Foam Party only** (`foam_single`, `foam_double`)
-- Check `bookings` for any confirmed/pending foam party on the selected date
-- If clear: create booking with status `confirmed`, fire Stripe Checkout immediately, send deposit link
-- If taken: fall back to standard inquiry flow with a note that the date is popular
-- Admin setting to toggle instant-book per service
-- Must account for Joe's capacity (e.g. can only do 1 foam party per day, or 2 if double-staffed)
-
-**6. Client-facing booking lookup**
+**2. Client-facing booking lookup**
 Let clients check and update their own booking by reference number.
 - Public page at `/my-booking.html` or `/booking-form.html?lookup=1`
 - Client enters reference number + email to verify

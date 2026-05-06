@@ -1,5 +1,6 @@
 const { Client } = require("pg");
 const { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange } = require('./_email');
+const { notifyMatchingStaff } = require('./staff-assignments');
 
 const db = () => new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 const SITE = "https://funkymonkeyadmin.netlify.app";
@@ -154,6 +155,14 @@ exports.handler = async (event) => {
           }
         } else {
           console.log(`Skipping Stripe link generation for booking ${updated.id} — deposit_amount is ${depositAmount}`);
+        }
+
+        // Auto-notify matching staff when booking is confirmed
+        try {
+          await notifyMatchingStaff(updated);
+          console.log(`Auto-notified matching staff for booking ${updated.reference}`);
+        } catch(e) {
+          console.error(`Failed to auto-notify staff for booking ${updated.id}:`, e.message);
         }
       }
 
