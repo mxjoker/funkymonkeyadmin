@@ -1079,6 +1079,14 @@ function openBooking(id) {
       <div class="stripe-result" id="stripe-msg-${b.id}"></div>
     </div>
 
+    <!-- Download Invoice -->
+    <div style="background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <strong style="font-size:.875rem">🧾 Invoice</strong>
+        <a href="/api/generate-invoice/${b.reference}" class="btn btn-outline btn-sm" download>Download PDF</a>
+      </div>
+    </div>
+
     <!-- Admin notes -->
     <div class="notes-block">
       <span class="section-label">Admin Notes <span class="text-muted">(internal only)</span></span>

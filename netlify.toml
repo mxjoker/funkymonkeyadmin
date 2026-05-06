@@ -69,6 +69,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/generate-invoice/:id"
+  to = "/.netlify/functions/generate-invoice/:id"
+  status = 200
+
+[[redirects]]
   from = "/staff"
   to = "/staff-portal.html"
   status = 200

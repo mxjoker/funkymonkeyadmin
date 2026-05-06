@@ -1,5 +1,5 @@
 # Funky Monkey Events — Admin Platform Instructions
-*Last updated: May 6, 2026 — Added confirmation page, booking lookup, W-9/Invoice/COI downloads*
+*Last updated: May 6, 2026 — Added PDF invoice generator*
 
 ---
 
@@ -35,7 +35,7 @@ Funky Monkey Events is a booking + operations platform for Joe Coover's entertai
 ├── docs/
 │   └── w9.pdf                         ← Joe's W-9 tax form (for client download)
 ├── netlify.toml                        ← Route redirects + scheduled functions
-├── package.json                        ← Dependencies (pg only)
+├── package.json                        ← Dependencies (pg, pdf-lib)
 └── netlify/functions/
     ├── _email.js                       ← SHARED: sendEmail, wrap, render, logEmail, fireStatusAutomations
     ├── auth.js                         ← Login: checks ADMIN_PASSWORD, then staff PINs
@@ -48,6 +48,7 @@ Funky Monkey Events is a booking + operations platform for Joe Coover's entertai
     ├── staff-payments.js               ← Staff payment tracking (per-gig)
     ├── payroll.js                      ← NEW: Weekly payroll runs (generate, approve, pay)
     ├── payroll-scheduled.js            ← NEW: Auto-generate payroll every Saturday midnight
+    ├── generate-invoice.js             ← NEW: PDF invoice generation (pdf-lib)
     ├── create-stripe-link.js           ← Generates Stripe Checkout Session (redirects to confirmation.html)
     └── stripe-webhook.js               ← Handles checkout.session.completed → confirms booking
 ```
@@ -66,6 +67,7 @@ Funky Monkey Events is a booking + operations platform for Joe Coover's entertai
 | `/api/payroll` | `payroll.js` |
 | `/api/payroll/:id` | `payroll.js` |
 | `/api/automations` | `automations.js` |
+| `/api/generate-invoice/:id` | `generate-invoice.js` |
 | `/api/create-stripe-link` | `create-stripe-link.js` |
 | `/api/stripe-webhook` | `stripe-webhook.js` |
 
@@ -192,6 +194,46 @@ Staff logins see **My Portal only** — nav items hidden: `dashboard`, `bookings
 
 ---
 
+## 👥 STAFF ASSIGNMENT UI (Enhanced May 2026)
+
+The booking modal staff assignment section was upgraded from a flat list to a **slot-based visual UI** with one-click assignment.
+
+### What Changed
+**Before:** Simple list of assigned staff with dropdown selection  
+**After:** Visual slot cards showing requirements, matching staff, and quick-assign buttons
+
+### Key Features
+- **Visual slot cards** — One card per required role (from `staff_slots` table)
+- **Color-coded status** — Yellow background (needs staff) vs. green (fully staffed)
+- **Progress counters** — "2 / 3 filled" badge per slot
+- **Smart matching** — Filters `allStaff` by skill tags, shows only qualified staff
+- **One-click assignment** — Quick-assign buttons for matching staff (up to 3 shown, rest in collapsible details)
+- **Graceful fallback** — Shows helpful message when no requirements configured
+
+### Functions Modified
+- `loadStaffAssignments(bookingId)` — Lines 1207-1357 in admin.html — completely rewritten
+- `renderAssignmentCard(a, payByStaff, bookingId, slotTag)` — NEW helper function
+- `quickAssignStaff(staffId, tag, bookingId)` — NEW one-click assignment function
+
+### Functions Preserved (unchanged)
+- `assignStaff()` — manual dropdown assignment still works
+- `promoteToAssigned()` — promote interested → assigned
+- `unassignStaff()` — remove staff from gig
+- `notifyStaff()` — email matching staff
+- `recordPayment()` — staff payment tracking
+
+### Installation
+Enhanced version ready to deploy via Terminal command (see SIMPLE_INSTALL.md):
+```bash
+cd ~/Downloads/funky-monkey-email
+cp admin.html admin.html.backup-$(date +%Y%m%d)
+# Then run the Perl one-liner replacement command
+```
+
+Full technical spec in: `STAFF_ASSIGNMENT_UI_UPGRADE.md`
+
+---
+
 ## 🖥️ LOCAL DEV SETUP
 
 ```bash
@@ -251,6 +293,7 @@ git push
 
 | Feature | Status | Date |
 |---|---|---|
+| PDF Invoice Generator | ✅ COMPLETED — Auto-generates professional invoices with Joe's business info | May 6, 2026 |
 | W-9, Invoice, COI download buttons | ✅ COMPLETED — confirmation.html created | May 6, 2026 |
 | Client-facing booking lookup | ✅ COMPLETED — my-booking.html created | May 6, 2026 |
 | Confirmation page after booking/payment | ✅ COMPLETED — redirects from form + Stripe | May 6, 2026 |
@@ -261,6 +304,7 @@ git push
 | Weekly payroll system with auto-generation | ✅ COMPLETED — Runs every Saturday | May 2026 |
 | Instant booking page for Foam Party | ✅ COMPLETED — instant-book.html | May 2026 |
 | Staff Requirements Editor | ✅ Already existed in Catalogue | May 2026 |
+| Slot-based Staff Assignment UI | ✅ COMPLETED — Visual slot cards with one-click assignment | May 2026 |
 | Staff checklist buttons not clickable | ✅ Fixed — double-quoted JSON.stringify args inside HTML attributes broke onclick | Mar 2026 |
 | Autopilot email scheduler | ✅ Built — `automations.js`, configurable rules, template variables | Mar 2026 |
 | Per-booking email log | ✅ Built — shows in booking modal, logged to `email_log` table | Mar 2026 |
@@ -275,22 +319,7 @@ git push
 
 ### 🔴 High Priority — Missing Core Features
 
-**1. Staff assignment UI in admin**
-Backend is ready in `staff-assignments.js`. Need UI in booking detail modal to:
-- Show required skill slots for this booking
-- Assign staff to each slot
-- Change assignment status (interested → assigned)
-- Unassign staff
-
-**2. Generate Invoice from Booking Data**
-Create PDF invoice generation:
-- Pull booking details (service, addons, deposit, balance)
-- Include Joe's business info (EIN, address, contact)
-- Professional invoice template with itemization
-- Download directly from admin or client confirmation page
-- Store generated invoices for record-keeping
-
-**3. Enhanced COI Request System**
+**1. Enhanced COI Request System**
 Currently the "Request Insurance Certificate" button just shows an alert. Enhance to:
 - Send email notification to Joe when requested from confirmation/my-booking pages
 - Log COI request in database with timestamp and client details
@@ -298,25 +327,25 @@ Currently the "Request Insurance Certificate" button just shows an alert. Enhanc
 
 ### 🟡 Medium Priority
 
-**7. Staff feedback loop**
+**2. Staff feedback loop**
 - Joe can leave per-gig notes visible to that staff member (`shared_notes` pattern, per-assignment)
 - Google Review linking — manually associate a review URL with a booking/staff member
 - Bonus tracking — flag when a staff member gets a review mention, track bonus credits
 
-**8. Staff dual notes**
+**3. Staff dual notes**
 Staff records currently have `admin_notes` (private) and `staff_notes` (staff → Joe) and `shared_notes` (Joe → staff, already built). Make `shared_notes` editable by both admin and staff in their respective portals.
 
-**9. Staffing warning on dashboard**
+**4. Staffing warning on dashboard**
 Flag bookings within 14 days that have `confirmed` status but no assigned staff. Show a warning badge on the dashboard.
 
-**10. Dashboard overhaul — Task Summary widget**
+**5. Dashboard overhaul — Task Summary widget**
 Inspired by PPM's Task Manager. Replace or supplement the "Recent Bookings" panel with an action-oriented task summary showing counts of:
 - Bookings needing review (status = `review`)
 - Deposits not yet sent (status = `pending`, no `stripe_payment_link`)
 - Gigs within 14 days with no assigned staff
 Each item should be a clickable badge that deep-links to the relevant filtered view.
 
-**11. Dashboard overhaul — KPI Stat Tiles**
+**6. Dashboard overhaul — KPI Stat Tiles**
 Inspired by PPM's Business Stats section. Add 4 stat tiles below the task summary:
 - Total Booking Value (month-to-date + YTD)
 - Average Price / Event
@@ -324,30 +353,30 @@ Inspired by PPM's Business Stats section. Add 4 stat tiles below the task summar
 - Confirmed Bookings
 All computable from the existing `bookings` table. Include % change vs prior month if feasible.
 
-**12. Dashboard overhaul — Upcoming Events sidebar**
+**7. Dashboard overhaul — Upcoming Events sidebar**
 Inspired by PPM's right-column event feed. Show the next 10 upcoming confirmed events in chronological order with: date, client name, service name, and colored staff initials badges for assigned staff. Clicking an event opens the booking modal.
 
-**13. Booking change log / audit trail**
+**8. Booking change log / audit trail**
 Track every field change on a booking — what changed, old value, new value, when. Show in booking modal Activity tab (PPM has a "Changes" sub-tab for this). Add a `booking_changes` table.
 
-**14. "Total staff required" counter in booking modal**
+**9. "Total staff required" counter in booking modal**
 Staffing section should show: X Still to Allocate / X Awaiting / X Confirmed — matching PPM's staffing summary UI.
 
 ### 🟢 Lower Priority / Future
 
-**12. SMS notifications**
+**10. SMS notifications**
 Twilio — add branch in `_email.js` notify logic. All other code is ready for it.
 
-**13. Refunds**
+**11. Refunds**
 Not implemented — would add to `booking.js` as a POST action calling Stripe refund API.
 
-**14. Google Review linking**
+**12. Google Review linking**
 Manual process — admin links a Google review URL to a booking. No automatic API sync available from Google.
 
-**15. Export for accounting**
+**13. Export for accounting**
 Expand the CSV export with: staff fees, expenses, profit per gig. Or add a separate "Financial Export" with invoice-level detail.
 
-**16. Codebase packaging for friends**
+**14. Codebase packaging for friends**
 Once the platform is solid, package for Joe's friends in similar entertainment businesses. They run their own servers — Joe helps with setup only.
 
 ---

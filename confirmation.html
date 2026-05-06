@@ -276,7 +276,7 @@
           </a>
           <button onclick="requestInvoice()" class="download-btn">
             <div class="download-icon">🧾</div>
-            <div class="download-label">Request Invoice</div>
+            <div class="download-label">Download Invoice</div>
           </button>
           <button onclick="requestCOI()" class="download-btn">
             <div class="download-icon">🛡️</div>
@@ -429,9 +429,9 @@
     async function requestInvoice() {
       if (!currentBooking) return;
       
-      alert(`Invoice request sent! We'll email your invoice to ${currentBooking.client_email} within 24 hours.`);
-      
-      // TODO: Could add an API endpoint to log this request and send Joe an email
+      // Download invoice PDF directly
+      const invoiceUrl = `/api/generate-invoice/${currentBooking.reference}`;
+      window.location.href = invoiceUrl;
     }
 
     async function requestCOI() {
