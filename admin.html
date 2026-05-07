@@ -1194,6 +1194,13 @@ function openBooking(id) {
       <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:#9ca3af;margin-bottom:10px">📋 Activity</div>
       <div id="activity-log-${b.id}"><div style="color:#9ca3af;font-size:.8rem">Loading…</div></div>
     </div>
+    <div style="margin-top:18px;border-top:1px solid #e5e7eb;padding-top:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:#9ca3af">⭐ Google Reviews</div>
+        <button class="btn btn-outline btn-sm" onclick="addGoogleReview('${b.id}')">+ Link Review</button>
+      </div>
+      <div id="reviews-${b.id}"><div style="color:#9ca3af;font-size:.8rem">Loading…</div></div>
+    </div>
   ` : ''}
   `;
 
@@ -1203,6 +1210,7 @@ function openBooking(id) {
   if (currentUser?.role === 'admin') {
     loadStaffAssignments(b.id);
     loadCOIRequests(b.id);
+    loadGoogleReviews(b.id);
     // Email log
     const logContainer = document.getElementById('email-log-' + b.id);
     if (logContainer) loadBookingEmailLog(b.id, logContainer);
@@ -3266,6 +3274,155 @@ async function markCOIFulfilled(requestId, bookingId) {
   } catch(e) {
     console.error('Mark COI fulfilled error:', e);
     alert('Failed to mark COI as fulfilled. Please try again.');
+  }
+}
+
+// ══════════════════════════════════════════════════
+// GOOGLE REVIEWS & STAFF FEEDBACK
+// ══════════════════════════════════════════════════
+
+async function loadGoogleReviews(bookingId) {
+  const container = document.getElementById(`reviews-${bookingId}`);
+  if (!container) return;
+
+  try {
+    const res = await fetch(`/api/staff-feedback/reviews?booking_id=${bookingId}`);
+    const data = await res.json();
+    
+    if (!data.reviews || data.reviews.length === 0) {
+      container.innerHTML = '<p style="color:#9ca3af;font-size:.8rem;font-style:italic">No reviews linked yet</p>';
+      return;
+    }
+
+    const reviewsHtml = data.reviews.map(review => {
+      const reviewDate = review.review_date 
+        ? new Date(review.review_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        : 'Date not set';
+      
+      const stars = review.rating ? '⭐'.repeat(review.rating) : '';
+      const staffList = (review.staff_mentioned || []).length > 0 
+        ? review.staff_mentioned.join(', ')
+        : 'None mentioned';
+      
+      return `
+        <div style="padding:10px;background:#f9fafb;border-radius:6px;margin-bottom:8px;border-left:4px solid ${review.bonuses_awarded ? '#10b981' : '#f59e0b'}">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div>
+              <strong style="color:#374151">${stars} ${reviewDate}</strong>
+              ${review.bonuses_awarded ? '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:4px;font-size:.7rem;margin-left:8px">Bonuses Awarded</span>' : ''}
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="editReview('${review.id}')" style="font-size:.75rem;padding:4px 10px">Edit</button>
+          </div>
+          <div style="font-size:.78rem;color:#6b7280;line-height:1.5">
+            ${review.client_name ? `<div><strong>Client:</strong> ${esc(review.client_name)}</div>` : ''}
+            <div><strong>Staff mentioned:</strong> ${esc(staffList)}</div>
+            ${review.review_text ? `<div style="margin-top:6px;font-style:italic">"${esc(review.review_text.substring(0, 200))}${review.review_text.length > 200 ? '...' : ''}"</div>` : ''}
+            <div style="margin-top:6px"><a href="${esc(review.review_url)}" target="_blank" style="color:#7c3aed;text-decoration:underline">View Review →</a></div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    container.innerHTML = reviewsHtml;
+  } catch(e) {
+    console.error('Load reviews error:', e);
+    container.innerHTML = '<p style="color:#f87171;font-size:.8rem">Failed to load reviews</p>';
+  }
+}
+
+function addGoogleReview(bookingId) {
+  const reviewUrl = prompt('Enter Google Review URL:');
+  if (!reviewUrl) return;
+
+  const reviewDate = prompt('Review date (YYYY-MM-DD):');
+  const rating = prompt('Rating (1-5):');
+  const clientName = prompt('Client name (optional):');
+  const reviewText = prompt('Review excerpt (optional):');
+  const staffMentioned = prompt('Staff mentioned (comma-separated names):');
+
+  const staffArray = staffMentioned ? staffMentioned.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  fetch('/api/staff-feedback/reviews', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      booking_id: parseInt(bookingId),
+      review_url: reviewUrl,
+      review_date: reviewDate || null,
+      rating: rating ? parseInt(rating) : null,
+      client_name: clientName || '',
+      review_text: reviewText || '',
+      staff_mentioned: staffArray
+    })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      loadGoogleReviews(bookingId);
+      if (staffArray.length > 0) {
+        if (confirm(`Award bonuses for staff mentioned: ${staffArray.join(', ')}?`)) {
+          awardReviewBonuses(data.review.id, bookingId, staffArray);
+        }
+      }
+    } else {
+      throw new Error(data.error || 'Failed to add review');
+    }
+  })
+  .catch(e => {
+    console.error('Add review error:', e);
+    alert('Failed to add review. Please try again.');
+  });
+}
+
+function editReview(reviewId) {
+  alert('Review editing UI coming soon. For now, use browser console to PATCH /api/staff-feedback/reviews/' + reviewId);
+}
+
+async function awardReviewBonuses(reviewId, bookingId, staffNames) {
+  try {
+    // Find staff IDs from names
+    const staffIds = [];
+    for (const name of staffNames) {
+      const staff = allStaff.find(s => 
+        (s.preferred_name && s.preferred_name.toLowerCase().includes(name.toLowerCase())) ||
+        s.name.toLowerCase().includes(name.toLowerCase())
+      );
+      if (staff) staffIds.push(staff.id);
+    }
+
+    if (staffIds.length === 0) {
+      alert('Could not find matching staff members');
+      return;
+    }
+
+    // Award $10 bonus to each mentioned staff
+    for (const staffId of staffIds) {
+      await fetch('/api/staff-feedback/bonuses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          staff_id: staffId,
+          booking_id: bookingId,
+          review_id: reviewId,
+          bonus_type: 'review_mention',
+          amount: 10.00,
+          reason: 'Mentioned in Google Review'
+        })
+      });
+    }
+
+    // Mark review as bonuses awarded
+    await fetch(`/api/staff-feedback/reviews/${reviewId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bonuses_awarded: true })
+    });
+
+    alert(`Awarded $10 bonuses to ${staffIds.length} staff member(s)`);
+    loadGoogleReviews(bookingId);
+  } catch(e) {
+    console.error('Award bonuses error:', e);
+    alert('Failed to award bonuses');
   }
 }
 

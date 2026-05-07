@@ -1,5 +1,5 @@
 # Funky Monkey Events — Admin Platform Instructions
-*Last updated: May 6, 2026 — Added COI request system with email notifications*
+*Last updated: May 6, 2026 — Added Staff Feedback Loop system*
 
 ---
 
@@ -50,6 +50,7 @@ Funky Monkey Events is a booking + operations platform for Joe Coover's entertai
     ├── payroll-scheduled.js            ← NEW: Auto-generate payroll every Saturday midnight
     ├── generate-invoice.js             ← NEW: PDF invoice generation (pdf-lib)
     ├── coi-request.js                  ← NEW: Certificate of Insurance request tracking & notification
+    ├── staff-feedback.js               ← NEW: Per-gig feedback, Google Review linking, bonus tracking
     ├── create-stripe-link.js           ← Generates Stripe Checkout Session (redirects to confirmation.html)
     └── stripe-webhook.js               ← Handles checkout.session.completed → confirms booking
 ```
@@ -71,6 +72,7 @@ Funky Monkey Events is a booking + operations platform for Joe Coover's entertai
 | `/api/generate-invoice/:id` | `generate-invoice.js` |
 | `/api/coi-request` | `coi-request.js` |
 | `/api/coi-request/:id` | `coi-request.js` |
+| `/api/staff-feedback/*` | `staff-feedback.js` |
 | `/api/create-stripe-link` | `create-stripe-link.js` |
 | `/api/stripe-webhook` | `stripe-webhook.js` |
 
@@ -126,6 +128,15 @@ Individual payments within a run: `id`, `payroll_run_id`, `staff_payment_id`, `s
 
 ### `coi_requests` table
 Certificate of Insurance request tracking: `id`, `booking_id`, `requested_at`, `requested_by_email`, `requested_from` (confirmation_page/my_booking_page), `fulfilled`, `fulfilled_at`, `notes`, `created_at`
+
+### `assignment_feedback` table
+Per-gig admin feedback to staff: `id`, `assignment_id`, `booking_id`, `staff_id`, `admin_notes`, `visible_to_staff`, `created_at`, `updated_at`
+
+### `google_reviews` table
+Google Review tracking: `id`, `booking_id`, `review_url`, `review_date`, `rating` (1-5), `review_text`, `client_name`, `staff_mentioned` (TEXT[]), `bonuses_awarded`, `notes`, `created_at`, `updated_at`
+
+### `staff_bonuses` table
+Bonus tracking: `id`, `staff_id`, `booking_id`, `review_id`, `bonus_type`, `amount`, `reason`, `awarded_at`, `paid`, `paid_at`, `payroll_run_id`, `created_at`
 
 All tables use `ensureTable()` / `ensureTables()` with auto-migration on first use.
 
@@ -299,6 +310,7 @@ git push
 
 | Feature | Status | Date |
 |---|---|---|
+| Staff Feedback Loop | ✅ COMPLETED — Per-gig notes, Google Review linking, automatic bonus tracking | May 6, 2026 |
 | Enhanced COI Request System | ✅ COMPLETED — Logs requests to DB, emails Joe, tracks fulfillment in admin | May 6, 2026 |
 | PDF Invoice Generator | ✅ COMPLETED — Auto-generates professional invoices with Joe's business info | May 6, 2026 |
 | W-9, Invoice, COI download buttons | ✅ COMPLETED — confirmation.html created | May 6, 2026 |
@@ -330,25 +342,20 @@ git push
 
 ### 🟡 Medium Priority
 
-**1. Staff feedback loop**
-- Joe can leave per-gig notes visible to that staff member (`shared_notes` pattern, per-assignment)
-- Google Review linking — manually associate a review URL with a booking/staff member
-- Bonus tracking — flag when a staff member gets a review mention, track bonus credits
-
-**2. Staff dual notes**
+**1. Staff dual notes**
 Staff records currently have `admin_notes` (private) and `staff_notes` (staff → Joe) and `shared_notes` (Joe → staff, already built). Make `shared_notes` editable by both admin and staff in their respective portals.
 
-**3. Staffing warning on dashboard**
+**2. Staffing warning on dashboard**
 Flag bookings within 14 days that have `confirmed` status but no assigned staff. Show a warning badge on the dashboard.
 
-**4. Dashboard overhaul — Task Summary widget**
+**3. Dashboard overhaul — Task Summary widget**
 Inspired by PPM's Task Manager. Replace or supplement the "Recent Bookings" panel with an action-oriented task summary showing counts of:
 - Bookings needing review (status = `review`)
 - Deposits not yet sent (status = `pending`, no `stripe_payment_link`)
 - Gigs within 14 days with no assigned staff
 Each item should be a clickable badge that deep-links to the relevant filtered view.
 
-**5. Dashboard overhaul — KPI Stat Tiles**
+**4. Dashboard overhaul — KPI Stat Tiles**
 Inspired by PPM's Business Stats section. Add 4 stat tiles below the task summary:
 - Total Booking Value (month-to-date + YTD)
 - Average Price / Event
@@ -356,30 +363,27 @@ Inspired by PPM's Business Stats section. Add 4 stat tiles below the task summar
 - Confirmed Bookings
 All computable from the existing `bookings` table. Include % change vs prior month if feasible.
 
-**6. Dashboard overhaul — Upcoming Events sidebar**
+**5. Dashboard overhaul — Upcoming Events sidebar**
 Inspired by PPM's right-column event feed. Show the next 10 upcoming confirmed events in chronological order with: date, client name, service name, and colored staff initials badges for assigned staff. Clicking an event opens the booking modal.
 
-**7. Booking change log / audit trail**
+**6. Booking change log / audit trail**
 Track every field change on a booking — what changed, old value, new value, when. Show in booking modal Activity tab (PPM has a "Changes" sub-tab for this). Add a `booking_changes` table.
 
-**8. "Total staff required" counter in booking modal**
+**7. "Total staff required" counter in booking modal**
 Staffing section should show: X Still to Allocate / X Awaiting / X Confirmed — matching PPM's staffing summary UI.
 
 ### 🟢 Lower Priority / Future
 
-**9. SMS notifications**
+**8. SMS notifications**
 Twilio — add branch in `_email.js` notify logic. All other code is ready for it.
 
-**10. Refunds**
+**9. Refunds**
 Not implemented — would add to `booking.js` as a POST action calling Stripe refund API.
 
-**11. Google Review linking**
-Manual process — admin links a Google review URL to a booking. No automatic API sync available from Google.
-
-**12. Export for accounting**
+**10. Export for accounting**
 Expand the CSV export with: staff fees, expenses, profit per gig. Or add a separate "Financial Export" with invoice-level detail.
 
-**13. Codebase packaging for friends**
+**11. Codebase packaging for friends**
 Once the platform is solid, package for Joe's friends in similar entertainment businesses. They run their own servers — Joe helps with setup only.
 
 ---
