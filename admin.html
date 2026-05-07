@@ -1178,6 +1178,11 @@ function openBooking(id) {
       <button class="btn btn-outline btn-sm" onclick="toggleContract('${b.id}')">
         ${b.contract_signed?'📝 Contract Signed ✓':'📝 Mark Contract Signed'}
       </button>
+      ${b.deposit_paid || b.stripe_payment_intent_id ? `
+      <button class="btn btn-outline btn-sm" onclick="processRefund('${b.id}')" style="color:#dc2626;border-color:#dc2626">
+        💸 Process Refund
+      </button>
+      ` : ''}
       <button class="btn btn-danger btn-sm" onclick="confirmDelete('${b.id}')">🗑 Delete</button>
     </div>
 
@@ -1734,6 +1739,98 @@ async function toggleContract(id) {
     b.contract_signed = newVal;
     openBooking(id); // re-render modal with updated state
   } catch(e) { alert('Failed to update contract: ' + e.message); }
+}
+
+// ── Process Refund ────────────────────────────────────────────────────────────
+async function processRefund(bookingId) {
+  const booking = allBookings.find(b => b.id === parseInt(bookingId));
+  if (!booking) {
+    alert('Booking not found');
+    return;
+  }
+
+  // Build refund options
+  const depositAmount = Number(booking.deposit_amount || 0);
+  const totalPrice = Number(booking.total_price || 0);
+  const balanceDue = Number(booking.balance_due || 0);
+
+  let message = `Process refund for ${booking.client_name}?\n\n`;
+  message += `Booking: ${booking.service_name} on ${booking.event_date}\n`;
+  message += `Total Price: $${totalPrice.toFixed(2)}\n`;
+  message += `Deposit: $${depositAmount.toFixed(2)}\n`;
+  message += `Balance Due: $${balanceDue.toFixed(2)}\n\n`;
+  message += `Choose refund type:\n`;
+  message += `1 = Deposit only ($${depositAmount.toFixed(2)})\n`;
+  message += `2 = Full refund ($${totalPrice.toFixed(2)})\n`;
+  message += `3 = Custom amount`;
+
+  const choice = prompt(message);
+  if (!choice) return;
+
+  let refundAmount;
+  let refundType;
+  let reason;
+
+  if (choice === '1') {
+    refundAmount = depositAmount;
+    refundType = 'deposit';
+    reason = prompt('Reason for deposit refund (optional):') || 'Deposit refund';
+  } else if (choice === '2') {
+    refundAmount = totalPrice;
+    refundType = 'full';
+    reason = prompt('Reason for full refund (optional):') || 'Full refund';
+  } else if (choice === '3') {
+    const customAmount = prompt(`Enter refund amount (max $${totalPrice.toFixed(2)}):`);
+    if (!customAmount) return;
+    refundAmount = parseFloat(customAmount);
+    
+    if (isNaN(refundAmount) || refundAmount <= 0 || refundAmount > totalPrice) {
+      alert('Invalid amount');
+      return;
+    }
+    
+    refundType = 'partial';
+    reason = prompt('Reason for refund (optional):') || 'Partial refund';
+  } else {
+    alert('Invalid choice');
+    return;
+  }
+
+  // Confirm refund
+  const confirmMsg = `Confirm refund of $${refundAmount.toFixed(2)}?\n\n`;
+  const confirmDetails = booking.stripe_payment_intent_id 
+    ? 'This will process through Stripe (funds return in 5-10 business days)'
+    : 'This is a MANUAL payment - you must process the refund outside the system (check, Venmo, etc.)';
+  
+  if (!confirm(confirmMsg + confirmDetails)) return;
+
+  try {
+    const res = await fetch('/api/refund', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        booking_id: bookingId,
+        amount: refundAmount,
+        reason: reason,
+        refund_type: refundType
+      })
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+      alert(`✓ Refund of $${refundAmount.toFixed(2)} processed successfully!\n\n${data.message}`);
+      
+      // Reload booking to show updated status
+      await loadBookings();
+      closeModal();
+    } else {
+      throw new Error(data.error || 'Refund failed');
+    }
+  } catch(e) {
+    console.error('Refund error:', e);
+    alert('Failed to process refund: ' + e.message);
+  }
 }
 
 async function confirmDelete(id) {

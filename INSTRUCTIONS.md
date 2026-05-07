@@ -13,6 +13,7 @@ You are a senior full-stack developer who knows this codebase deeply. Always rea
 - **Database:** PostgreSQL via `pg` npm package (`DATABASE_URL` env var) — hosted on Neon
 - **Payments:** Stripe (Checkout Sessions for deposits, webhook for confirmation)
 - **Email:** Resend API (`RESEND_API_KEY` env var) — sending from `bookings@funkymonkeyevents.com`
+- **SMS:** Twilio API (optional, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`)
 - **Auth:** Password (admin) or 4-digit PIN (staff) — checked in `auth.js`
 - **Config:** `netlify.toml`, `package.json`
 
@@ -38,6 +39,7 @@ Funky Monkey Events is a booking + operations platform for Joe Coover's entertai
 ├── package.json                        ← Dependencies (pg, pdf-lib)
 └── netlify/functions/
     ├── _email.js                       ← SHARED: sendEmail, wrap, render, logEmail, fireStatusAutomations
+    ├── _sms.js                         ← SHARED: sendSMS, renderSMS, logSMS, notify (email+SMS unified)
     ├── auth.js                         ← Login: checks ADMIN_PASSWORD, then staff PINs
     ├── bookings.js                     ← GET all bookings / POST new booking + AUTO-NOTIFY STAFF
     ├── booking.js                      ← PATCH (status + STRIPE FIX + AUTO-NOTIFY) / DELETE
@@ -51,6 +53,7 @@ Funky Monkey Events is a booking + operations platform for Joe Coover's entertai
     ├── generate-invoice.js             ← NEW: PDF invoice generation (pdf-lib)
     ├── coi-request.js                  ← NEW: Certificate of Insurance request tracking & notification
     ├── staff-feedback.js               ← NEW: Per-gig feedback, Google Review linking, bonus tracking
+    ├── refund.js                       ← NEW: Stripe refund processing + manual refund tracking
     ├── create-stripe-link.js           ← Generates Stripe Checkout Session (redirects to confirmation.html)
     └── stripe-webhook.js               ← Handles checkout.session.completed → confirms booking
 ```
@@ -128,6 +131,12 @@ Individual payments within a run: `id`, `payroll_run_id`, `staff_payment_id`, `s
 
 ### `coi_requests` table
 Certificate of Insurance request tracking: `id`, `booking_id`, `requested_at`, `requested_by_email`, `requested_from` (confirmation_page/my_booking_page), `fulfilled`, `fulfilled_at`, `notes`, `created_at`
+
+### `sms_log` table
+SMS message tracking: `id`, `booking_id`, `rule_id`, `trigger_label`, `recipient_phone`, `recipient_label`, `message_preview`, `sent_at`
+
+### `refunds` table
+Refund tracking: `id`, `booking_id`, `stripe_refund_id`, `amount`, `reason`, `status` (pending/succeeded/failed/manual), `refunded_by`, `created_at`, `processed_at`
 
 ### `assignment_feedback` table
 Per-gig admin feedback to staff: `id`, `assignment_id`, `booking_id`, `staff_id`, `admin_notes`, `visible_to_staff`, `created_at`, `updated_at`
@@ -310,6 +319,14 @@ git push
 
 | Feature | Status | Date |
 |---|---|---|
+| Refunds system | ✅ COMPLETED — Stripe API integration + manual refund tracking, deposit/full/custom amounts | May 6, 2026 |
+| SMS notifications | ✅ COMPLETED — Twilio integration ready, awaiting credentials | May 6, 2026 |
+| Staff required counter in booking modal | ✅ COMPLETED — Shows "X Still Needed / X Interested / X of Y Assigned" with color-coded badges | May 6, 2026 |
+| Booking change log / audit trail | ✅ COMPLETED — Activity tab tracks status, payments, contract, notes with timestamps | May 6, 2026 |
+| Dashboard staffing warnings | ✅ COMPLETED — Shows unstaffed gigs within 14 days with staff badges in upcoming events | May 6, 2026 |
+| Dashboard KPI tiles | ✅ COMPLETED — MTD revenue, YTD, avg price, needs review, confirmed count | May 6, 2026 |
+| Dashboard action needed | ✅ COMPLETED — Needs review, no deposit link, staffing warnings with expandable details | May 6, 2026 |
+| Staff dual notes | ✅ COMPLETED — Shared notes editable by both admin and staff in their portals | May 6, 2026 |
 | Staff Feedback Loop | ✅ COMPLETED — Per-gig notes, Google Review linking, automatic bonus tracking | May 6, 2026 |
 | Enhanced COI Request System | ✅ COMPLETED — Logs requests to DB, emails Joe, tracks fulfillment in admin | May 6, 2026 |
 | PDF Invoice Generator | ✅ COMPLETED — Auto-generates professional invoices with Joe's business info | May 6, 2026 |
@@ -338,52 +355,24 @@ git push
 
 ### 🔴 High Priority — Missing Core Features
 
-(No high-priority features — all core features complete!)
+**NONE — ALL CORE FEATURES COMPLETE!** 🎉
 
 ### 🟡 Medium Priority
 
-**1. Staff dual notes**
-Staff records currently have `admin_notes` (private) and `staff_notes` (staff → Joe) and `shared_notes` (Joe → staff, already built). Make `shared_notes` editable by both admin and staff in their respective portals.
-
-**2. Staffing warning on dashboard**
-Flag bookings within 14 days that have `confirmed` status but no assigned staff. Show a warning badge on the dashboard.
-
-**3. Dashboard overhaul — Task Summary widget**
-Inspired by PPM's Task Manager. Replace or supplement the "Recent Bookings" panel with an action-oriented task summary showing counts of:
-- Bookings needing review (status = `review`)
-- Deposits not yet sent (status = `pending`, no `stripe_payment_link`)
-- Gigs within 14 days with no assigned staff
-Each item should be a clickable badge that deep-links to the relevant filtered view.
-
-**4. Dashboard overhaul — KPI Stat Tiles**
-Inspired by PPM's Business Stats section. Add 4 stat tiles below the task summary:
-- Total Booking Value (month-to-date + YTD)
-- Average Price / Event
-- Inquiries (new bookings in review)
-- Confirmed Bookings
-All computable from the existing `bookings` table. Include % change vs prior month if feasible.
-
-**5. Dashboard overhaul — Upcoming Events sidebar**
-Inspired by PPM's right-column event feed. Show the next 10 upcoming confirmed events in chronological order with: date, client name, service name, and colored staff initials badges for assigned staff. Clicking an event opens the booking modal.
-
-**6. Booking change log / audit trail**
-Track every field change on a booking — what changed, old value, new value, when. Show in booking modal Activity tab (PPM has a "Changes" sub-tab for this). Add a `booking_changes` table.
-
-**7. "Total staff required" counter in booking modal**
-Staffing section should show: X Still to Allocate / X Awaiting / X Confirmed — matching PPM's staffing summary UI.
+**NONE — ALL MEDIUM PRIORITY FEATURES COMPLETE!** 🎉
 
 ### 🟢 Lower Priority / Future
 
-**8. SMS notifications**
-Twilio — add branch in `_email.js` notify logic. All other code is ready for it.
+**1. SMS notifications** ✅ CODE READY
+Complete SMS system built with Twilio integration. Ready to deploy once credentials added to Netlify environment variables. See `SMS_IMPLEMENTATION_GUIDE.md` and `SMS_INTEGRATION_EXAMPLE.md` for full details.
 
-**9. Refunds**
-Not implemented — would add to `booking.js` as a POST action calling Stripe refund API.
+**2. Refunds** ✅ CODE READY
+Complete Stripe refund system with deposit/full/custom amount support. Handles both Stripe payments (automatic) and manual payments (logged). See `REFUNDS_SYSTEM_GUIDE.md` for full details.
 
-**10. Export for accounting**
+**3. Export for accounting**
 Expand the CSV export with: staff fees, expenses, profit per gig. Or add a separate "Financial Export" with invoice-level detail.
 
-**11. Codebase packaging for friends**
+**4. Codebase packaging for friends**
 Once the platform is solid, package for Joe's friends in similar entertainment businesses. They run their own servers — Joe helps with setup only.
 
 ---
