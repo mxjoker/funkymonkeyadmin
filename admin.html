@@ -1087,6 +1087,14 @@ function openBooking(id) {
       </div>
     </div>
 
+    <!-- COI Requests -->
+    <div style="background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <strong style="font-size:.875rem">🛡️ Certificate of Insurance</strong>
+      </div>
+      <div id="coi-requests-${b.id}" style="font-size:.85rem;color:#6b7280">Loading...</div>
+    </div>
+
     <!-- Admin notes -->
     <div class="notes-block">
       <span class="section-label">Admin Notes <span class="text-muted">(internal only)</span></span>
@@ -1194,6 +1202,7 @@ function openBooking(id) {
   // Load staff assignments after modal renders (admin only)
   if (currentUser?.role === 'admin') {
     loadStaffAssignments(b.id);
+    loadCOIRequests(b.id);
     // Email log
     const logContainer = document.getElementById('email-log-' + b.id);
     if (logContainer) loadBookingEmailLog(b.id, logContainer);
@@ -3185,6 +3194,79 @@ async function runScheduledNow() {
     await loadAutomations();
   } catch(e) { alert('Error: ' + e.message); }
   btn.disabled = false; btn.textContent = '▶ Run Scheduled Now';
+}
+
+// ══════════════════════════════════════════════════
+// COI REQUESTS
+// ══════════════════════════════════════════════════
+async function loadCOIRequests(bookingId) {
+  const container = document.getElementById(`coi-requests-${bookingId}`);
+  if (!container) return;
+
+  try {
+    const res = await fetch(`/api/coi-request/${bookingId}`);
+    const data = await res.json();
+    
+    if (!data.requests || data.requests.length === 0) {
+      container.innerHTML = '<p style="color:#9ca3af;font-size:.8rem;font-style:italic">No COI requests yet</p>';
+      return;
+    }
+
+    const requestsHtml = data.requests.map(req => {
+      const requestedDate = new Date(req.requested_at).toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      });
+      
+      return `
+        <div style="padding:10px;background:${req.fulfilled ? '#f0fdf4' : '#fef3c7'};border-radius:6px;margin-bottom:8px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div>
+              <strong style="color:#374151">${req.fulfilled ? '✅ Fulfilled' : '⏳ Pending'}</strong>
+              <span style="color:#6b7280;font-size:.75rem;margin-left:8px">${requestedDate}</span>
+            </div>
+            ${!req.fulfilled ? `
+              <button class="btn btn-success btn-sm" onclick="markCOIFulfilled('${req.id}', '${bookingId}')" style="font-size:.75rem;padding:4px 10px">
+                Mark Fulfilled
+              </button>
+            ` : ''}
+          </div>
+          <div style="font-size:.78rem;color:#6b7280">
+            Requested by: ${esc(req.requested_by_email)}<br>
+            From: ${req.requested_from === 'confirmation_page' ? 'Confirmation Page' : req.requested_from === 'my_booking_page' ? 'My Booking Page' : req.requested_from}
+          </div>
+          ${req.notes ? `<div style="margin-top:6px;font-size:.78rem;color:#374151;font-style:italic">${esc(req.notes)}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    container.innerHTML = requestsHtml;
+  } catch(e) {
+    console.error('Load COI requests error:', e);
+    container.innerHTML = '<p style="color:#f87171;font-size:.8rem">Failed to load COI requests</p>';
+  }
+}
+
+async function markCOIFulfilled(requestId, bookingId) {
+  try {
+    const res = await fetch(`/api/coi-request/${requestId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fulfilled: true })
+    });
+
+    const data = await res.json();
+    
+    if (data.success) {
+      // Reload the COI requests
+      await loadCOIRequests(bookingId);
+    } else {
+      throw new Error(data.error || 'Failed to update');
+    }
+  } catch(e) {
+    console.error('Mark COI fulfilled error:', e);
+    alert('Failed to mark COI as fulfilled. Please try again.');
+  }
 }
 
 // ══════════════════════════════════════════════════

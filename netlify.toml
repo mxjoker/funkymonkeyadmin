@@ -74,6 +74,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/coi-request/:id"
+  to = "/.netlify/functions/coi-request/:id"
+  status = 200
+
+[[redirects]]
+  from = "/api/coi-request"
+  to = "/.netlify/functions/coi-request"
+  status = 200
+
+[[redirects]]
   from = "/staff"
   to = "/staff-portal.html"
   status = 200

@@ -437,9 +437,28 @@
     async function requestCOI() {
       if (!currentBooking) return;
       
-      alert(`Certificate of Insurance request sent! We'll email your COI to ${currentBooking.client_email} within 24 hours.`);
-      
-      // TODO: Could add an API endpoint to log this request and send Joe an email
+      try {
+        const res = await fetch('/api/coi-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            booking_id: currentBooking.id,
+            requested_by_email: currentBooking.client_email,
+            requested_from: 'confirmation_page'
+          })
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          alert(`✅ Certificate of Insurance request sent!\n\nWe'll email your COI to ${currentBooking.client_email} within 24 hours.\n\nReference: ${currentBooking.reference}`);
+        } else {
+          throw new Error(data.error || 'Request failed');
+        }
+      } catch(e) {
+        console.error('COI request error:', e);
+        alert('❌ Failed to send COI request. Please contact us at (405) 431-6625.');
+      }
     }
 
     function esc(str) {
