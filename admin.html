@@ -346,19 +346,68 @@ input,select,textarea{font-family:inherit}
     <div class="page" id="page-bookings">
       <div class="page-hdr">
         <h1>All Bookings</h1>
-        <div class="filter-bar">
-          <button class="btn btn-outline btn-sm" onclick="exportBookingsCSV()" style="margin-right:8px">⬇ Export CSV</button>
-          <select id="filter-status" onchange="renderBookingsTable()">
-            <option value="">All Statuses</option>
-            <option value="review">Review</option>
-            <option value="pending">Pending</option>
-            <option value="confirmed">Confirmed</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-          <input type="text" id="filter-search" placeholder="Search name, ref…" oninput="renderBookingsTable()" style="width:180px"/>
+        <button class="btn btn-outline btn-sm" onclick="exportBookingsCSV()">⬇ Export CSV</button>
+      </div>
+      
+      <!-- Enhanced Filter Bar -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-body" style="padding:16px">
+          <!-- Row 1: Primary Filters -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <input type="text" id="filter-search" placeholder="🔍 Search name, ref, service..." oninput="renderBookingsTable()" style="flex:1;min-width:200px;max-width:300px"/>
+            
+            <select id="filter-status" onchange="renderBookingsTable()" style="min-width:140px">
+              <option value="">All Statuses</option>
+              <option value="review">Review</option>
+              <option value="pending">Pending</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+            
+            <select id="filter-date-range" onchange="renderBookingsTable()" style="min-width:140px">
+              <option value="all">All Events</option>
+              <option value="upcoming">Upcoming</option>
+              <option value="past">Past Events</option>
+              <option value="this-month">This Month</option>
+              <option value="next-month">Next Month</option>
+            </select>
+            
+            <select id="filter-deposit" onchange="renderBookingsTable()" style="min-width:140px">
+              <option value="">All Deposits</option>
+              <option value="paid">Paid</option>
+              <option value="unpaid">Unpaid</option>
+            </select>
+            
+            <select id="sort-by" onchange="renderBookingsTable()" style="min-width:160px">
+              <option value="created_desc">Sort: Newest Inquiry</option>
+              <option value="created_asc">Sort: Oldest Inquiry</option>
+              <option value="event_desc">Sort: Event (Latest)</option>
+              <option value="event_asc">Sort: Event (Soonest)</option>
+              <option value="name_asc">Sort: Client A-Z</option>
+              <option value="price_desc">Sort: Price (High-Low)</option>
+              <option value="price_asc">Sort: Price (Low-High)</option>
+            </select>
+          </div>
+          
+          <!-- Row 2: Quick Toggle Filters -->
+          <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:.9rem">
+            <label style="display:flex;align-items:center;cursor:pointer;user-select:none">
+              <input type="checkbox" id="filter-hide-past" onchange="renderBookingsTable()" checked style="margin-right:6px"/>
+              <span>Hide Past Events</span>
+            </label>
+            <label style="display:flex;align-items:center;cursor:pointer;user-select:none">
+              <input type="checkbox" id="filter-hide-cancelled" onchange="renderBookingsTable()" style="margin-right:6px"/>
+              <span>Hide Cancelled</span>
+            </label>
+            <label style="display:flex;align-items:center;cursor:pointer;user-select:none">
+              <input type="checkbox" id="filter-hide-completed" onchange="renderBookingsTable()" style="margin-right:6px"/>
+              <span>Hide Completed</span>
+            </label>
+          </div>
         </div>
       </div>
+      
       <div class="card">
         <table>
           <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th><th></th></tr></thead>
@@ -1023,17 +1072,84 @@ function exportBookingsCSV() {
 }
 
 function renderBookingsTable() {
+  // Get all filter values
   const statusFilter = document.getElementById('filter-status').value;
   const search = (document.getElementById('filter-search').value || '').toLowerCase().trim();
+  const dateRange = document.getElementById('filter-date-range').value;
+  const depositFilter = document.getElementById('filter-deposit').value;
+  const sortBy = document.getElementById('sort-by').value;
+  const hidePast = document.getElementById('filter-hide-past').checked;
+  const hideCancelled = document.getElementById('filter-hide-cancelled').checked;
+  const hideCompleted = document.getElementById('filter-hide-completed').checked;
+
+  const today = new Date().toISOString().split('T')[0];
+  const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+  const thisMonthEnd = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().split('T')[0];
+  const nextMonthStart = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString().split('T')[0];
+  const nextMonthEnd = new Date(new Date().getFullYear(), new Date().getMonth() + 2, 0).toISOString().split('T')[0];
 
   let list = allBookings;
-  if (statusFilter) list = list.filter(b => b.status === statusFilter);
-  if (search) list = list.filter(b =>
-    (b.client_name||'').toLowerCase().includes(search) ||
-    (b.reference||'').toLowerCase().includes(search) ||
-    (b.service_name||'').toLowerCase().includes(search)
-  );
 
+  // Apply filters
+  if (statusFilter) {
+    list = list.filter(b => b.status === statusFilter);
+  }
+  
+  if (search) {
+    list = list.filter(b =>
+      (b.client_name||'').toLowerCase().includes(search) ||
+      (b.reference||'').toLowerCase().includes(search) ||
+      (b.service_name||'').toLowerCase().includes(search)
+    );
+  }
+  
+  // Date range filter
+  if (dateRange === 'upcoming') {
+    list = list.filter(b => b.event_date && b.event_date >= today);
+  } else if (dateRange === 'past') {
+    list = list.filter(b => b.event_date && b.event_date < today);
+  } else if (dateRange === 'this-month') {
+    list = list.filter(b => b.event_date && b.event_date >= thisMonthStart && b.event_date <= thisMonthEnd);
+  } else if (dateRange === 'next-month') {
+    list = list.filter(b => b.event_date && b.event_date >= nextMonthStart && b.event_date <= nextMonthEnd);
+  }
+  
+  // Deposit filter
+  if (depositFilter === 'paid') {
+    list = list.filter(b => b.deposit_paid === true);
+  } else if (depositFilter === 'unpaid') {
+    list = list.filter(b => b.deposit_paid !== true);
+  }
+  
+  // Quick toggle filters
+  if (hidePast) {
+    list = list.filter(b => !b.event_date || b.event_date >= today);
+  }
+  if (hideCancelled) {
+    list = list.filter(b => b.status !== 'cancelled');
+  }
+  if (hideCompleted) {
+    list = list.filter(b => b.status !== 'completed');
+  }
+
+  // Apply sorting
+  if (sortBy === 'created_desc') {
+    list.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  } else if (sortBy === 'created_asc') {
+    list.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+  } else if (sortBy === 'event_desc') {
+    list.sort((a, b) => (b.event_date || '').localeCompare(a.event_date || ''));
+  } else if (sortBy === 'event_asc') {
+    list.sort((a, b) => (a.event_date || '').localeCompare(b.event_date || ''));
+  } else if (sortBy === 'name_asc') {
+    list.sort((a, b) => (a.client_name || '').localeCompare(b.client_name || ''));
+  } else if (sortBy === 'price_desc') {
+    list.sort((a, b) => (Number(b.total_price) || 0) - (Number(a.total_price) || 0));
+  } else if (sortBy === 'price_asc') {
+    list.sort((a, b) => (Number(a.total_price) || 0) - (Number(b.total_price) || 0));
+  }
+
+  // Render results
   document.getElementById('bookings-tbody').innerHTML = list.length
     ? list.map(b => bookingRow(b, true)).join('')
     : `<tr><td colspan="7" class="table-empty">No bookings match your filters</td></tr>`;

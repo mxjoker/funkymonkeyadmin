@@ -319,7 +319,9 @@ git push
 
 | Feature | Status | Date |
 |---|---|---|
-| Database indexes | ✅ READY — 27 critical indexes for 10-50x query speedup (run migration: /api/add-indexes) | May 7, 2026 |
+| Bookings filters & sorting | ✅ COMPLETED — 8 filters + 7 sort options, hide past/cancelled/completed toggles, defaults to newest inquiry | May 7, 2026 |
+| Historical data import | ✅ COMPLETED — 635 bookings imported from Party Enquiry Tracker CSV, old references preserved | May 7, 2026 |
+| Database indexes | ✅ DEPLOYED — 27 critical indexes for 10-50x query speedup, 22 created successfully | May 7, 2026 |
 | Database connection pattern fix | ✅ FIXED — Migrated booking.js, client.js, stripe-webhook.js from Client to Pool pattern | May 7, 2026 |
 | Refunds system | ✅ COMPLETED — Stripe API integration + manual refund tracking, deposit/full/custom amounts | May 6, 2026 |
 | SMS notifications | ✅ COMPLETED — Twilio integration ready, awaiting credentials | May 6, 2026 |
