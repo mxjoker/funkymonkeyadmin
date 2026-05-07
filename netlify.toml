@@ -94,6 +94,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/add-indexes"
+  to = "/.netlify/functions/add-indexes"
+  status = 200
+
+[[redirects]]
   from = "/api/staff-feedback/*"
   to = "/.netlify/functions/staff-feedback/:splat"
   status = 200
