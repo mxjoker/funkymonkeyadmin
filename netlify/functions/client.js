@@ -1,6 +1,9 @@
-const { Client } = require("pg");
+const { Pool } = require("pg");
 
-const db = () => new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 const FROM   = "Funky Monkey Events <bookings@funkymonkeyevents.com>";
 const NOTIFY = process.env.NOTIFY_EMAIL || "Joe.Coover@gmail.com";
 const SITE   = process.env.SITE_URL || "https://funkymonkeyadmin.netlify.app";
@@ -104,9 +107,8 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers: h, body: JSON.stringify({ error: "Valid email required — got: " + JSON.stringify(email) + " path: " + event.path }) };
   }
 
-  const c = db();
+  const c = await pool.connect();
   try {
-    await c.connect();
     if (!tablesReady) {
       await ensureTables(c);
       tablesReady = true;
@@ -238,6 +240,6 @@ exports.handler = async (event) => {
     console.error("client.js error:", e.message);
     return { statusCode: 500, headers: h, body: JSON.stringify({ error: e.message }) };
   } finally {
-    await c.end();
+    c.release();
   }
 };

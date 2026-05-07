@@ -1,8 +1,11 @@
-const { Client } = require("pg");
+const { Pool } = require("pg");
 const crypto = require("crypto");
 const { sendEmail, wrap, logEmail, logChange, ensureEmailLog, ensureBookingChanges } = require('./_email');
 
-const db = () => new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 const NOTIFY = process.env.NOTIFY_EMAIL || "Joe.Coover@gmail.com";
 
 const verifySig = (payload, sigHeader, secret) => {
@@ -30,9 +33,8 @@ exports.handler = async (event) => {
   try { ev = JSON.parse(event.body); }
   catch(e) { return { statusCode: 400, headers: h, body: JSON.stringify({ error: "Invalid JSON" }) }; }
 
-  const c = db();
+  const c = await pool.connect();
   try {
-    await c.connect();
     await ensureEmailLog(c);
     await ensureBookingChanges(c);
 
@@ -160,5 +162,7 @@ exports.handler = async (event) => {
   } catch(e) {
     console.error("Webhook error:", e);
     return { statusCode: 500, headers: h, body: JSON.stringify({ error: e.message }) };
-  } finally { await c.end(); }
+  } finally {
+    c.release();
+  }
 };

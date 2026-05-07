@@ -319,6 +319,7 @@ git push
 
 | Feature | Status | Date |
 |---|---|---|
+| Database connection pattern fix | ✅ FIXED — Migrated booking.js, client.js, stripe-webhook.js from Client to Pool pattern | May 7, 2026 |
 | Refunds system | ✅ COMPLETED — Stripe API integration + manual refund tracking, deposit/full/custom amounts | May 6, 2026 |
 | SMS notifications | ✅ COMPLETED — Twilio integration ready, awaiting credentials | May 6, 2026 |
 | Staff required counter in booking modal | ✅ COMPLETED — Shows "X Still Needed / X Interested / X of Y Assigned" with color-coded badges | May 6, 2026 |
@@ -389,8 +390,18 @@ Once the platform is solid, package for Joe's friends in similar entertainment b
 
 ## 🏗️ KEY PATTERNS
 
-### Netlify Function Pattern
+### Netlify Function Pattern (Database Connections)
+**CRITICAL:** Always use Pool pattern, never Client pattern in Netlify Functions.
+
 ```javascript
+const { Pool } = require('pg');
+
+// Create pool at module level (reused across invocations)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -399,6 +410,7 @@ exports.handler = async (event, context) => {
   };
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
 
+  // Get connection from pool
   const client = await pool.connect();
   try {
     await ensureTable(client);
@@ -407,10 +419,12 @@ exports.handler = async (event, context) => {
     console.error('Function error:', err.message);
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
   } finally {
-    client.release();
+    client.release(); // ✅ Return to pool, NOT .end()
   }
 };
 ```
+
+**Why Pool?** Serverless functions reuse Lambda instances. Pool maintains reusable connections. Client.end() permanently closes connections → crashes on next invocation.
 
 ### PATCH endpoints — use colMap pattern
 Only update fields explicitly provided. See `booking.js` `colMap` for reference.

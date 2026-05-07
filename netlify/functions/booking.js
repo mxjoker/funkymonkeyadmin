@@ -1,8 +1,11 @@
-const { Client } = require("pg");
+const { Pool } = require("pg");
 const { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
 
-const db = () => new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 const SITE = "https://funkymonkeyadmin.netlify.app";
 
 // ── Stripe Checkout Session ───────────────────────────────────────────────────
@@ -58,9 +61,8 @@ exports.handler = async (event) => {
   const id = event.path.split("/").pop();
   if (!id || isNaN(parseInt(id))) return { statusCode: 400, headers: h, body: JSON.stringify({ error: "Invalid ID" }) };
 
-  const c = db();
+  const c = await pool.connect();
   try {
-    await c.connect();
     await ensureEmailLog(c);
     await ensureBookingChanges(c);
 
@@ -203,6 +205,6 @@ exports.handler = async (event) => {
     console.error("booking.js error:", e.message);
     return { statusCode: 500, headers: h, body: JSON.stringify({ error: e.message }) };
   } finally {
-    await c.end();
+    c.release();
   }
 };
