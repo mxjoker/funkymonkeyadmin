@@ -99,6 +99,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/import-bookings"
+  to = "/.netlify/functions/import-bookings"
+  status = 200
+
+[[redirects]]
   from = "/api/staff-feedback/*"
   to = "/.netlify/functions/staff-feedback/:splat"
   status = 200
