@@ -536,8 +536,14 @@ exports.handler = async (event) => {
       // Auto-calculate schedule times immediately on assignment
       await autoCalcTimes(client, assignment.id, parseInt(booking_id));
 
+      // Re-fetch assignment to get the freshly calculated times for the email
+      const { rows: [freshAssignment] } = await client.query(
+        'SELECT * FROM staff_assignments WHERE id=$1', [assignment.id]
+      );
+      const fa = freshAssignment || assignment;
+
       // Notify the assigned staff member
-      const { rows: staffRows } = await client.query('SELECT * FROM staff WHERE id=$1', [parseInt(staff_id)]);
+      const { rows: staffRows }   = await client.query('SELECT * FROM staff WHERE id=$1', [parseInt(staff_id)]);
       const { rows: bookingRows } = await client.query('SELECT * FROM bookings WHERE id=$1', [parseInt(booking_id)]);
       const s = staffRows[0];
       const b = bookingRows[0];
@@ -547,21 +553,87 @@ exports.handler = async (event) => {
           ? new Date(b.event_date + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
           : 'TBD';
 
+        // Build schedule block for email
+        const toStr = m => {
+          const h = Math.floor(((m % 1440) + 1440) % 1440 / 60);
+          const mn = ((m % 1440) + 1440) % 1440 % 60;
+          const ampm = h >= 12 ? 'PM' : 'AM';
+          return `${((h % 12) || 12)}:${String(mn).padStart(2,'0')} ${ampm}`;
+        };
+        const toMins = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+
+        let scheduleHtml = '';
+        if (fa.schedule_start && fa.drive_minutes_each_way != null) {
+          const load   = fa.load_minutes          || 30;
+          const setup  = fa.unload_minutes         || 45;
+          const drive  = fa.drive_minutes_each_way;
+          const pack   = fa.pack_out_minutes       || 20;
+          const homeUn = fa.home_unload_minutes    || 15;
+          const total  = fa.total_minutes;
+          const rawH   = total / 60;
+          const paidH  = Math.max(5, rawH).toFixed(2);
+
+          const loadTime    = toMins(fa.schedule_start);
+          const departTime  = loadTime + load;
+          const arriveTime  = departTime + drive;
+          const showTime    = arriveTime + setup;
+
+          scheduleHtml = `
+            <div style="margin-top:16px;background:#0A0720;border-radius:12px;padding:16px;border:1px solid #2D1B69">
+              <div style="font-size:11px;text-transform:uppercase;font-weight:700;color:#A78BCA;letter-spacing:.08em;margin-bottom:12px">⏱ Your Schedule</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+                <div style="background:#1A1035;border-radius:8px;padding:10px;text-align:center">
+                  <div style="font-size:10px;color:#A78BCA;text-transform:uppercase;margin-bottom:3px">📦 Load Up</div>
+                  <div style="font-size:15px;font-weight:900;color:#FFD600">${toStr(loadTime)}</div>
+                  <div style="font-size:10px;color:#6b5b95">${load} min</div>
+                </div>
+                <div style="background:#1A1035;border-radius:8px;padding:10px;text-align:center">
+                  <div style="font-size:10px;color:#A78BCA;text-transform:uppercase;margin-bottom:3px">🚗 Depart</div>
+                  <div style="font-size:15px;font-weight:900;color:#60A5FA">${toStr(departTime)}</div>
+                  <div style="font-size:10px;color:#6b5b95">${drive} min drive + gas</div>
+                </div>
+                <div style="background:#1A1035;border-radius:8px;padding:10px;text-align:center">
+                  <div style="font-size:10px;color:#A78BCA;text-transform:uppercase;margin-bottom:3px">📍 Arrive Venue</div>
+                  <div style="font-size:15px;font-weight:900;color:#F59E0B">${toStr(arriveTime)}</div>
+                  <div style="font-size:10px;color:#6b5b95">${setup} min setup</div>
+                </div>
+                <div style="background:#1A1035;border-radius:8px;padding:10px;text-align:center">
+                  <div style="font-size:10px;color:#A78BCA;text-transform:uppercase;margin-bottom:3px">🎪 Show Starts</div>
+                  <div style="font-size:15px;font-weight:900;color:#10B981">${toStr(showTime)}</div>
+                  <div style="font-size:10px;color:#6b5b95">Event time</div>
+                </div>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;background:#1A1035;border-radius:8px;padding:10px 14px">
+                <div style="font-size:11px;color:#A78BCA">Pack-out: <strong style="color:#F3E8FF">${pack} min</strong> &nbsp;·&nbsp; Home unload: <strong style="color:#F3E8FF">${homeUn} min</strong></div>
+                <div style="text-align:right">
+                  <div style="font-size:10px;color:#A78BCA;text-transform:uppercase">Paid Hours</div>
+                  <div style="font-size:14px;font-weight:900;color:#FFD600">${paidH}h${parseFloat(paidH) > rawH ? ' <span style="font-size:9px">(5h min)</span>' : ''}</div>
+                </div>
+              </div>
+            </div>`;
+        } else {
+          scheduleHtml = `
+            <div style="margin-top:16px;background:#1A1035;border-radius:8px;padding:12px;border:1px solid #2D1B69;font-size:12px;color:#A78BCA;text-align:center">
+              Schedule times will be available once the event ZIP is confirmed. Check your portal for updates.
+            </div>`;
+        }
+
         await notify({
           to_email: s.email,
           to_name: s.preferred_name || s.name,
           subject: `✅ You're booked! ${b.service_name} on ${dateStr}`,
           html: wrap(`
             <p style="font-size:16px;margin-bottom:16px">Hi <strong>${s.preferred_name || s.name}</strong>! 🎉</p>
-            <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">You've been assigned to a gig! Log into your portal to see the full details.</p>
-            <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
+            <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">You've been assigned to a gig! Here are your details and call times.</p>
+            <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:4px">
               <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</span><br><span style="font-weight:600">${b.service_name}</span></div>
-              <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date & Time</span><br><span style="font-weight:600">${dateStr}${b.event_time?' at '+b.event_time:''}</span></div>
-              <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Area</span><br><span style="font-weight:600">${b.event_zip || 'OKC'}${b.event_location?' — '+b.event_location:''}</span></div>
+              <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Event Date</span><br><span style="font-weight:600">${dateStr}${b.event_time ? ' at ' + b.event_time : ''}</span></div>
+              <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Area</span><br><span style="font-weight:600">${b.event_zip || 'OKC'}${b.event_location ? ' — ' + b.event_location : ''}</span></div>
               <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Your Role</span><br><span style="color:#FFD600;font-weight:700">${tag_filled}</span></div>
             </div>
-            <div style="text-align:center;margin-bottom:20px">
-              <a href="${SITE}/admin.html" style="background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">View Gig Details →</a>
+            ${scheduleHtml}
+            <div style="text-align:center;margin-top:20px;margin-bottom:20px">
+              <a href="${SITE}/admin.html" style="background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">View Full Gig Details →</a>
             </div>
             <p style="font-size:12px;color:#A78BCA;text-align:center">Questions? Contact Joe at <a href="tel:4054316625" style="color:#06B6D4">(405) 431-6625</a></p>
           `)
