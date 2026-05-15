@@ -501,8 +501,16 @@ input,select,textarea{font-family:inherit}
     <div class="page" id="page-payroll">
       <div class="page-hdr">
         <h1>💰 Payroll</h1>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-primary btn-sm" onclick="generatePayroll()">Generate This Week's Payroll</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:8px;padding:6px 10px">
+            <label style="font-size:.75rem;color:#6b7280;font-weight:600;white-space:nowrap">FROM</label>
+            <input type="date" id="payroll-date-from" style="border:none;background:transparent;font-size:.82rem;color:#1e1b4b;font-weight:600;outline:none"/>
+            <label style="font-size:.75rem;color:#6b7280;font-weight:600;white-space:nowrap">TO</label>
+            <input type="date" id="payroll-date-to" style="border:none;background:transparent;font-size:.82rem;color:#1e1b4b;font-weight:600;outline:none"/>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="setPayrollRange('week')" title="Current week (Mon–Sun)">This Week</button>
+          <button class="btn btn-outline btn-sm" onclick="setPayrollRange('month')" title="Current month">This Month</button>
+          <button class="btn btn-primary btn-sm" onclick="generatePayroll()">Generate Payroll</button>
         </div>
       </div>
       <!-- Current Week Summary -->
@@ -1652,7 +1660,148 @@ function renderAssignmentCard(a, payByStaff, bookingId, slotTag = null) {
       </div>
       ${surveyHtml}
       ${payHtml}
+      ${a.status === 'assigned' ? renderScheduleBlock(a, bookingId) : ''}
     </div>`;
+}
+
+function renderScheduleBlock(a, bookingId) {
+  const aid = a.id;
+  const load   = a.load_minutes           ?? 30;
+  const setup  = a.unload_minutes          ?? 45;
+  const pack   = a.pack_out_minutes        ?? 20;
+  const homeUn = a.home_unload_minutes     ?? 15;
+  const drive  = a.drive_minutes_each_way  ?? '—';
+  const total  = a.total_minutes;
+  const schedStart = a.schedule_start;
+
+  // Format total + pay preview
+  let totalLabel = '—';
+  let minApplied = false;
+  if (total) {
+    const rawH = total / 60;
+    const paidH = Math.max(5, rawH);
+    minApplied = paidH > rawH;
+    totalLabel = `${paidH.toFixed(2)}h paid${minApplied ? ' <span style="color:#f59e0b;font-size:.7rem">(5h min)</span>' : ''}`;
+  }
+
+  // Build schedule timeline if we have schedule_start
+  let timelineHtml = '';
+  if (schedStart && a.drive_minutes_each_way != null) {
+    const toMins = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+    const toStr  = m => { const h = Math.floor(((m%1440)+1440)%1440/60); const mn = ((m%1440)+1440)%1440%60; const ampm = h>=12?'PM':'AM'; return `${((h%12)||12)}:${String(mn).padStart(2,'0')} ${ampm}`; };
+    const loadStart  = schedStart;
+    const depart     = toMins(schedStart) + load;
+    const arriveVenue= depart + drive;
+    const eventStart = arriveVenue + setup;
+    const packStart  = eventStart; // pack starts after party (party mins = duration, tracked separately)
+    timelineHtml = `
+      <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:8px;font-size:.73rem">
+        <span style="background:#ede9fe;color:#7c3aed;border-radius:6px;padding:2px 7px;font-weight:700">📦 Load ${toStr(toMins(schedStart))}</span>
+        <span style="color:#9ca3af">→</span>
+        <span style="background:#dbeafe;color:#1d4ed8;border-radius:6px;padding:2px 7px;font-weight:700">🚗 Depart ${toStr(depart)}</span>
+        <span style="color:#9ca3af">→</span>
+        <span style="background:#fef3c7;color:#92400e;border-radius:6px;padding:2px 7px;font-weight:700">📍 Arrive ${toStr(arriveVenue)}</span>
+        <span style="color:#9ca3af">→</span>
+        <span style="background:#f0fdf4;color:#166534;border-radius:6px;padding:2px 7px;font-weight:700">🎪 Show ${toStr(eventStart)}</span>
+      </div>`;
+  }
+
+  return `
+    <div style="margin-top:10px;border-top:1px dashed #e5e7eb;padding-top:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:#6b7280;letter-spacing:.04em">⏱ Gig Schedule</span>
+        <button onclick="toggleScheduleEdit('${aid}','${bookingId}')"
+          style="font-size:.7rem;color:#7c3aed;background:none;border:none;cursor:pointer;font-weight:700;padding:0">✏️ Edit</button>
+      </div>
+      ${timelineHtml}
+      <div id="sched-view-${aid}" style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:8px;font-size:.75rem">
+        <div style="background:#f9fafb;border-radius:6px;padding:5px 7px;text-align:center">
+          <div style="color:#6b7280;font-size:.65rem;margin-bottom:1px">LOAD</div>
+          <div style="font-weight:700">${load} min</div>
+        </div>
+        <div style="background:#f9fafb;border-radius:6px;padding:5px 7px;text-align:center">
+          <div style="color:#6b7280;font-size:.65rem;margin-bottom:1px">DRIVE EA. WAY</div>
+          <div style="font-weight:700">${drive === '—' ? '—' : drive + ' min'}</div>
+        </div>
+        <div style="background:#f9fafb;border-radius:6px;padding:5px 7px;text-align:center">
+          <div style="color:#6b7280;font-size:.65rem;margin-bottom:1px">SETUP</div>
+          <div style="font-weight:700">${setup} min</div>
+        </div>
+        <div style="background:#f9fafb;border-radius:6px;padding:5px 7px;text-align:center">
+          <div style="color:#6b7280;font-size:.65rem;margin-bottom:1px">PACK-OUT</div>
+          <div style="font-weight:700">${pack} min</div>
+        </div>
+        <div style="background:#f9fafb;border-radius:6px;padding:5px 7px;text-align:center">
+          <div style="color:#6b7280;font-size:.65rem;margin-bottom:1px">HOME UNLOAD</div>
+          <div style="font-weight:700">${homeUn} min</div>
+        </div>
+        <div style="background:#ede9fe;border-radius:6px;padding:5px 7px;text-align:center">
+          <div style="color:#6b7280;font-size:.65rem;margin-bottom:1px">TOTAL PAID</div>
+          <div style="font-weight:700;color:#7c3aed">${totalLabel}</div>
+        </div>
+      </div>
+      <!-- Edit form (hidden by default) -->
+      <div id="sched-edit-${aid}" style="display:none;margin-top:10px;background:#f3f4f6;border-radius:8px;padding:10px">
+        <div style="font-size:.72rem;font-weight:700;color:#374151;margin-bottom:8px">Override Time Blocks for This Gig</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.78rem">
+          <label>Load (min)<br>
+            <input type="number" id="se-load-${aid}" value="${load}" min="0"
+              style="width:100%;padding:4px 7px;border:1.5px solid #d1d5db;border-radius:6px;margin-top:2px;font-size:.82rem"/></label>
+          <label>Drive ea. way (min)<br>
+            <input type="number" id="se-drive-${aid}" value="${drive === '—' ? '' : drive}" min="0" placeholder="Auto"
+              style="width:100%;padding:4px 7px;border:1.5px solid #d1d5db;border-radius:6px;margin-top:2px;font-size:.82rem"/></label>
+          <label>Setup @ venue (min)<br>
+            <input type="number" id="se-setup-${aid}" value="${setup}" min="0"
+              style="width:100%;padding:4px 7px;border:1.5px solid #d1d5db;border-radius:6px;margin-top:2px;font-size:.82rem"/></label>
+          <label>Pack-out (min)<br>
+            <input type="number" id="se-pack-${aid}" value="${pack}" min="0"
+              style="width:100%;padding:4px 7px;border:1.5px solid #d1d5db;border-radius:6px;margin-top:2px;font-size:.82rem"/></label>
+          <label>Home Unload (min)<br>
+            <input type="number" id="se-homeun-${aid}" value="${homeUn}" min="0"
+              style="width:100%;padding:4px 7px;border:1.5px solid #d1d5db;border-radius:6px;margin-top:2px;font-size:.82rem"/></label>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-primary btn-sm" onclick="saveAssignmentTimes('${aid}','${bookingId}')">Save Times</button>
+          <button class="btn btn-outline btn-sm" onclick="toggleScheduleEdit('${aid}','${bookingId}')">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggleScheduleEdit(aid, bookingId) {
+  const view = document.getElementById('sched-view-' + aid);
+  const edit = document.getElementById('sched-edit-' + aid);
+  if (!view || !edit) return;
+  const isHidden = edit.style.display === 'none';
+  edit.style.display = isHidden ? 'block' : 'none';
+  view.style.display = isHidden ? 'none' : 'grid';
+}
+
+async function saveAssignmentTimes(aid, bookingId) {
+  const load  = parseInt(document.getElementById('se-load-'  + aid)?.value) || 0;
+  const drive = parseInt(document.getElementById('se-drive-' + aid)?.value) || null;
+  const setup = parseInt(document.getElementById('se-setup-' + aid)?.value) || 0;
+  const pack  = parseInt(document.getElementById('se-pack-'  + aid)?.value) || 0;
+  const homeUn= parseInt(document.getElementById('se-homeun-'+ aid)?.value) || 0;
+
+  // Find the booking's event_time and service duration for schedule_start calc
+  const booking = (allBookings || []).find(b => b.id === parseInt(bookingId));
+  const party   = booking?.duration_minutes || 60; // fallback
+
+  try {
+    await callApi('staff-assignments', 'POST', {
+      action: 'update_assignment_times',
+      assignment_id: parseInt(aid),
+      load_minutes: load,
+      drive_minutes_each_way: drive,
+      unload_minutes: setup,
+      pack_out_minutes: pack,
+      home_unload_minutes: homeUn,
+      party_minutes: party,
+      event_time: booking?.event_time || null
+    });
+    await loadStaffAssignments(bookingId);
+  } catch(e) { alert('Save failed: ' + e.message); }
 }
 
 // NEW: Quick assign function
@@ -2657,8 +2806,85 @@ function gigCard(g, isAssigned) {
       ${isAssigned&&g.client_phone?`<div>📞 <a href="tel:${g.client_phone}" style="color:#7c3aed">${esc(g.client_phone)}</a></div>`:''}
     </div>
     ${isAssigned&&g.client_notes?`<div style="margin-top:8px;font-size:.78rem;color:#6b7280;background:#f9fafb;border-radius:6px;padding:8px">${esc(g.client_notes)}</div>`:''}
+    ${isAssigned ? renderStaffScheduleBlock(g) : ''}
     ${checklistHtml}
   </div>`;
+}
+
+function renderStaffScheduleBlock(g) {
+  const load   = g.load_minutes           ?? 30;
+  const setup  = g.unload_minutes          ?? 45;
+  const drive  = g.drive_minutes_each_way;
+  const pack   = g.pack_out_minutes        ?? 20;
+  const homeUn = g.home_unload_minutes     ?? 15;
+  const total  = g.total_minutes;
+  const schedStart = g.schedule_start;
+
+  if (!load && !setup && !drive && !pack && !homeUn) return ''; // nothing to show yet
+
+  // Pay hours
+  let hoursLabel = '';
+  if (total) {
+    const rawH  = total / 60;
+    const paidH = Math.max(5, rawH);
+    hoursLabel = `${paidH.toFixed(2)}h${paidH > rawH ? ' <span style="color:#f59e0b;font-size:.68rem">(5h min)</span>' : ''}`;
+  }
+
+  // Timeline
+  let timelineHtml = '';
+  if (schedStart && drive != null) {
+    const toMins = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+    const toStr  = m => { const h = Math.floor(((m%1440)+1440)%1440/60); const mn = ((m%1440)+1440)%1440%60; const ampm = h>=12?'PM':'AM'; return `${((h%12)||12)}:${String(mn).padStart(2,'0')} ${ampm}`; };
+    const depart      = toMins(schedStart) + load;
+    const arriveVenue = depart + drive;
+    const eventStart  = arriveVenue + setup;
+    timelineHtml = `
+      <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:10px;font-size:.73rem">
+        <span style="background:#ede9fe;color:#7c3aed;border-radius:6px;padding:3px 8px;font-weight:700">📦 ${toStr(toMins(schedStart))}</span>
+        <span style="color:#9ca3af;font-size:.65rem">Load</span>
+        <span style="color:#9ca3af">→</span>
+        <span style="background:#dbeafe;color:#1d4ed8;border-radius:6px;padding:3px 8px;font-weight:700">🚗 ${toStr(depart)}</span>
+        <span style="color:#9ca3af;font-size:.65rem">Depart</span>
+        <span style="color:#9ca3af">→</span>
+        <span style="background:#fef3c7;color:#92400e;border-radius:6px;padding:3px 8px;font-weight:700">📍 ${toStr(arriveVenue)}</span>
+        <span style="color:#9ca3af;font-size:.65rem">Arrive</span>
+        <span style="color:#9ca3af">→</span>
+        <span style="background:#f0fdf4;color:#166534;border-radius:6px;padding:3px 8px;font-weight:700">🎪 ${toStr(eventStart)}</span>
+        <span style="color:#9ca3af;font-size:.65rem">Show starts</span>
+      </div>`;
+  }
+
+  return `
+    <div style="margin-top:10px;padding:10px;background:#f8f7ff;border:1px solid #ede9fe;border-radius:8px">
+      <div style="font-size:.7rem;font-weight:700;text-transform:uppercase;color:#7c3aed;letter-spacing:.05em;margin-bottom:8px">⏱ Your Schedule</div>
+      ${timelineHtml}
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;font-size:.73rem">
+        <div style="text-align:center;background:#fff;border-radius:6px;padding:4px">
+          <div style="color:#9ca3af;font-size:.62rem">LOAD</div>
+          <div style="font-weight:700">${load} min</div>
+        </div>
+        <div style="text-align:center;background:#fff;border-radius:6px;padding:4px">
+          <div style="color:#9ca3af;font-size:.62rem">DRIVE</div>
+          <div style="font-weight:700">${drive != null ? drive + ' min' : '—'}</div>
+        </div>
+        <div style="text-align:center;background:#fff;border-radius:6px;padding:4px">
+          <div style="color:#9ca3af;font-size:.62rem">SETUP</div>
+          <div style="font-weight:700">${setup} min</div>
+        </div>
+        <div style="text-align:center;background:#fff;border-radius:6px;padding:4px">
+          <div style="color:#9ca3af;font-size:.62rem">PACK-OUT</div>
+          <div style="font-weight:700">${pack} min</div>
+        </div>
+        <div style="text-align:center;background:#fff;border-radius:6px;padding:4px">
+          <div style="color:#9ca3af;font-size:.62rem">HOME UNLOAD</div>
+          <div style="font-weight:700">${homeUn} min</div>
+        </div>
+        ${hoursLabel ? `<div style="text-align:center;background:#ede9fe;border-radius:6px;padding:4px">
+          <div style="color:#9ca3af;font-size:.62rem">PAID HRS</div>
+          <div style="font-weight:700;color:#7c3aed">${hoursLabel}</div>
+        </div>` : ''}
+      </div>
+    </div>`;
 }
 
 function openGigCard(g) {
@@ -2882,19 +3108,23 @@ let catSlots = []; // service staff slot definitions
 let catSkillTags = []; // all known skill tags (loaded from DB or fallback)
 let catServiceAddons = {}; // { service_id: [addon_id, ...] }
 let catServiceEventTypes = {}; // { service_id: [event_type_id, ...] }
+let catTimeTemplates = {}; // { service_id: { load_minutes, unload_minutes, ... } }
 
 async function loadCatalogue() {
   document.getElementById('cat-loading').style.display = 'block';
   document.getElementById('cat-content').style.display = 'none';
   try {
-    const [svcRes, slotsRes] = await Promise.all([
+    const [svcRes, slotsRes, tmplRes] = await Promise.all([
       fetch('/api/services'),
-      fetch('/api/staff-assignments?service_slots=true')
+      fetch('/api/staff-assignments?service_slots=true'),
+      fetch('/api/staff-assignments?time_templates=true')
     ]);
     const data = await svcRes.json();
     catServices = data.services || [];
     catAddons   = data.addons   || [];
     catSlots    = (await slotsRes.json()).slots || [];
+    catTimeTemplates = {};
+    ((await tmplRes.json()).templates || []).forEach(t => { catTimeTemplates[t.service_id] = t; });
     catServiceAddons = data.service_addons || {};
     catServiceEventTypes = data.service_event_types || {};
     renderCatalogue();
@@ -3036,6 +3266,57 @@ function renderCatalogue() {
         </div>
       </div>
     </div>
+  </div>`;
+
+  // ── Time Templates section ────────────────────────────────────────────────
+  html += `<div class="cat-section" id="time-templates-section">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <h3>⏱ Gig Time Templates</h3>
+    </div>
+    <p class="text-muted" style="margin-bottom:14px;font-size:.82rem">
+      Set default time blocks per service. These drive total hours for payroll.
+      Drive time is auto-calculated from ZIP (73118 home base) + 15 min gas stop buffer.
+      <strong>Setup time</strong> = time between arriving at venue and event start.
+    </p>
+    <table class="cat-table" style="table-layout:fixed">
+      <thead><tr>
+        <th>Service</th>
+        <th style="width:90px;text-align:center">Load<br><span style="font-weight:400;font-size:.7rem;color:#6b7280">@ home (min)</span></th>
+        <th style="width:90px;text-align:center">Setup<br><span style="font-weight:400;font-size:.7rem;color:#6b7280">@ venue (min)</span></th>
+        <th style="width:90px;text-align:center">Pack-out<br><span style="font-weight:400;font-size:.7rem;color:#6b7280">@ venue (min)</span></th>
+        <th style="width:90px;text-align:center">Home Unload<br><span style="font-weight:400;font-size:.7rem;color:#6b7280">@ home (min)</span></th>
+        <th style="width:110px;text-align:center;color:#6b7280;font-style:italic">Drive (auto)</th>
+      </tr></thead>
+      <tbody>
+      ${catServices.map(s => {
+        const t = catTimeTemplates[s.service_id] || {};
+        const load    = t.load_minutes          ?? 30;
+        const unload  = t.unload_minutes         ?? 45;
+        const pack    = t.pack_out_minutes       ?? 20;
+        const homeUn  = t.home_unload_minutes    ?? 15;
+        return `<tr data-tmpl-svc="${esc(s.service_id)}">
+          <td style="font-weight:600">${esc(s.icon||'')} ${esc(s.name)}</td>
+          <td style="text-align:center">
+            <input type="number" class="tmpl-load" value="${load}" min="0" max="240"
+              style="width:60px;padding:4px;border:1.5px solid #e5e7eb;border-radius:6px;text-align:center;font-size:.85rem"/>
+          </td>
+          <td style="text-align:center">
+            <input type="number" class="tmpl-unload" value="${unload}" min="0" max="240"
+              style="width:60px;padding:4px;border:1.5px solid #e5e7eb;border-radius:6px;text-align:center;font-size:.85rem"/>
+          </td>
+          <td style="text-align:center">
+            <input type="number" class="tmpl-pack" value="${pack}" min="0" max="240"
+              style="width:60px;padding:4px;border:1.5px solid #e5e7eb;border-radius:6px;text-align:center;font-size:.85rem"/>
+          </td>
+          <td style="text-align:center">
+            <input type="number" class="tmpl-homeun" value="${homeUn}" min="0" max="240"
+              style="width:60px;padding:4px;border:1.5px solid #e5e7eb;border-radius:6px;text-align:center;font-size:.85rem"/>
+          </td>
+          <td style="text-align:center;color:#9ca3af;font-size:.8rem;font-style:italic">ZIP-based<br>+ 15 min buffer</td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table>
   </div>`;
 
   document.getElementById('cat-content').innerHTML = html;
@@ -3300,6 +3581,20 @@ async function saveCatalogue() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'service_event_types', service_id: serviceId, event_type_ids: etIds })
+      });
+    }
+
+    // Save time templates
+    for (const row of document.querySelectorAll('#time-templates-section tr[data-tmpl-svc]')) {
+      const service_id      = row.dataset.tmplSvc;
+      const load_minutes    = parseInt(row.querySelector('.tmpl-load')?.value)   || 30;
+      const unload_minutes  = parseInt(row.querySelector('.tmpl-unload')?.value) || 45;
+      const pack_out_minutes     = parseInt(row.querySelector('.tmpl-pack')?.value)   || 20;
+      const home_unload_minutes  = parseInt(row.querySelector('.tmpl-homeun')?.value) || 15;
+      await fetch('/api/staff-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save_time_template', service_id, load_minutes, unload_minutes, pack_out_minutes, home_unload_minutes })
       });
     }
 
@@ -3865,6 +4160,7 @@ function flash(id) {
 // ══════════════════════════════════════════════════
 
 async function loadPayroll() {
+  setPayrollRange('week'); // default date range to current week on load
   try {
     const [runsRes, unpaidRes] = await Promise.all([
       fetch('/api/payroll'),
@@ -3936,27 +4232,56 @@ async function loadPayroll() {
   }
 }
 
+function setPayrollRange(preset) {
+  const today = new Date();
+  let from, to;
+  if (preset === 'week') {
+    // Mon–Sun of current week
+    const day = today.getDay(); // 0=Sun
+    const mon = new Date(today); mon.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
+    const sun = new Date(mon);   sun.setDate(mon.getDate() + 6);
+    from = mon.toISOString().split('T')[0];
+    to   = sun.toISOString().split('T')[0];
+  } else {
+    // First–last of current month
+    from = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    to   = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+  }
+  document.getElementById('payroll-date-from').value = from;
+  document.getElementById('payroll-date-to').value   = to;
+}
+
 async function generatePayroll() {
-  if (!confirm('Generate payroll for the current week?')) return;
+  const dateFrom = document.getElementById('payroll-date-from')?.value;
+  const dateTo   = document.getElementById('payroll-date-to')?.value;
+
+  if (!dateFrom || !dateTo) {
+    alert('Please select a date range first.');
+    return;
+  }
+  if (dateFrom > dateTo) {
+    alert('Start date must be before end date.');
+    return;
+  }
+
+  if (!confirm(`Generate payroll for ${dateFrom} through ${dateTo}?`)) return;
 
   try {
-    const today = new Date();
-    const thisSunday = new Date(today);
-    thisSunday.setDate(today.getDate() + (7 - today.getDay()));
-
     const res = await fetch('/api/payroll', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'generate',
-        week_ending: thisSunday.toISOString().split('T')[0]
+        date_from: dateFrom,
+        date_to:   dateTo,
+        label: `${dateFrom} – ${dateTo}`
       })
     });
 
     const data = await res.json();
 
     if (res.ok && data.run) {
-      alert(`Payroll created! ${data.count} payments totaling $${Number(data.run.total_amount).toFixed(2)}`);
+      alert(`✅ Payroll created!\n${data.count} payment${data.count !== 1 ? 's' : ''} totaling $${Number(data.run.total_amount).toFixed(2)}\n(${data.assignments_found} gig assignment${data.assignments_found !== 1 ? 's' : ''} found)`);
       await loadPayroll();
     } else {
       alert(data.error || data.message || 'Generation failed');

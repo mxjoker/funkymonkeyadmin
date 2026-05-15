@@ -168,62 +168,251 @@ exports.handler = async (event) => {
       const body = JSON.parse(event.body || '{}');
       const action = body.action;
 
-      // action: generate - Create new payroll run for a given week
+      // action: generate - Create new payroll run for a date range
       if (action === 'generate') {
-        const { week_ending } = body;
-        if (!week_ending) {
-          return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'week_ending required' }) };
+        const { week_ending, date_from, date_to, label } = body;
+
+        // Support both legacy week_ending and new date_from/date_to range
+        let rangeStart, rangeEnd, runLabel;
+        if (date_from && date_to) {
+          rangeStart = date_from;
+          rangeEnd   = date_to;
+          runLabel   = label || `${date_from} – ${date_to}`;
+        } else if (week_ending) {
+          rangeEnd   = getSunday(week_ending);
+          rangeStart = getMonday(rangeEnd);
+          runLabel   = `Week ending ${rangeEnd}`;
+        } else {
+          return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'date_from + date_to or week_ending required' }) };
         }
 
-        const weekEnd = getSunday(week_ending);
-        const weekStart = getMonday(weekEnd);
-
-        // Check if run already exists for this week
+        // Check if run already exists for this exact range
         const { rows: existing } = await client.query(
-          'SELECT * FROM payroll_runs WHERE week_ending = $1',
-          [weekEnd]
+          'SELECT * FROM payroll_runs WHERE week_ending = $1', [rangeEnd]
         );
         if (existing.length > 0) {
-          return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'Payroll run already exists for this week', run: existing[0] }) };
+          return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'A payroll run already exists ending on this date', run: existing[0] }) };
         }
 
-        // Find all unpaid staff_payments where event_date is in this week
-        const { rows: unpaidPayments } = await client.query(`
-          SELECT sp.*, b.event_date, s.name as staff_name, s.preferred_name
-          FROM staff_payments sp
-          JOIN bookings b ON b.id = sp.booking_id
-          JOIN staff s ON s.id = sp.staff_id
-          WHERE sp.paid = false
+        // ── Step 1: Find all assigned staff on bookings in range, NOT already paid ──
+        const { rows: assignments } = await client.query(`
+          SELECT sa.id as assignment_id, sa.staff_id, sa.tag_filled,
+                 sa.load_minutes, sa.unload_minutes, sa.pack_out_minutes,
+                 sa.home_unload_minutes, sa.drive_minutes_each_way, sa.total_minutes,
+                 b.id as booking_id, b.reference, b.service_name, b.service_id,
+                 b.event_date, b.event_time, b.event_zip,
+                 s.name as staff_name, s.preferred_name,
+                 s.pay_type, s.flat_rate, s.hourly_rate
+          FROM staff_assignments sa
+          JOIN bookings b ON b.id = sa.booking_id
+          JOIN staff s ON s.id = sa.staff_id
+          -- Exclude gigs where this staff member is already paid
+          LEFT JOIN staff_payments sp_paid
+            ON sp_paid.booking_id = sa.booking_id
+            AND sp_paid.staff_id  = sa.staff_id
+            AND sp_paid.paid = true
+          WHERE sa.status = 'assigned'
             AND b.event_date >= $1
             AND b.event_date <= $2
+            AND b.status IN ('confirmed','completed')
+            AND sp_paid.id IS NULL
           ORDER BY s.id, b.event_date
-        `, [weekStart, weekEnd]);
+        `, [rangeStart, rangeEnd]);
 
-        if (unpaidPayments.length === 0) {
-          return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ message: 'No unpaid payments for this week', count: 0 }) };
+        if (assignments.length === 0) {
+          return { statusCode: 200, headers: HEADERS, body: JSON.stringify({
+            message: 'No unpaid assigned staff found for this date range',
+            date_from: rangeStart, date_to: rangeEnd, count: 0
+          }) };
         }
 
-        // Calculate total
-        const totalAmount = unpaidPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+        // ── Step 2: Load service time templates ──────────────────────────────
+        const { rows: templates } = await client.query(
+          'SELECT * FROM service_time_templates'
+        );
+        const templateMap = {};
+        templates.forEach(t => { templateMap[t.service_id] = t; });
 
-        // Create payroll run
+        // ── Step 3: Load service durations (party_minutes) ───────────────────
+        const { rows: services } = await client.query(
+          'SELECT service_id, duration_minutes FROM services'
+        );
+        const durationMap = {};
+        services.forEach(s => { durationMap[s.service_id] = s.duration_minutes || 60; });
+
+        // ── Step 4: Estimate drive time via straight-line ZIP distance ────────
+        // Uses a simple OKC-area ZIP→coords map for offline estimation.
+        // Falls back to 30 min if ZIP unknown.
+        const HOME_ZIP = '73118';
+        const zipCoords = {
+          '73099':{ lat:35.5176, lng:-97.7618 }, '73101':{ lat:35.4676, lng:-97.5164 },
+          '73102':{ lat:35.4714, lng:-97.5169 }, '73103':{ lat:35.4869, lng:-97.5245 },
+          '73104':{ lat:35.4781, lng:-97.5058 }, '73105':{ lat:35.4947, lng:-97.5112 },
+          '73106':{ lat:35.4875, lng:-97.5411 }, '73107':{ lat:35.4786, lng:-97.5631 },
+          '73108':{ lat:35.4531, lng:-97.5604 }, '73109':{ lat:35.4397, lng:-97.5245 },
+          '73110':{ lat:35.4631, lng:-97.4203 }, '73111':{ lat:35.5061, lng:-97.4913 },
+          '73112':{ lat:35.5008, lng:-97.5631 }, '73114':{ lat:35.5675, lng:-97.5245 },
+          '73115':{ lat:35.4275, lng:-97.4581 }, '73116':{ lat:35.5397, lng:-97.5631 },
+          '73117':{ lat:35.4841, lng:-97.4913 }, '73118':{ lat:35.5161, lng:-97.5411 },
+          '73119':{ lat:35.4231, lng:-97.5631 }, '73120':{ lat:35.5675, lng:-97.5831 },
+          '73121':{ lat:35.5008, lng:-97.4581 }, '73122':{ lat:35.5008, lng:-97.6031 },
+          '73127':{ lat:35.4786, lng:-97.6431 }, '73128':{ lat:35.4397, lng:-97.6431 },
+          '73129':{ lat:35.4231, lng:-97.4913 }, '73130':{ lat:35.4631, lng:-97.3803 },
+          '73131':{ lat:35.5397, lng:-97.4581 }, '73132':{ lat:35.5397, lng:-97.6231 },
+          '73134':{ lat:35.6097, lng:-97.5831 }, '73135':{ lat:35.3875, lng:-97.4581 },
+          '73139':{ lat:35.3875, lng:-97.5245 }, '73142':{ lat:35.6097, lng:-97.6231 },
+          '73149':{ lat:35.3875, lng:-97.4203 }, '73150':{ lat:35.4231, lng:-97.3803 },
+          '73159':{ lat:35.3875, lng:-97.6031 }, '73160':{ lat:35.3275, lng:-97.5245 },
+          '73162':{ lat:35.5675, lng:-97.6431 }, '73165':{ lat:35.3275, lng:-97.4203 },
+          '73169':{ lat:35.3875, lng:-97.6431 }, '73170':{ lat:35.3275, lng:-97.6031 },
+          '73179':{ lat:35.4397, lng:-97.6831 },
+          // Surrounding cities
+          '73003':{ lat:35.6597, lng:-97.4781 }, '73007':{ lat:35.6097, lng:-97.4203 },
+          '73008':{ lat:35.5397, lng:-97.6831 }, '73013':{ lat:35.6397, lng:-97.5631 },
+          '73020':{ lat:35.4631, lng:-97.2803 }, '73025':{ lat:35.6597, lng:-97.7418 },
+          '73026':{ lat:35.2275, lng:-97.4413 }, '73034':{ lat:35.6597, lng:-97.3803 },
+          '73044':{ lat:35.8597, lng:-97.4581 }, '73049':{ lat:35.4631, lng:-97.1803 },
+          '73051':{ lat:35.1275, lng:-97.3803 }, '73054':{ lat:35.6097, lng:-97.2803 },
+          '73059':{ lat:35.3275, lng:-97.8031 }, '73064':{ lat:35.4097, lng:-97.7618 },
+          '73066':{ lat:35.5397, lng:-97.2803 }, '73069':{ lat:35.2275, lng:-97.2803 },
+          '73071':{ lat:35.2275, lng:-97.4413 }, '73072':{ lat:35.2275, lng:-97.4413 },
+          '73073':{ lat:36.1597, lng:-97.5831 }, '73074':{ lat:34.9275, lng:-97.4413 },
+          '73078':{ lat:35.5675, lng:-97.7818 }, '73080':{ lat:35.2275, lng:-97.6031 },
+          '73084':{ lat:35.5397, lng:-97.3803 }, '73089':{ lat:35.3275, lng:-97.7218 },
+          '73093':{ lat:35.2275, lng:-97.5631 }, '73097':{ lat:35.3875, lng:-97.7218 },
+        };
+
+        function getDriveMins(destZip) {
+          const home = zipCoords[HOME_ZIP];
+          const dest = zipCoords[(destZip||'').toString().substring(0,5)];
+          if (!home || !dest) return 30; // fallback
+          // Haversine distance → assume 35 mph average → minutes
+          const R = 3958.8; // miles
+          const dLat = (dest.lat - home.lat) * Math.PI / 180;
+          const dLng = (dest.lng - home.lng) * Math.PI / 180;
+          const a = Math.sin(dLat/2)**2 + Math.cos(home.lat*Math.PI/180)*Math.cos(dest.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+          const miles = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          return Math.max(10, Math.round((miles / 35) * 60)) + 15; // min 10 min + 15 min gas stop buffer
+        }
+
+        // ── Step 5: Build payment records ────────────────────────────────────
+        const paymentsToCreate = [];
+
+        for (const a of assignments) {
+          // Check if a staff_payment already exists for this assignment
+          const { rows: existing } = await client.query(
+            'SELECT id FROM staff_payments WHERE booking_id=$1 AND staff_id=$2',
+            [a.booking_id, a.staff_id]
+          );
+
+          // Get time values — prefer assignment overrides, fall back to template
+          const tmpl = templateMap[a.service_id] || {};
+          const load    = a.load_minutes          ?? tmpl.load_minutes          ?? 30;
+          const unload  = a.unload_minutes         ?? tmpl.unload_minutes         ?? 15;
+          const pack    = a.pack_out_minutes       ?? tmpl.pack_out_minutes       ?? 20;
+          const homeUn  = a.home_unload_minutes    ?? tmpl.home_unload_minutes    ?? 15;
+          const drive   = a.drive_minutes_each_way ?? getDriveMins(a.event_zip);
+          const party   = durationMap[a.service_id] || 60;
+
+          // Total hours = load + drive_to + unload + party + pack_out + drive_home + home_unload
+          const totalMins = load + drive + unload + party + pack + drive + homeUn;
+          const rawHours = totalMins / 60;
+          const totalHours = Math.max(5, Math.round(rawHours * 100) / 100); // 5-hour minimum
+
+          // Calculate pay
+          const payType = a.pay_type || 'flat';
+          let amount;
+          if (payType === 'hourly') {
+            amount = Math.round(totalHours * (Number(a.hourly_rate) || 0) * 100) / 100;
+          } else {
+            // flat — use existing staff_payment amount if already set, else flat_rate default
+            amount = existing.length > 0 ? null : (Number(a.flat_rate) || 0);
+          }
+
+          paymentsToCreate.push({
+            existingId: existing[0]?.id || null,
+            staff_id:   a.staff_id,
+            booking_id: a.booking_id,
+            assignment_id: a.assignment_id,
+            reference:  a.reference,
+            service_name: a.service_name,
+            event_date: a.event_date,
+            pay_type:   payType,
+            raw_hours:  Math.round(rawHours * 100) / 100,
+            hours:      totalHours,
+            amount,
+            drive_minutes: drive,
+            total_minutes: totalMins,
+          });
+
+          // Auto-save calculated drive + total back to assignment
+          await client.query(`
+            UPDATE staff_assignments SET
+              drive_minutes_each_way = $1,
+              total_minutes = $2,
+              updated_at = NOW()
+            WHERE id = $3
+              AND (drive_minutes_each_way IS NULL OR total_minutes IS NULL)
+          `, [drive, totalMins, a.assignment_id]);
+        }
+
+        // ── Step 6: Create/update staff_payments ─────────────────────────────
+        const paymentIds = [];
+        for (const p of paymentsToCreate) {
+          if (p.existingId) {
+            // Update hours on existing record (don't overwrite a manually-set amount)
+            await client.query(
+              'UPDATE staff_payments SET hours=$1, updated_at=NOW() WHERE id=$2',
+              [p.hours, p.existingId]
+            );
+            paymentIds.push({ id: p.existingId, ...p });
+          } else {
+            const { rows: ins } = await client.query(`
+              INSERT INTO staff_payments
+                (staff_id, booking_id, amount, pay_type, hours, note)
+              VALUES ($1,$2,$3,$4,$5,$6)
+              RETURNING *
+            `, [
+              p.staff_id, p.booking_id,
+              p.amount !== null ? p.amount : 0,
+              p.pay_type, p.hours,
+              `Auto-generated: ${p.total_minutes} min raw (${p.drive_minutes} min drive ea.) → ${p.hours}h paid${p.hours > p.raw_hours ? ' (5h min applied)' : ''}`
+            ]);
+            paymentIds.push({ id: ins[0].id, ...p });
+          }
+        }
+
+        // ── Step 7: Calculate total and create payroll run ───────────────────
+        const { rows: finalPayments } = await client.query(`
+          SELECT sp.* FROM staff_payments sp
+          WHERE sp.id = ANY($1::int[]) AND sp.paid = false
+        `, [paymentIds.map(p => p.id)]);
+
+        const totalAmount = finalPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+
         const { rows: [run] } = await client.query(`
-          INSERT INTO payroll_runs (week_ending, status, total_amount, created_by)
-          VALUES ($1, 'draft', $2, 'Admin')
+          INSERT INTO payroll_runs (week_ending, status, total_amount, notes, created_by)
+          VALUES ($1, 'draft', $2, $3, 'Admin')
           RETURNING *
-        `, [weekEnd, totalAmount]);
+        `, [rangeEnd, totalAmount, runLabel]);
 
-        // Create line items
-        for (const payment of unpaidPayments) {
+        for (const payment of finalPayments) {
+          const pid = paymentIds.find(p => p.id === payment.id);
           await client.query(`
             INSERT INTO payroll_line_items (payroll_run_id, staff_payment_id, staff_id, amount)
             VALUES ($1, $2, $3, $4)
           `, [run.id, payment.id, payment.staff_id, payment.amount]);
         }
 
-        console.log(`Created payroll run ${run.id} for week ending ${weekEnd} with ${unpaidPayments.length} payments totaling $${totalAmount}`);
+        console.log(`Created payroll run ${run.id} for ${rangeStart}–${rangeEnd} with ${finalPayments.length} payments totaling $${totalAmount}`);
 
-        return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ run, count: unpaidPayments.length }) };
+        return { statusCode: 200, headers: HEADERS, body: JSON.stringify({
+          run,
+          count: finalPayments.length,
+          assignments_found: assignments.length,
+          date_from: rangeStart,
+          date_to: rangeEnd
+        }) };
       }
 
       // action: add_adjustment - Add bonus/deduction to a line item

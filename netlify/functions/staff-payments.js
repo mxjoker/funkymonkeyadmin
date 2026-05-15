@@ -18,6 +18,7 @@ async function ensureTable(client) {
       id SERIAL PRIMARY KEY,
       staff_id INTEGER NOT NULL,
       booking_id INTEGER NOT NULL,
+      assignment_id INTEGER,
       amount NUMERIC(10,2) NOT NULL DEFAULT 0,
       pay_type VARCHAR(20) DEFAULT 'flat',
       hours NUMERIC(5,2),
@@ -29,6 +30,8 @@ async function ensureTable(client) {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  // Migration for existing tables
+  try { await client.query(`ALTER TABLE staff_payments ADD COLUMN IF NOT EXISTS assignment_id INTEGER`); } catch(_) {}
 }
 
 exports.handler = async (event) => {
