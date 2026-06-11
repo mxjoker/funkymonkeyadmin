@@ -31,7 +31,7 @@ Effective with the June 2026 hardening. Shared modules: `netlify/functions/_db.j
 | PATCH/DELETE /api/booking/:id | no | no | yes |
 | GET /api/staff | no | yes — SAFE FIELDS, never pin/access_code_hash | yes — never pin/access_code_hash |
 | GET /api/staff/:id | no | self only | yes |
-| PATCH /api/staff/:id | no | self only, LIMITED FIELDS: preferred_name, color, phone, email, skills/preferences/availability fields, shared_notes. Never: pay rates, role, active, pin, access_code_hash | yes (any field except direct hash writes) |
+| PATCH /api/staff/:id | no | self only, LIMITED FIELDS: preferred_name, pronouns, color, phone, email, comms_preference, skills, shared_notes, staff_notes. Never: pay rates, role, active, pin, access_code_hash | yes (any field except direct hash writes) |
 | POST /api/staff, DELETE /api/staff/:id | no | no | yes |
 | POST /api/staff/:id {action:'regenerate_access_code'} | no | no | yes — returns plaintext code ONCE |
 | GET /api/staff-assignments?staff_id=N | no | self only | yes |

@@ -640,9 +640,11 @@ async function savePreferences() {
   // Only send the fields the server accepts for staff self-PATCH
   const payload = {
     preferred_name:   document.getElementById('pf-pname').value.trim(),
+    pronouns:         document.getElementById('pf-pronouns').value.trim(),
     phone, email,
     comms_preference: document.getElementById('pf-comms').value,
     shared_notes:     document.getElementById('pf-shared').value.trim(),
+    staff_notes:      document.getElementById('pf-notes').value.trim(),
   };
   try {
     const res = await apiFetch('/api/staff/' + currentUser.staffId, {

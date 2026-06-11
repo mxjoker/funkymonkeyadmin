@@ -15,11 +15,6 @@ const SAFE_COLS = `
 `.trim();
 
 // Fields a staff member may update on their own record.
-const STAFF_ALLOWED_FIELDS = new Set([
-  'preferred_name', 'color', 'phone', 'email', 'comms_preference',
-  'skills', 'shared_notes',
-]);
-
 // Fields admin may update (anything except the credential columns).
 const ADMIN_FORBIDDEN_FIELDS = new Set(['pin', 'access_code_hash']);
 
@@ -238,9 +233,9 @@ exports.handler = async (event) => {
     };
 
     const staffColMap = {
-      preferred_name: 'preferred_name', color: 'color',
+      preferred_name: 'preferred_name', pronouns: 'pronouns', color: 'color',
       phone: 'phone', email: 'email', comms_preference: 'comms_preference',
-      skills: 'skills', shared_notes: 'shared_notes',
+      skills: 'skills', shared_notes: 'shared_notes', staff_notes: 'staff_notes',
     };
 
     const colMap = auth.role === 'admin' ? adminColMap : staffColMap;
