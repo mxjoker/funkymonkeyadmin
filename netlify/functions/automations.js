@@ -1,20 +1,11 @@
-const { Pool } = require('pg');
-const { wrap, render, sendEmail, logEmail } = require('./_email');
+const { getPool, withClient } = require('./_db');
+const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
+const { wrap, render, esc, sendEmail, logEmail, ensureEmailLog } = require('./_email');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-
-const HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-  'Content-Type': 'application/json'
-};
-
-const FROM = 'Funky Monkey Events <bookings@funkymonkeyevents.com>';
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
+
+const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
+
 async function ensureTables(client) {
   // automation_rules: defines when/what to send
   await client.query(`
@@ -39,21 +30,8 @@ async function ensureTables(client) {
     )
   `);
 
-  // email_log: every email sent, linked to a booking
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS email_log (
-      id SERIAL PRIMARY KEY,
-      booking_id INTEGER NOT NULL,
-      rule_id INTEGER REFERENCES automation_rules(id) ON DELETE SET NULL,
-      trigger_label VARCHAR(255) NOT NULL,
-      subject VARCHAR(500) NOT NULL,
-      recipient_email VARCHAR(255) NOT NULL,
-      recipient_label VARCHAR(32) DEFAULT 'client',
-      -- 'client' or 'admin' or 'manual'
-      sent_at TIMESTAMPTZ DEFAULT NOW(),
-      status VARCHAR(32) DEFAULT 'sent'
-    )
-  `);
+  // email_log: owned by _email.js (its rule_id column links to automation_rules)
+  await ensureEmailLog(client);
 
   // booking_tasks: per-booking admin checklist
   await client.query(`
@@ -159,7 +137,7 @@ async function runScheduledAutomations(client) {
        WHERE status IN ('confirmed','pending')
          AND event_date::date = $1::date
          AND id NOT IN (
-           SELECT booking_id FROM email_log WHERE rule_id=$2
+           SELECT booking_id FROM email_log WHERE rule_id=$2 AND status='sent'
          )`,
       [dateStr, rule.id]
     );
@@ -185,7 +163,7 @@ async function runScheduledAutomations(client) {
        WHERE status IN ('confirmed','completed')
          AND event_date::date = $1::date
          AND id NOT IN (
-           SELECT booking_id FROM email_log WHERE rule_id=$2
+           SELECT booking_id FROM email_log WHERE rule_id=$2 AND status='sent'
          )`,
       [dateStr, rule.id]
     );
@@ -200,148 +178,157 @@ async function runScheduledAutomations(client) {
 
 // ── HTTP handler ──────────────────────────────────────────────────────────────
 exports.handler = async (event) => {
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers: HEADERS, body: '' };
+  const pre = preflight(event);
+  if (pre) return pre;
 
-  const client = await pool.connect();
-  try {
-    await ensureTables(client);
+  // All automations routes are admin-only
+  const auth = await requireAuth(event, ['admin']);
+  if (!auth) return unauthorized();
 
-    // GET /api/automations — list rules + recent email log
-    if (event.httpMethod === 'GET') {
-      const type = event.queryStringParameters?.type;
+  return withClient(async (client) => {
+    try {
+      await ensureTables(client);
 
-      if (type === 'log') {
-        const bookingId = event.queryStringParameters?.booking_id;
-        if (bookingId) {
+      // GET /api/automations — list rules + recent email log
+      if (event.httpMethod === 'GET') {
+        const type = event.queryStringParameters?.type;
+
+        if (type === 'log') {
+          const bookingId = event.queryStringParameters?.booking_id;
+          if (bookingId) {
+            const { rows } = await client.query(
+              `SELECT * FROM email_log WHERE booking_id=$1 ORDER BY sent_at DESC`,
+              [parseInt(bookingId)]
+            );
+            return json(200, rows);
+          }
+          // Global log
           const { rows } = await client.query(
-            `SELECT * FROM email_log WHERE booking_id=$1 ORDER BY sent_at DESC`,
+            `SELECT el.*, b.reference, b.client_name FROM email_log el
+             JOIN bookings b ON b.id = el.booking_id
+             ORDER BY el.sent_at DESC LIMIT 100`
+          );
+          return json(200, rows);
+        }
+
+        if (type === 'tasks') {
+          const bookingId = event.queryStringParameters?.booking_id;
+          if (!bookingId) return json(400, { error: 'booking_id required' });
+          const { rows } = await client.query(
+            'SELECT * FROM booking_tasks WHERE booking_id=$1 ORDER BY sort_order, id',
             [parseInt(bookingId)]
           );
-          return { statusCode: 200, headers: HEADERS, body: JSON.stringify(rows) };
+          return json(200, rows);
         }
-        // Global log
-        const { rows } = await client.query(
-          `SELECT el.*, b.reference, b.client_name FROM email_log el
-           JOIN bookings b ON b.id = el.booking_id
-           ORDER BY el.sent_at DESC LIMIT 100`
-        );
-        return { statusCode: 200, headers: HEADERS, body: JSON.stringify(rows) };
+
+        // Default: list automation rules
+        const { rows } = await client.query('SELECT * FROM automation_rules ORDER BY sort_order, id');
+        return json(200, rows);
       }
 
-      if (type === 'tasks') {
-        const bookingId = event.queryStringParameters?.booking_id;
-        if (!bookingId) return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'booking_id required' }) };
-        const { rows } = await client.query(
-          'SELECT * FROM booking_tasks WHERE booking_id=$1 ORDER BY sort_order, id',
-          [parseInt(bookingId)]
-        );
-        return { statusCode: 200, headers: HEADERS, body: JSON.stringify(rows) };
+      let body;
+      try {
+        body = event.body ? JSON.parse(event.body) : {};
+      } catch {
+        return json(400, { error: 'Invalid JSON' });
+      }
+      const action = body.action;
+
+      // POST action:'run_scheduled' — trigger all scheduled automations (call daily via cron)
+      if (action === 'run_scheduled') {
+        const sent = await runScheduledAutomations(client);
+        return json(200, { success: true, sent });
       }
 
-      // Default: list automation rules
-      const { rows } = await client.query('SELECT * FROM automation_rules ORDER BY sort_order, id');
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify(rows) };
-    }
-
-    const body = event.body ? JSON.parse(event.body) : {};
-    const action = body.action;
-
-    // POST action:'run_scheduled' — trigger all scheduled automations (call daily via cron)
-    if (action === 'run_scheduled') {
-      const sent = await runScheduledAutomations(client);
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ success: true, sent }) };
-    }
-
-    // POST action:'trigger_status' — called internally when booking status changes
-    if (action === 'trigger_status') {
-      const { booking_id, status, stripe_link } = body;
-      const { rows } = await client.query('SELECT * FROM bookings WHERE id=$1', [parseInt(booking_id)]);
-      if (!rows[0]) return { statusCode: 404, headers: HEADERS, body: JSON.stringify({ error: 'Booking not found' }) };
-      await triggerStatusChange(client, rows[0], status, stripe_link || null);
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ success: true }) };
-    }
-
-    // POST action:'send_manual' — manually send an email to a client
-    if (action === 'send_manual') {
-      const { booking_id, subject, html } = body;
-      const { rows } = await client.query('SELECT * FROM bookings WHERE id=$1', [parseInt(booking_id)]);
-      const booking = rows[0];
-      if (!booking) return { statusCode: 404, headers: HEADERS, body: JSON.stringify({ error: 'Booking not found' }) };
-
-      const RESEND_API_KEY = process.env.RESEND_API_KEY;
-      if (RESEND_API_KEY && booking.client_email) {
-        await sendEmail(booking.client_email, subject, wrap(html));
-        await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client');
+      // POST action:'trigger_status' — called internally when booking status changes
+      if (action === 'trigger_status') {
+        const { booking_id, status, stripe_link } = body;
+        const { rows } = await client.query('SELECT * FROM bookings WHERE id=$1', [parseInt(booking_id)]);
+        if (!rows[0]) return json(404, { error: 'Booking not found' });
+        await triggerStatusChange(client, rows[0], status, stripe_link || null);
+        return json(200, { success: true });
       }
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ success: true }) };
-    }
 
-    // POST action:'save_rule' — create or update an automation rule
-    if (action === 'save_rule') {
-      const r = body.rule;
-      if (r.id) {
+      // POST action:'send_manual' — manually send an email to a client
+      if (action === 'send_manual') {
+        const { booking_id, subject, html } = body;
+        const { rows } = await client.query('SELECT * FROM bookings WHERE id=$1', [parseInt(booking_id)]);
+        const booking = rows[0];
+        if (!booking) return json(404, { error: 'Booking not found' });
+
+        const RESEND_API_KEY = process.env.RESEND_API_KEY;
+        if (RESEND_API_KEY && booking.client_email) {
+          await sendEmail(booking.client_email, subject, wrap(html));
+          await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client');
+        }
+        return json(200, { success: true });
+      }
+
+      // POST action:'save_rule' — create or update an automation rule
+      if (action === 'save_rule') {
+        const r = body.rule;
+        if (r.id) {
+          await client.query(
+            `UPDATE automation_rules SET name=$1,active=$2,trigger_event=$3,trigger_status=$4,
+             trigger_days=$5,recipient=$6,subject=$7,body_html=$8,sort_order=$9,updated_at=NOW()
+             WHERE id=$10`,
+            [r.name,r.active!==false,r.trigger_event,r.trigger_status||null,
+             r.trigger_days||null,r.recipient||'client',r.subject,r.body_html,r.sort_order||0,r.id]
+          );
+        } else {
+          await client.query(
+            `INSERT INTO automation_rules (name,active,trigger_event,trigger_status,trigger_days,recipient,subject,body_html,sort_order)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+            [r.name,r.active!==false,r.trigger_event,r.trigger_status||null,
+             r.trigger_days||null,r.recipient||'client',r.subject,r.body_html,r.sort_order||0]
+          );
+        }
+        return json(200, { success: true });
+      }
+
+      // POST action:'delete_rule'
+      if (action === 'delete_rule') {
+        await client.query('UPDATE automation_rules SET active=FALSE WHERE id=$1', [body.rule_id]);
+        return json(200, { success: true });
+      }
+
+      // POST action:'save_task' — add/update a booking task
+      if (action === 'save_task') {
+        const { booking_id, task, task_id } = body;
+        if (task_id) {
+          await client.query('UPDATE booking_tasks SET task=$1 WHERE id=$2', [task, task_id]);
+        } else {
+          await client.query(
+            'INSERT INTO booking_tasks (booking_id, task, sort_order) VALUES ($1,$2,(SELECT COALESCE(MAX(sort_order),0)+1 FROM booking_tasks WHERE booking_id=$1))',
+            [parseInt(booking_id), task]
+          );
+        }
+        return json(200, { success: true });
+      }
+
+      // POST action:'complete_task'
+      if (action === 'complete_task') {
+        const { task_id, completed } = body;
         await client.query(
-          `UPDATE automation_rules SET name=$1,active=$2,trigger_event=$3,trigger_status=$4,
-           trigger_days=$5,recipient=$6,subject=$7,body_html=$8,sort_order=$9,updated_at=NOW()
-           WHERE id=$10`,
-          [r.name,r.active!==false,r.trigger_event,r.trigger_status||null,
-           r.trigger_days||null,r.recipient||'client',r.subject,r.body_html,r.sort_order||0,r.id]
+          'UPDATE booking_tasks SET completed=$1, completed_at=$2 WHERE id=$3',
+          [completed, completed ? new Date() : null, task_id]
         );
-      } else {
-        await client.query(
-          `INSERT INTO automation_rules (name,active,trigger_event,trigger_status,trigger_days,recipient,subject,body_html,sort_order)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-          [r.name,r.active!==false,r.trigger_event,r.trigger_status||null,
-           r.trigger_days||null,r.recipient||'client',r.subject,r.body_html,r.sort_order||0]
-        );
+        return json(200, { success: true });
       }
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ success: true }) };
-    }
 
-    // POST action:'delete_rule'
-    if (action === 'delete_rule') {
-      await client.query('UPDATE automation_rules SET active=FALSE WHERE id=$1', [body.rule_id]);
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ success: true }) };
-    }
-
-    // POST action:'save_task' — add/update a booking task
-    if (action === 'save_task') {
-      const { booking_id, task, task_id } = body;
-      if (task_id) {
-        await client.query('UPDATE booking_tasks SET task=$1 WHERE id=$2', [task, task_id]);
-      } else {
-        await client.query(
-          'INSERT INTO booking_tasks (booking_id, task, sort_order) VALUES ($1,$2,(SELECT COALESCE(MAX(sort_order),0)+1 FROM booking_tasks WHERE booking_id=$1))',
-          [parseInt(booking_id), task]
-        );
+      // POST action:'delete_task'
+      if (action === 'delete_task') {
+        await client.query('DELETE FROM booking_tasks WHERE id=$1', [body.task_id]);
+        return json(200, { success: true });
       }
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ success: true }) };
+
+      return json(400, { error: 'Unknown action' });
+
+    } catch(err) {
+      console.error('automations.js error:', err.message);
+      return json(500, { error: 'Internal server error' });
     }
-
-    // POST action:'complete_task'
-    if (action === 'complete_task') {
-      const { task_id, completed } = body;
-      await client.query(
-        'UPDATE booking_tasks SET completed=$1, completed_at=$2 WHERE id=$3',
-        [completed, completed ? new Date() : null, task_id]
-      );
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ success: true }) };
-    }
-
-    // POST action:'delete_task'
-    if (action === 'delete_task') {
-      await client.query('DELETE FROM booking_tasks WHERE id=$1', [body.task_id]);
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ success: true }) };
-    }
-
-    return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'Unknown action: ' + action }) };
-
-  } catch(err) {
-    console.error('automations.js error:', err.message);
-    return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ error: err.message }) };
-  } finally {
-    client.release();
-  }
+  });
 };
 
 // Export helpers for use in booking.js

@@ -1,9 +1,27 @@
-const { Pool } = require('pg');
+const { withClient } = require('./_db');
+const {
+  CORS, preflight, requireAuth, unauthorized, forbidden,
+  generateAccessCode, hashSecret,
+} = require('./_auth');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
+
+// Safe column list — never includes pin or access_code_hash.
+const SAFE_COLS = `
+  id, staff_id, name, preferred_name, pronouns, role, color,
+  phone, email, comms_preference, skills, staff_notes, shared_notes,
+  admin_notes, active, sort_order, pay_type, flat_rate, hourly_rate,
+  payment_method, payment_handle, created_at, updated_at
+`.trim();
+
+// Fields a staff member may update on their own record.
+const STAFF_ALLOWED_FIELDS = new Set([
+  'preferred_name', 'color', 'phone', 'email', 'comms_preference',
+  'skills', 'shared_notes',
+]);
+
+// Fields admin may update (anything except the credential columns).
+const ADMIN_FORBIDDEN_FIELDS = new Set(['pin', 'access_code_hash']);
 
 const DEFAULT_STAFF = [
   { staff_id:'joe_coover', name:'Joe Coover', preferred_name:'Joe',  role:'Owner / Magician', color:'#7c3aed', pin:'9632', phone:'(405) 431-6625', email:'Joe.Coover@gmail.com', pronouns:'he/him', comms_preference:'email', skills:[{name:'Magic Show',exclusive:true},{name:'Corporate Magic',exclusive:true},{name:'Childrens Magic',exclusive:true},{name:'Driver',exclusive:false}], admin_notes:'Owner', staff_notes:'', sort_order:1 },
@@ -34,7 +52,6 @@ async function ensureTable(client) {
     )
   `);
 
-  // Migrations for existing tables
   const migrations = [
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS preferred_name VARCHAR(255) DEFAULT ''",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS pronouns VARCHAR(64) DEFAULT ''",
@@ -49,18 +66,19 @@ async function ensureTable(client) {
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS shared_notes TEXT DEFAULT ''",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0",
+    "ALTER TABLE staff ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS pay_type VARCHAR(20) DEFAULT 'flat'",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS flat_rate NUMERIC(10,2) DEFAULT 0",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS hourly_rate NUMERIC(10,2) DEFAULT 0",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS payment_method VARCHAR(64) DEFAULT ''",
     "ALTER TABLE staff ADD COLUMN IF NOT EXISTS payment_handle VARCHAR(255) DEFAULT ''",
+    "ALTER TABLE staff ADD COLUMN IF NOT EXISTS access_code_hash TEXT",
   ];
   for (const sql of migrations) {
     try { await client.query(sql); } catch (_) {}
   }
 
-  // Seed / correct default staff on every startup (DO UPDATE ensures PIN fixes apply to existing rows)
   for (const s of DEFAULT_STAFF) {
     await client.query(
       `INSERT INTO staff (staff_id, name, preferred_name, pronouns, role, color, pin, phone, email, comms_preference, skills, admin_notes, staff_notes, sort_order)
@@ -79,52 +97,103 @@ async function ensureTable(client) {
   }
 }
 
-const HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-  'Content-Type': 'application/json'
-};
-
 exports.handler = async (event) => {
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers: HEADERS, body: '' };
+  const pre = preflight(event);
+  if (pre) return pre;
 
-  const client = await pool.connect();
-  try {
-    await ensureTable(client);
+  // Path helpers
+  const pathMatch = event.path.match(/\/staff\/(\d+)$/);
+  const pathId = pathMatch ? parseInt(pathMatch[1]) : null;
 
-    // GET single staff member by ID (staff portal — own record only, no PIN or admin notes)
-    if (event.httpMethod === 'GET' && event.path.match(/\/staff\/\d+$/)) {
-      const id = parseInt(event.path.split('/').pop());
-      const { rows } = await client.query('SELECT * FROM staff WHERE id=$1 AND active=TRUE', [id]);
-      if (!rows.length) return { statusCode: 404, headers: HEADERS, body: JSON.stringify({ error: 'Not found' }) };
-      const { pin, admin_notes, ...safe } = rows[0];
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify(safe) };
+  // ── POST /api/staff/:id  {action:'regenerate_access_code'}  (admin only) ──
+  if (event.httpMethod === 'POST' && pathId) {
+    const auth = await requireAuth(event, ['admin']);
+    if (!auth) return unauthorized();
+
+    let body;
+    try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
+
+    if (body.action === 'regenerate_access_code') {
+      return withClient(async (client) => {
+        await ensureTable(client);
+        const code = generateAccessCode();
+        const hashed = hashSecret(code);
+        const { rows } = await client.query(
+          'UPDATE staff SET access_code_hash=$1, updated_at=NOW() WHERE id=$2 RETURNING id',
+          [hashed, pathId]
+        );
+        if (!rows.length) return json(404, { error: 'Staff member not found' });
+        return json(200, { success: true, access_code: code });
+      });
     }
 
-    // GET all active staff (admin only)
-    if (event.httpMethod === 'GET') {
+    // Fall through to generic POST handler for other actions (none currently)
+    return json(400, { error: 'Unknown action' });
+  }
+
+  // ── GET /api/staff/:id ─────────────────────────────────────────────────────
+  if (event.httpMethod === 'GET' && pathId) {
+    const auth = await requireAuth(event);
+    if (!auth) return unauthorized();
+
+    // Staff may only fetch their own record
+    if (auth.role === 'staff' && auth.staffId !== pathId) return forbidden();
+
+    return withClient(async (client) => {
+      await ensureTable(client);
       const { rows } = await client.query(
-        'SELECT * FROM staff WHERE active = TRUE ORDER BY sort_order, id'
+        `SELECT ${SAFE_COLS} FROM staff WHERE id=$1 AND active=TRUE`,
+        [pathId]
       );
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify(rows) };
+      if (!rows.length) return json(404, { error: 'Not found' });
+      // Admin can see admin_notes; staff sees their own but without admin_notes
+      if (auth.role === 'staff') {
+        const { admin_notes, ...safe } = rows[0];
+        return json(200, safe);
+      }
+      return json(200, rows[0]);
+    });
+  }
+
+  // ── GET /api/staff  (list) ─────────────────────────────────────────────────
+  if (event.httpMethod === 'GET') {
+    const auth = await requireAuth(event);
+    if (!auth) return unauthorized();
+
+    return withClient(async (client) => {
+      await ensureTable(client);
+      // Staff role: return safe cols for everyone (they need it for scheduling context)
+      // Admin: also safe cols (never expose pin/access_code_hash to anyone)
+      const { rows } = await client.query(
+        `SELECT ${SAFE_COLS} FROM staff WHERE active=TRUE ORDER BY sort_order, id`
+      );
+      // Strip admin_notes for staff callers
+      const out = auth.role === 'staff'
+        ? rows.map(({ admin_notes, ...r }) => r)
+        : rows;
+      return json(200, out);
+    });
+  }
+
+  // ── POST /api/staff  (create) — admin only ─────────────────────────────────
+  if (event.httpMethod === 'POST') {
+    const auth = await requireAuth(event, ['admin']);
+    if (!auth) return unauthorized();
+
+    let b;
+    try { b = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
+
+    if (!b.name || !b.phone || !b.email) {
+      return json(400, { error: 'name, phone, and email are required' });
     }
 
-    // POST — create new staff member
-    if (event.httpMethod === 'POST') {
-      const b = JSON.parse(event.body || '{}');
-
-      if (!b.name || !b.phone || !b.email) {
-        return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'name, phone, and email are required' }) };
-      }
-
-      // Generate a staff_id from name
+    return withClient(async (client) => {
+      await ensureTable(client);
       const staff_id = b.name.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'') + '_' + Date.now();
-
       const { rows } = await client.query(
         `INSERT INTO staff (staff_id, name, preferred_name, pronouns, role, color, pin, phone, email, comms_preference, skills, admin_notes, staff_notes, sort_order)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-         RETURNING *`,
+         RETURNING ${SAFE_COLS}`,
         [
           staff_id,
           b.name,
@@ -142,83 +211,84 @@ exports.handler = async (event) => {
           b.sort_order || 99,
         ]
       );
-      return { statusCode: 201, headers: HEADERS, body: JSON.stringify(rows[0]) };
+      return json(201, rows[0]);
+    });
+  }
+
+  // ── PATCH /api/staff/:id ───────────────────────────────────────────────────
+  if (event.httpMethod === 'PATCH' && pathId) {
+    const auth = await requireAuth(event);
+    if (!auth) return unauthorized();
+
+    // Staff may only update their own record
+    if (auth.role === 'staff' && auth.staffId !== pathId) return forbidden();
+
+    let u;
+    try { u = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
+
+    // Build allowed column map based on role
+    const adminColMap = {
+      name: 'name', preferred_name: 'preferred_name', pronouns: 'pronouns',
+      role: 'role', color: 'color', phone: 'phone', email: 'email',
+      comms_preference: 'comms_preference', skills: 'skills',
+      admin_notes: 'admin_notes', staff_notes: 'staff_notes', shared_notes: 'shared_notes',
+      active: 'active', sort_order: 'sort_order',
+      pay_type: 'pay_type', flat_rate: 'flat_rate', hourly_rate: 'hourly_rate',
+      payment_method: 'payment_method', payment_handle: 'payment_handle',
+    };
+
+    const staffColMap = {
+      preferred_name: 'preferred_name', color: 'color',
+      phone: 'phone', email: 'email', comms_preference: 'comms_preference',
+      skills: 'skills', shared_notes: 'shared_notes',
+    };
+
+    const colMap = auth.role === 'admin' ? adminColMap : staffColMap;
+
+    const sets = [], vals = [];
+    let idx = 1;
+    for (const [k, col] of Object.entries(colMap)) {
+      if (u[k] !== undefined) {
+        // Extra safety: admin can't directly write credential fields via this endpoint
+        if (ADMIN_FORBIDDEN_FIELDS.has(k)) continue;
+        sets.push(`${col}=$${idx}`);
+        vals.push(k === 'skills' ? JSON.stringify(u[k]) : u[k]);
+        idx++;
+      }
     }
 
-    // PATCH — update staff member (by id in path)
-    if (event.httpMethod === 'PATCH') {
-      const id = event.path.split('/').pop();
-      if (!id || isNaN(parseInt(id))) {
-        return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'Invalid ID' }) };
-      }
+    if (!sets.length) return json(400, { error: 'No allowed fields to update' });
 
-      const u = JSON.parse(event.body || '{}');
-      const colMap = {
-        name:              'name',
-        preferred_name:    'preferred_name',
-        pronouns:          'pronouns',
-        role:              'role',
-        color:             'color',
-        pin:               'pin',
-        phone:             'phone',
-        email:             'email',
-        comms_preference:  'comms_preference',
-        skills:            'skills',
-        admin_notes:       'admin_notes',
-        staff_notes:       'staff_notes',
-        shared_notes:      'shared_notes',
-        active:            'active',
-        sort_order:        'sort_order',
-        pay_type:          'pay_type',
-        flat_rate:         'flat_rate',
-        hourly_rate:       'hourly_rate',
-        payment_method:    'payment_method',
-        payment_handle:    'payment_handle',
-      };
+    sets.push(`updated_at=NOW()`);
+    vals.push(pathId);
 
-      const sets = [], vals = [];
-      let idx = 1;
-      for (const [k, col] of Object.entries(colMap)) {
-        if (u[k] !== undefined) {
-          sets.push(`${col}=$${idx}`);
-          // Serialize skills array to JSON string for JSONB column
-          vals.push(k === 'skills' ? JSON.stringify(u[k]) : u[k]);
-          idx++;
-        }
-      }
-
-      if (!sets.length) {
-        return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'No fields to update' }) };
-      }
-
-      sets.push(`updated_at=NOW()`);
-      vals.push(parseInt(id));
-
+    return withClient(async (client) => {
+      await ensureTable(client);
       const { rows } = await client.query(
-        `UPDATE staff SET ${sets.join(',')} WHERE id=$${idx} RETURNING *`,
+        `UPDATE staff SET ${sets.join(',')} WHERE id=$${idx} RETURNING ${SAFE_COLS}`,
         vals
       );
-
-      if (!rows.length) {
-        return { statusCode: 404, headers: HEADERS, body: JSON.stringify({ error: 'Staff member not found' }) };
+      if (!rows.length) return json(404, { error: 'Staff member not found' });
+      // Strip admin_notes for staff callers
+      if (auth.role === 'staff') {
+        const { admin_notes, ...safe } = rows[0];
+        return json(200, safe);
       }
-
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify(rows[0]) };
-    }
-
-    // DELETE — soft delete (set active=false)
-    if (event.httpMethod === 'DELETE') {
-      const id = event.path.split('/').pop();
-      await client.query('UPDATE staff SET active=FALSE WHERE id=$1', [parseInt(id)]);
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ success: true }) };
-    }
-
-    return { statusCode: 405, headers: HEADERS, body: JSON.stringify({ error: 'Method not allowed' }) };
-
-  } catch (err) {
-    console.error('staff.js error:', err.message);
-    return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ error: err.message }) };
-  } finally {
-    client.release();
+      return json(200, rows[0]);
+    });
   }
+
+  // ── DELETE /api/staff/:id — admin only ────────────────────────────────────
+  if (event.httpMethod === 'DELETE' && pathId) {
+    const auth = await requireAuth(event, ['admin']);
+    if (!auth) return unauthorized();
+
+    return withClient(async (client) => {
+      await ensureTable(client);
+      await client.query('UPDATE staff SET active=FALSE WHERE id=$1', [pathId]);
+      return json(200, { success: true });
+    });
+  }
+
+  return json(405, { error: 'Method not allowed' });
 };

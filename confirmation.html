@@ -315,18 +315,60 @@
     async function loadBooking() {
       const params = new URLSearchParams(window.location.search);
       const reference = params.get('ref');
+      let email = params.get('email') || '';
 
       if (!reference) {
         showError('No booking reference provided');
         return;
       }
 
+      // If email not in URL, show a small prompt before fetching
+      if (!email) {
+        showEmailPrompt(reference);
+        return;
+      }
+
+      await fetchBooking(reference, email);
+    }
+
+    function showEmailPrompt(reference) {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('error').innerHTML = `
+        <div style="font-size:3rem;margin-bottom:16px">📧</div>
+        <p style="margin-bottom:16px">Please enter the email you used when booking to view your confirmation.</p>
+        <input type="email" id="prompt-email" placeholder="you@example.com"
+          style="width:100%;max-width:320px;padding:12px;border-radius:8px;border:2px solid rgba(124,58,237,0.4);
+                 background:rgba(255,255,255,0.05);color:#F3E8FF;font-size:1rem;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto"/>
+        <button class="btn" onclick="submitEmailPrompt('${esc(reference)}')" style="max-width:200px">View Booking</button>
+        <p style="margin-top:16px;font-size:0.875rem">
+          <a href="/my-booking.html" style="color:#7C3AED">Look Up My Booking</a>
+        </p>`;
+      document.getElementById('error').style.display = 'block';
+      const inp = document.getElementById('prompt-email');
+      if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') submitEmailPrompt(reference); });
+    }
+
+    async function submitEmailPrompt(reference) {
+      const inp = document.getElementById('prompt-email');
+      const email = inp ? inp.value.trim() : '';
+      if (!email) return;
+      document.getElementById('error').style.display = 'none';
+      document.getElementById('loading').style.display = 'block';
+      await fetchBooking(reference, email);
+    }
+
+    async function fetchBooking(reference, email) {
       try {
-        const res = await fetch(`/api/bookings?reference=${reference}`);
+        const res = await fetch(`/api/bookings?reference=${encodeURIComponent(reference)}&email=${encodeURIComponent(email)}`);
         const data = await res.json();
 
-        if (!data.bookings || data.bookings.length === 0) {
-          showError('Booking not found');
+        if (res.status === 404 || !data.bookings || data.bookings.length === 0) {
+          showError('No booking found for that reference and email. Please check and try again.');
+          return;
+        }
+
+        if (!res.ok) {
+          showError(data.error || 'Failed to load booking. Please try again.');
           return;
         }
 
@@ -428,21 +470,20 @@
 
     async function requestInvoice() {
       if (!currentBooking) return;
-      
-      // Download invoice PDF directly
-      const invoiceUrl = `/api/generate-invoice/${currentBooking.reference}`;
-      window.location.href = invoiceUrl;
+      const url = `/api/generate-invoice/${encodeURIComponent(currentBooking.reference)}?email=${encodeURIComponent(currentBooking.client_email)}`;
+      window.open(url, '_blank');
     }
 
     async function requestCOI() {
       if (!currentBooking) return;
-      
+
       try {
         const res = await fetch('/api/coi-request', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            booking_id: currentBooking.id,
+            reference: currentBooking.reference,
+            client_email: currentBooking.client_email,
             requested_by_email: currentBooking.client_email,
             requested_from: 'confirmation_page'
           })

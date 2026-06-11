@@ -1,9 +1,5 @@
-const { Pool } = require('pg');
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+const { getPool, withClient } = require('./_db');
+const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
 
 const DEFAULT_SERVICES = [
   { service_id:'deluxe_magic',   category:'shows',       name:'Deluxe Birthday Magic Show',           price:385,  icon:'🎩', duration_minutes:45,  guest_suggestion:'Best for kids parties',        sort_order:1  },
@@ -115,114 +111,115 @@ async function ensureTables(client) {
 }
 
 exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json'
-  };
+  const pre = preflight(event);
+  if (pre) return pre;
 
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers, body: '' };
+  // GET is public (booking form needs the catalogue)
+  // POST/writes are admin-only
+  if (event.httpMethod !== 'GET') {
+    const auth = await requireAuth(event, ['admin']);
+    if (!auth) return unauthorized();
   }
 
-  let client;
-  try {
-    client = await pool.connect();
-    await ensureTables(client);
+  return withClient(async (client) => {
+    try {
+      await ensureTables(client);
 
-    if (event.httpMethod === 'GET') {
-      const [svcResult, addonResult, svcAddonResult, svcEtResult] = await Promise.all([
-        client.query('SELECT * FROM services WHERE active = TRUE ORDER BY sort_order, id'),
-        client.query('SELECT * FROM addons WHERE active = TRUE ORDER BY sort_order, id'),
-        client.query('SELECT * FROM service_addons ORDER BY service_id, sort_order'),
-        client.query('SELECT * FROM service_event_types ORDER BY service_id')
-      ]);
+      if (event.httpMethod === 'GET') {
+        const [svcResult, addonResult, svcAddonResult, svcEtResult] = await Promise.all([
+          client.query('SELECT * FROM services WHERE active = TRUE ORDER BY sort_order, id'),
+          client.query('SELECT * FROM addons WHERE active = TRUE ORDER BY sort_order, id'),
+          client.query('SELECT * FROM service_addons ORDER BY service_id, sort_order'),
+          client.query('SELECT * FROM service_event_types ORDER BY service_id')
+        ]);
 
-      const svcAddonMap = {};
-      svcAddonResult.rows.forEach(r => {
-        if (!svcAddonMap[r.service_id]) svcAddonMap[r.service_id] = [];
-        svcAddonMap[r.service_id].push(r.addon_id);
-      });
+        const svcAddonMap = {};
+        svcAddonResult.rows.forEach(r => {
+          if (!svcAddonMap[r.service_id]) svcAddonMap[r.service_id] = [];
+          svcAddonMap[r.service_id].push(r.addon_id);
+        });
 
-      const svcEtMap = {};
-      svcEtResult.rows.forEach(r => {
-        if (!svcEtMap[r.service_id]) svcEtMap[r.service_id] = [];
-        svcEtMap[r.service_id].push(r.event_type_id);
-      });
+        const svcEtMap = {};
+        svcEtResult.rows.forEach(r => {
+          if (!svcEtMap[r.service_id]) svcEtMap[r.service_id] = [];
+          svcEtMap[r.service_id].push(r.event_type_id);
+        });
 
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          services: svcResult.rows,
-          addons: addonResult.rows,
-          service_addons: svcAddonMap,
-          service_event_types: svcEtMap   // { service_id: [event_type_id, ...] }
-        })
-      };
-    }
-
-    if (event.httpMethod === 'POST') {
-      const body = JSON.parse(event.body || '{}');
-
-      if (body.type === 'service_event_types') {
-        const { service_id, event_type_ids } = body;
-        if (!service_id) return { statusCode: 400, headers, body: JSON.stringify({ error: 'service_id required' }) };
-        await client.query('DELETE FROM service_event_types WHERE service_id=$1', [service_id]);
-        for (const et_id of (event_type_ids || [])) {
-          await client.query(
-            'INSERT INTO service_event_types (service_id, event_type_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-            [service_id, et_id]
-          );
-        }
-        return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
-      } else if (body.type === 'service_addons') {
-        // Replace all addon links for a service
-        // body.service_id, body.addon_ids: string[]
-        const { service_id, addon_ids } = body;
-        if (!service_id) return { statusCode: 400, headers, body: JSON.stringify({ error: 'service_id required' }) };
-        await client.query('DELETE FROM service_addons WHERE service_id=$1', [service_id]);
-        let order = 0;
-        for (const addon_id of (addon_ids || [])) {
-          await client.query(
-            'INSERT INTO service_addons (service_id, addon_id, sort_order) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
-            [service_id, addon_id, order++]
-          );
-        }
-        return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
-      } else if (body.type === 'addon') {
-        await client.query(
-          `INSERT INTO addons (addon_id, name, price, active, sort_order)
-           VALUES ($1,$2,$3,$4,$5)
-           ON CONFLICT (addon_id) DO UPDATE SET
-             name = EXCLUDED.name, price = EXCLUDED.price,
-             active = EXCLUDED.active, sort_order = EXCLUDED.sort_order`,
-          [body.addon_id, body.name, Number(body.price), body.active !== false, body.sort_order || 0]
-        );
-      } else {
-        await client.query(
-          `INSERT INTO services (service_id, category, name, price, icon, duration_minutes, guest_suggestion, active, sort_order)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-           ON CONFLICT (service_id) DO UPDATE SET
-             name = EXCLUDED.name, price = EXCLUDED.price, icon = EXCLUDED.icon,
-             duration_minutes = EXCLUDED.duration_minutes, guest_suggestion = EXCLUDED.guest_suggestion,
-             active = EXCLUDED.active, sort_order = EXCLUDED.sort_order, updated_at = NOW()`,
-          [
-            body.service_id, body.category, body.name, Number(body.price),
-            body.icon || '🎪', Number(body.duration_minutes) || 120,
-            body.guest_suggestion || '', body.active !== false, Number(body.sort_order) || 0
-          ]
-        );
+        return {
+          statusCode: 200,
+          headers: CORS,
+          body: JSON.stringify({
+            services: svcResult.rows,
+            addons: addonResult.rows,
+            service_addons: svcAddonMap,
+            service_event_types: svcEtMap
+          })
+        };
       }
-      return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
+
+      if (event.httpMethod === 'POST') {
+        let body;
+        try {
+          body = JSON.parse(event.body || '{}');
+        } catch {
+          return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'Invalid JSON' }) };
+        }
+
+        if (body.type === 'service_event_types') {
+          const { service_id, event_type_ids } = body;
+          if (!service_id) return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'service_id required' }) };
+          await client.query('DELETE FROM service_event_types WHERE service_id=$1', [service_id]);
+          for (const et_id of (event_type_ids || [])) {
+            await client.query(
+              'INSERT INTO service_event_types (service_id, event_type_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+              [service_id, et_id]
+            );
+          }
+          return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) };
+        } else if (body.type === 'service_addons') {
+          const { service_id, addon_ids } = body;
+          if (!service_id) return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'service_id required' }) };
+          await client.query('DELETE FROM service_addons WHERE service_id=$1', [service_id]);
+          let order = 0;
+          for (const addon_id of (addon_ids || [])) {
+            await client.query(
+              'INSERT INTO service_addons (service_id, addon_id, sort_order) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
+              [service_id, addon_id, order++]
+            );
+          }
+          return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) };
+        } else if (body.type === 'addon') {
+          await client.query(
+            `INSERT INTO addons (addon_id, name, price, active, sort_order)
+             VALUES ($1,$2,$3,$4,$5)
+             ON CONFLICT (addon_id) DO UPDATE SET
+               name = EXCLUDED.name, price = EXCLUDED.price,
+               active = EXCLUDED.active, sort_order = EXCLUDED.sort_order`,
+            [body.addon_id, body.name, Number(body.price), body.active !== false, body.sort_order || 0]
+          );
+        } else {
+          await client.query(
+            `INSERT INTO services (service_id, category, name, price, icon, duration_minutes, guest_suggestion, active, sort_order)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+             ON CONFLICT (service_id) DO UPDATE SET
+               name = EXCLUDED.name, price = EXCLUDED.price, icon = EXCLUDED.icon,
+               duration_minutes = EXCLUDED.duration_minutes, guest_suggestion = EXCLUDED.guest_suggestion,
+               active = EXCLUDED.active, sort_order = EXCLUDED.sort_order, updated_at = NOW()`,
+            [
+              body.service_id, body.category, body.name, Number(body.price),
+              body.icon || '🎪', Number(body.duration_minutes) || 120,
+              body.guest_suggestion || '', body.active !== false, Number(body.sort_order) || 0
+            ]
+          );
+        }
+        return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) };
+      }
+
+      return { statusCode: 405, headers: CORS, body: JSON.stringify({ error: 'Method not allowed' }) };
+
+    } catch (err) {
+      console.error('Services error:', err.message);
+      return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: 'Internal server error' }) };
     }
-
-    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
-
-  } catch (err) {
-    console.error('Services error:', err.message);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
-  } finally {
-    if (client) client.release();
-  }
+  });
 };

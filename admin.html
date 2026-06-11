@@ -81,6 +81,8 @@ tr:hover td{background:#fafaf8}
 .btn-ghost:hover{color:#374151;background:#f3f4f6}
 .btn-sm{padding:5px 11px;font-size:.78rem}
 .btn-xs{padding:3px 8px;font-size:.72rem}
+.btn-accent{background:linear-gradient(135deg,#f59e0b,#f97316);color:#fff;border:none}
+.btn-accent:hover:not(:disabled){filter:brightness(1.08)}
 
 /* ── Badges ── */
 .badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:.72rem;font-weight:700;white-space:nowrap}
@@ -282,8 +284,11 @@ input,select,textarea{font-family:inherit}
       Funky Monkey Events · OKC<br>
       (405) 431-6625
       <div style="margin-top:12px">
-        <button class="btn btn-outline btn-sm" onclick="sessionStorage.clear();location.reload()" style="width:100%;font-size:0.875rem">
+        <button class="btn btn-outline btn-sm" onclick="(async()=>{try{await apiFetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'logout'})})}catch(e){}sessionStorage.clear();location.reload()})()" style="width:100%;font-size:0.875rem">
           🚪 Sign Out
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="changeAdminPassword()" style="width:100%;font-size:0.8rem;margin-top:6px;color:rgba(255,255,255,.4)">
+          🔑 Change Password
         </button>
       </div>
     </div>
@@ -421,9 +426,9 @@ input,select,textarea{font-family:inherit}
       <div class="page-hdr">
         <h1>Calendar</h1>
         <div class="cal-nav">
-          <button class="btn btn-outline btn-sm" onclick="changeMonth(-2)">← Prev</button>
+          <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">← Prev</button>
           <span class="cal-month-label" id="cal-month-label"></span>
-          <button class="btn btn-outline btn-sm" onclick="changeMonth(2)">Next →</button>
+          <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Next →</button>
         </div>
       </div>
       <div class="card" style="margin-bottom:16px">
@@ -704,6 +709,21 @@ const EVENT_TYPE_DEFS = [
 // ══════════════════════════════════════════════════
 // AUTH
 // ══════════════════════════════════════════════════
+
+// Shared authenticated fetch helper — injects Bearer token and handles 401
+async function apiFetch(url, opts = {}) {
+  const session = (() => { try { return JSON.parse(sessionStorage.getItem('fm_auth') || 'null'); } catch { return null; } })();
+  const headers = Object.assign({}, opts.headers || {});
+  if (session?.token) headers['Authorization'] = 'Bearer ' + session.token;
+  const res = await fetch(url, Object.assign({}, opts, { headers }));
+  if (res.status === 401) {
+    sessionStorage.removeItem('fm_auth');
+    location.reload();
+    return res; // unreachable after reload but satisfies callers
+  }
+  return res;
+}
+
 async function doLogin() {
   const pw = document.getElementById('auth-pw').value;
   document.getElementById('auth-err').style.display = 'none';
@@ -714,7 +734,7 @@ async function doLogin() {
     });
     const data = await res.json();
     if (data.success) {
-      currentUser = { role: data.role, staffId: data.staffId || null, staffName: data.staffName || 'Admin', staffColor: data.staffColor || '#7c3aed' };
+      currentUser = { role: data.role, staffId: data.staffId || null, staffName: data.staffName || 'Admin', staffColor: data.staffColor || '#7c3aed', token: data.token || null, expiresAt: data.expiresAt || null };
       sessionStorage.setItem('fm_auth', JSON.stringify(currentUser));
       document.getElementById('auth-screen').style.display = 'none';
       document.getElementById('app').style.display = 'block';
@@ -727,15 +747,34 @@ async function doLogin() {
   }
 }
 
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('dash-date').textContent =
     new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
   const saved = sessionStorage.getItem('fm_auth');
   if (saved) {
-    try { currentUser = JSON.parse(saved); } catch { currentUser = { role: 'admin' }; }
-    document.getElementById('auth-screen').style.display = 'none';
-    document.getElementById('app').style.display = 'block';
-    init();
+    let session;
+    try { session = JSON.parse(saved); } catch { session = null; }
+    if (session) {
+      // Validate stored token with the server
+      try {
+        const checkRes = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (session.token || '') },
+          body: JSON.stringify({ action: 'check' })
+        });
+        if (!checkRes.ok) {
+          sessionStorage.removeItem('fm_auth');
+          return; // show login screen
+        }
+      } catch {
+        sessionStorage.removeItem('fm_auth');
+        return;
+      }
+      currentUser = session;
+      document.getElementById('auth-screen').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      init();
+    }
   }
 });
 
@@ -758,14 +797,14 @@ async function init() {
 
 async function loadStaffList() {
   try {
-    const res = await fetch('/api/staff');
+    const res = await apiFetch('/api/staff');
     allStaff = await res.json();
   } catch(e) { console.error('loadStaffList:', e); }
 }
 
 async function loadServiceSlots() {
   try {
-    const res = await fetch('/api/staff-assignments?service_slots=true');
+    const res = await apiFetch('/api/staff-assignments?service_slots=true');
     if (!res.ok) return;
     const data = await res.json();
     allServiceSlots = data.slots || [];
@@ -775,7 +814,7 @@ async function loadServiceSlots() {
 async function loadCalStaffMap() {
   try {
     // Fetch all assignments in one go for calendar rendering
-    const res = await fetch('/api/staff-assignments?all=true');
+    const res = await apiFetch('/api/staff-assignments?all=true');
     if (!res.ok) return;
     const data = await res.json();
     calStaffMap = {};
@@ -793,7 +832,7 @@ async function loadCalStaffMap() {
 
 async function loadBookings() {
   try {
-    const res = await fetch('/api/bookings');
+    const res = await apiFetch('/api/bookings');
     allBookings = await res.json();
     refreshAllViews();
   } catch(e) { console.error('loadBookings:', e); }
@@ -1257,7 +1296,7 @@ function openBooking(id) {
     <div style="background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <strong style="font-size:.875rem">🧾 Invoice</strong>
-        <a href="/api/generate-invoice/${b.reference}" class="btn btn-outline btn-sm" download>Download PDF</a>
+        <button class="btn btn-outline btn-sm" onclick="downloadInvoice('${b.reference}')">Download PDF</button>
       </div>
     </div>
 
@@ -1306,7 +1345,7 @@ function openBooking(id) {
           <label>Payment Ref</label>
           <input type="text" id="pay-ref-${b.id}" value="${esc(b.payment_ref||'')}" placeholder="Check #, Venmo ID…" style="width:100%"/>
         </div>
-        <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordPayment('${b.id}')">Save Payment</button>
+        <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordClientPayment('${b.id}')">Save Payment</button>
         <span class="save-flash" id="pay-flash-${b.id}">✓ Saved</span>
       </div>
       <div class="pay-row" style="margin-top:8px;align-items:center;gap:12px">
@@ -1415,9 +1454,9 @@ async function loadStaffAssignments(bookingId) {
   
   try {
     const [assignRes, payRes, bookingRes] = await Promise.all([
-      fetch('/api/staff-assignments?booking_id=' + bookingId),
-      fetch('/api/staff-payments?booking_id=' + bookingId),
-      fetch('/api/bookings')
+      apiFetch('/api/staff-assignments?booking_id=' + bookingId),
+      apiFetch('/api/staff-payments?booking_id=' + bookingId),
+      apiFetch('/api/bookings')
     ]);
     
     const { assignments, slots } = await assignRes.json();
@@ -1807,14 +1846,14 @@ async function saveAssignmentTimes(aid, bookingId) {
 // NEW: Quick assign function
 async function quickAssignStaff(staffId, tag, bookingId) {
   try {
-    const res = await fetch('/api/staff-assignments', {
+    const res = await apiFetch('/api/staff-assignments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        action: 'assign', 
-        booking_id: parseInt(bookingId), 
-        staff_id: parseInt(staffId), 
-        tag_filled: tag 
+      body: JSON.stringify({
+        action: 'assign',
+        booking_id: parseInt(bookingId),
+        staff_id: parseInt(staffId),
+        tag_filled: tag
       })
     });
     if (!res.ok) { 
@@ -1836,7 +1875,7 @@ async function assignStaff(bookingId) {
   if (!staffId || !tag) { alert('Select a staff member and role first.'); return; }
 
   try {
-    const res = await fetch('/api/staff-assignments', {
+    const res = await apiFetch('/api/staff-assignments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'assign', booking_id: parseInt(bookingId), staff_id: parseInt(staffId), tag_filled: tag })
@@ -1850,7 +1889,7 @@ async function assignStaff(bookingId) {
 
 async function promoteToAssigned(bookingId, staffId, tag) {
   try {
-    const res = await fetch('/api/staff-assignments', {
+    const res = await apiFetch('/api/staff-assignments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'assign', booking_id: parseInt(bookingId), staff_id: parseInt(staffId), tag_filled: tag })
@@ -1863,7 +1902,7 @@ async function promoteToAssigned(bookingId, staffId, tag) {
 async function unassignStaff(bookingId, staffId, tag) {
   if (!confirm('Remove this staff member from the gig?')) return;
   try {
-    const res = await fetch('/api/staff-assignments', {
+    const res = await apiFetch('/api/staff-assignments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'unassign', booking_id: parseInt(bookingId), staff_id: parseInt(staffId), tag_filled: tag })
@@ -1880,7 +1919,7 @@ async function notifyStaff(bookingId) {
   btn.disabled = true;
   btn.textContent = 'Sending…';
   try {
-    const res = await fetch('/api/staff-assignments', {
+    const res = await apiFetch('/api/staff-assignments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'notify_staff', booking_id: parseInt(bookingId) })
@@ -1900,7 +1939,7 @@ async function recordPayment(staffId, bookingId, defaultMethod) {
   const note   = document.getElementById(`pay-note-${staffId}-${bookingId}`)?.value || '';
   const staffRecord = (allStaff || []).find(s => s.id === staffId);
   try {
-    const res = await fetch('/api/staff-payments', {
+    const res = await apiFetch('/api/staff-payments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1919,7 +1958,7 @@ async function recordPayment(staffId, bookingId, defaultMethod) {
 
 async function markPaymentPaid(paymentId, bookingId) {
   try {
-    const res = await fetch('/api/staff-payments/' + paymentId, {
+    const res = await apiFetch('/api/staff-payments/' + paymentId, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paid: true })
@@ -1931,7 +1970,7 @@ async function markPaymentPaid(paymentId, bookingId) {
 
 async function markPaymentUnpaid(paymentId, bookingId) {
   try {
-    const res = await fetch('/api/staff-payments/' + paymentId, {
+    const res = await apiFetch('/api/staff-payments/' + paymentId, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paid: false })
@@ -1949,7 +1988,7 @@ async function setStatus(id, status) {
     openBooking(id);
     // Auto-notify matching staff when a booking is confirmed
     if (status === 'confirmed') {
-      fetch('/api/staff-assignments', {
+      apiFetch('/api/staff-assignments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'notify_staff', booking_id: parseInt(id) })
@@ -1985,7 +2024,7 @@ async function sendStripeLink(id) {
   const depositAmount = Number(b.deposit_amount) || 100;
 
   try {
-    const res = await fetch('/api/create-stripe-link', {
+    const res = await apiFetch('/api/create-stripe-link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1999,17 +2038,25 @@ async function sendStripeLink(id) {
     });
     const data = await res.json();
     if (data.url) {
-      el.innerHTML = `✅ Link sent. <a href="${data.url}" target="_blank" style="color:#7c3aed">Open →</a>`;
-      const bk = allBookings.find(x => String(x.id) === String(id));
-      if (bk) bk.stripe_payment_link = data.url;
+      if (!String(data.url).startsWith('https://')) {
+        el.textContent = '❌ Invalid payment link URL returned';
+      } else {
+        const safeUrl = encodeURI(data.url);
+        const a = document.createElement('a');
+        a.href = safeUrl; a.target = '_blank'; a.style.color = '#7c3aed'; a.textContent = 'Open →';
+        el.textContent = '✅ Link sent. ';
+        el.appendChild(a);
+        const bk = allBookings.find(x => String(x.id) === String(id));
+        if (bk) bk.stripe_payment_link = data.url;
+      }
     } else {
       el.textContent = '❌ ' + (data.error || 'Unknown error');
     }
   } catch(e) { el.textContent = '❌ ' + e.message; }
 }
 
-// ── Record payment — inline feedback, reopens modal to show updated deposit status ──
-async function recordPayment(id) {
+// ── Record client deposit payment — inline feedback, reopens modal to show updated deposit status ──
+async function recordClientPayment(id) {
   const amt = document.getElementById('pay-amt-' + id).value;
   const method = document.getElementById('pay-meth-' + id).value;
   const note = document.getElementById('pay-note-' + id).value;
@@ -2120,7 +2167,7 @@ async function processRefund(bookingId) {
   if (!confirm(confirmMsg + confirmDetails)) return;
 
   try {
-    const res = await fetch('/api/refund', {
+    const res = await apiFetch('/api/refund', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2150,14 +2197,14 @@ async function processRefund(bookingId) {
 
 async function confirmDelete(id) {
   if (!confirm('Delete this booking? This cannot be undone.')) return;
-  await fetch('/api/booking/' + id, { method: 'DELETE' });
+  await apiFetch('/api/booking/' + id, { method: 'DELETE' });
   closeModal();
   await loadBookings();
 }
 
 // ── Shared PATCH helper ──
 async function patch(id, payload) {
-  const res = await fetch('/api/booking/' + id, {
+  const res = await apiFetch('/api/booking/' + id, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -2257,7 +2304,7 @@ async function renderStaff() {
   const grid = document.getElementById('staff-grid');
   grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af">Loading…</div>';
   try {
-    const res = await fetch('/api/staff');
+    const res = await apiFetch('/api/staff');
     allStaff = await res.json();
   } catch(e) {
     grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#dc2626">Failed to load staff.</div>';
@@ -2418,12 +2465,57 @@ async function addCustomTagPicker(staffId) {
 
 async function archiveStaff(id) {
   if (!confirm('Remove this staff member? Their history is preserved.')) return;
-  await fetch('/api/staff/' + id, { method: 'DELETE' });
+  await apiFetch('/api/staff/' + id, { method: 'DELETE' });
   renderStaff();
 }
 
+async function regenerateAccessCode(staffId) {
+  if (!confirm('Regenerate access code? The old code will stop working immediately.')) return;
+  try {
+    const res = await apiFetch(`/api/staff/${staffId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'regenerate_access_code' })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed');
+    const el = document.getElementById('sf-access-code-result');
+    if (el) {
+      el.style.display = 'block';
+      el.innerHTML = `<strong>⚠️ New access code (shown once — copy it now):</strong><br>
+        <span style="font-family:monospace;font-size:1.1rem;letter-spacing:.15em;user-select:all;cursor:pointer" title="Click to copy" onclick="navigator.clipboard.writeText('${data.access_code}');this.textContent='Copied!'">${esc(data.access_code)}</span>
+        <div style="font-size:.72rem;color:#92400e;margin-top:4px">Share this code with the staff member. It will not be shown again.</div>`;
+    } else {
+      alert(`New access code (copy now — shown once):\n\n${data.access_code}`);
+    }
+  } catch(e) {
+    alert('Failed to regenerate access code: ' + e.message);
+  }
+}
+
+async function changeAdminPassword() {
+  const pw = prompt('Enter new admin password (min 10 characters):');
+  if (!pw) return;
+  if (pw.length < 10) { alert('Password must be at least 10 characters.'); return; }
+  try {
+    const res = await apiFetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_admin_password', new_password: pw })
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert('Password updated successfully.');
+    } else {
+      alert('Failed: ' + (data.error || 'Unknown error'));
+    }
+  } catch(e) {
+    alert('Failed to update password: ' + e.message);
+  }
+}
+
 async function patchStaff(id, payload) {
-  const res = await fetch('/api/staff/' + id, {
+  const res = await apiFetch('/api/staff/' + id, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -2478,12 +2570,16 @@ function openStaffModal(id) {
         <input id="sf-email" type="email" value="${esc(s?.email||'')}" placeholder="jane@email.com"
           style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
       </div>
-      <div class="detail-field">
-        <label>Login PIN</label>
-        <input id="sf-pin" type="text" value="${esc(s?.pin||'0000')}" maxlength="10" placeholder="e.g. 1234"
-          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem;font-family:monospace;letter-spacing:.1em"/>
-        <div style="font-size:.72rem;color:#9ca3af;margin-top:3px">Staff use this PIN to log in</div>
-      </div>
+      ${s ? `<div class="detail-field" style="grid-column:1/-1">
+        <label>Staff Access Code</label>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn btn-outline btn-sm" onclick="regenerateAccessCode(${s.id})">🔑 Regenerate Access Code</button>
+          <span style="font-size:.72rem;color:#9ca3af">Staff log in with their access code. Generate a new one to revoke the old one.</span>
+        </div>
+        <div id="sf-access-code-result" style="display:none;margin-top:8px;padding:10px;background:#fef3c7;border:1.5px solid #f59e0b;border-radius:7px;font-size:.875rem"></div>
+      </div>` : `<div class="detail-field" style="grid-column:1/-1">
+        <span style="font-size:.72rem;color:#9ca3af">An access code can be generated after saving this new staff member.</span>
+      </div>`}
       <div class="detail-field">
         <label>Comms Preference</label>
         <select id="sf-comms" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem">
@@ -2564,7 +2660,6 @@ async function saveStaffModal(id) {
     role:             document.getElementById('sf-role').value.trim() || 'Performer',
     color:            document.getElementById('sf-color').value,
     phone, email,
-    pin:              document.getElementById('sf-pin').value.trim() || '0000',
     comms_preference: document.getElementById('sf-comms').value,
     admin_notes:      document.getElementById('sf-anotes').value.trim(),
     shared_notes:     document.getElementById('sf-shared-notes').value.trim(),
@@ -2580,7 +2675,7 @@ async function saveStaffModal(id) {
     if (id) {
       await patchStaff(id, payload);
     } else {
-      const res = await fetch('/api/staff', {
+      const res = await apiFetch('/api/staff', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
       if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error||'Create failed'); }
@@ -2599,9 +2694,9 @@ async function loadStaffPortal() {
   grid.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af">Loading your gigs…</div>';
   try {
     const [assignRes, staffRes, payRes] = await Promise.all([
-      fetch('/api/staff-assignments?staff_id=' + currentUser.staffId),
-      fetch('/api/staff/' + currentUser.staffId),
-      fetch('/api/staff-payments?staff_id=' + currentUser.staffId)
+      apiFetch('/api/staff-assignments?staff_id=' + currentUser.staffId),
+      apiFetch('/api/staff/' + currentUser.staffId),
+      apiFetch('/api/staff-payments?staff_id=' + currentUser.staffId)
     ]);
     const data = await assignRes.json();
     const staffRecord = await staffRes.json();
@@ -2612,8 +2707,8 @@ async function loadStaffPortal() {
     if (earningsEl) {
       try {
         const [earningsRes, unpaidEarningsRes] = await Promise.all([
-          fetch(`/api/payroll?staff_id=${currentUser.staffId}`),
-          fetch(`/api/staff-payments?staff_id=${currentUser.staffId}&unpaid=true`)
+          apiFetch(`/api/payroll?staff_id=${currentUser.staffId}`),
+          apiFetch(`/api/staff-payments?staff_id=${currentUser.staffId}&unpaid=true`)
         ]);
         const { runs: payrollRuns } = await earningsRes.json();
         const { payments: unpaidEarnings } = await unpaidEarningsRes.json();
@@ -2909,7 +3004,7 @@ function openGigCard(g) {
 
 async function updateChecklist(logId, assignmentId, bookingId, staffId, status) {
   try {
-    const res = await fetch('/api/staff-assignments', {
+    const res = await apiFetch('/api/staff-assignments', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ action:'update_checklist', log_id:logId||undefined, assignment_id:assignmentId, booking_id:bookingId, staff_id:staffId, status })
     });
@@ -2924,7 +3019,7 @@ async function updateChecklist(logId, assignmentId, bookingId, staffId, status) 
 
 async function expressInterest(bookingId, tagFilled, status) {
   try {
-    await fetch('/api/staff-assignments', {
+    await apiFetch('/api/staff-assignments', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ action:'express_interest', booking_id:bookingId, staff_id:currentUser.staffId, tag_filled:tagFilled, status })
     });
@@ -3024,7 +3119,7 @@ async function submitSurvey(logId) {
   };
   Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
   try {
-    await fetch('/api/staff-assignments', {
+    await apiFetch('/api/staff-assignments', {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
     });
     closeModal();
@@ -3115,9 +3210,9 @@ async function loadCatalogue() {
   document.getElementById('cat-content').style.display = 'none';
   try {
     const [svcRes, slotsRes, tmplRes] = await Promise.all([
-      fetch('/api/services'),
-      fetch('/api/staff-assignments?service_slots=true'),
-      fetch('/api/staff-assignments?time_templates=true')
+      apiFetch('/api/services'),
+      apiFetch('/api/staff-assignments?service_slots=true'),
+      apiFetch('/api/staff-assignments?time_templates=true')
     ]);
     const data = await svcRes.json();
     catServices = data.services || [];
@@ -3525,7 +3620,7 @@ async function saveCatalogue() {
         else if (field === 'price' || field === 'duration_minutes') payload[field] = Number(f.value);
         else payload[field] = f.value;
       });
-      await fetch('/api/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+      await apiFetch('/api/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
     }
 
     // Save add-ons
@@ -3537,7 +3632,7 @@ async function saveCatalogue() {
         else if (field === 'price') payload[field] = Number(f.value);
         else payload[field] = f.value;
       });
-      await fetch('/api/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+      await apiFetch('/api/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
     }
 
     // Save staff slot requirements — collect all, send full replace
@@ -3556,7 +3651,7 @@ async function saveCatalogue() {
     const serviceIdsInSlots = new Set(allSlots.map(s => s.service_id));
     allServiceIds.forEach(id => { if (!serviceIdsInSlots.has(id)) allSlots.push({ service_id: id, tag_required: '__CLEAR__', slot_count: 0 }); });
 
-    await fetch('/api/staff-assignments', {
+    await apiFetch('/api/staff-assignments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'save_service_slots', slots: allSlots })
@@ -3566,7 +3661,7 @@ async function saveCatalogue() {
     for (const container of document.querySelectorAll('.svc-addon-container[data-svc]')) {
       const serviceId = container.dataset.svc;
       const addonIds = [...container.querySelectorAll('.svc-addon-chip')].map(c => c.dataset.addonId);
-      await fetch('/api/services', {
+      await apiFetch('/api/services', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'service_addons', service_id: serviceId, addon_ids: addonIds })
@@ -3577,7 +3672,7 @@ async function saveCatalogue() {
     for (const container of document.querySelectorAll('.svc-et-container[data-svc]')) {
       const serviceId = container.dataset.svc;
       const etIds = [...container.querySelectorAll('.svc-et-chip')].map(c => c.dataset.etId);
-      await fetch('/api/services', {
+      await apiFetch('/api/services', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'service_event_types', service_id: serviceId, event_type_ids: etIds })
@@ -3591,7 +3686,7 @@ async function saveCatalogue() {
       const unload_minutes  = parseInt(row.querySelector('.tmpl-unload')?.value) || 45;
       const pack_out_minutes     = parseInt(row.querySelector('.tmpl-pack')?.value)   || 20;
       const home_unload_minutes  = parseInt(row.querySelector('.tmpl-homeun')?.value) || 15;
-      await fetch('/api/staff-assignments', {
+      await apiFetch('/api/staff-assignments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'save_time_template', service_id, load_minutes, unload_minutes, pack_out_minutes, home_unload_minutes })
@@ -3610,8 +3705,8 @@ async function saveCatalogue() {
 // ══════════════════════════════════════════════════
 async function loadAutomations() {
   const [rulesRes, logRes] = await Promise.all([
-    fetch('/api/automations'),
-    fetch('/api/automations?type=log')
+    apiFetch('/api/automations'),
+    apiFetch('/api/automations?type=log')
   ]);
   const rules = await rulesRes.json();
   const log   = await logRes.json();
@@ -3732,7 +3827,7 @@ async function saveRule(ruleId) {
     active: true
   };
   try {
-    const res = await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'save_rule', rule }) });
+    const res = await apiFetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'save_rule', rule }) });
     if (!res.ok) throw new Error((await res.json()).error);
     closeModal();
     await loadAutomations();
@@ -3740,12 +3835,12 @@ async function saveRule(ruleId) {
 }
 
 async function toggleRule(ruleId, active) {
-  await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'save_rule', rule:{ id:ruleId, active } }) });
+  await apiFetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'save_rule', rule:{ id:ruleId, active } }) });
 }
 
 async function deleteRule(ruleId) {
   if (!confirm('Deactivate this rule?')) return;
-  await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'delete_rule', rule_id:ruleId }) });
+  await apiFetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'delete_rule', rule_id:ruleId }) });
   closeModal();
   await loadAutomations();
 }
@@ -3754,7 +3849,7 @@ async function runScheduledNow() {
   const btn = event.target;
   btn.disabled = true; btn.textContent = 'Running…';
   try {
-    const res = await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'run_scheduled' }) });
+    const res = await apiFetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'run_scheduled' }) });
     const data = await res.json();
     alert(`Done — ${data.sent} scheduled email(s) sent.`);
     await loadAutomations();
@@ -3770,7 +3865,7 @@ async function loadCOIRequests(bookingId) {
   if (!container) return;
 
   try {
-    const res = await fetch(`/api/coi-request/${bookingId}`);
+    const res = await apiFetch(`/api/coi-request/${bookingId}`);
     const data = await res.json();
     
     if (!data.requests || data.requests.length === 0) {
@@ -3815,7 +3910,7 @@ async function loadCOIRequests(bookingId) {
 
 async function markCOIFulfilled(requestId, bookingId) {
   try {
-    const res = await fetch(`/api/coi-request/${requestId}`, {
+    const res = await apiFetch(`/api/coi-request/${requestId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fulfilled: true })
@@ -3844,7 +3939,7 @@ async function loadGoogleReviews(bookingId) {
   if (!container) return;
 
   try {
-    const res = await fetch(`/api/staff-feedback/reviews?booking_id=${bookingId}`);
+    const res = await apiFetch(`/api/staff-feedback/reviews?booking_id=${bookingId}`);
     const data = await res.json();
     
     if (!data.reviews || data.reviews.length === 0) {
@@ -3900,7 +3995,7 @@ function addGoogleReview(bookingId) {
 
   const staffArray = staffMentioned ? staffMentioned.split(',').map(s => s.trim()).filter(Boolean) : [];
 
-  fetch('/api/staff-feedback/reviews', {
+  apiFetch('/api/staff-feedback/reviews', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -3955,7 +4050,7 @@ async function awardReviewBonuses(reviewId, bookingId, staffNames) {
 
     // Award $10 bonus to each mentioned staff
     for (const staffId of staffIds) {
-      await fetch('/api/staff-feedback/bonuses', {
+      await apiFetch('/api/staff-feedback/bonuses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3970,7 +4065,7 @@ async function awardReviewBonuses(reviewId, bookingId, staffNames) {
     }
 
     // Mark review as bonuses awarded
-    await fetch(`/api/staff-feedback/reviews/${reviewId}`, {
+    await apiFetch(`/api/staff-feedback/reviews/${reviewId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bonuses_awarded: true })
@@ -3989,7 +4084,7 @@ async function awardReviewBonuses(reviewId, bookingId, staffNames) {
 // ══════════════════════════════════════════════════
 async function loadBookingEmailLog(bookingId, container) {
   try {
-    const res = await fetch(`/api/automations?type=log&booking_id=${bookingId}`);
+    const res = await apiFetch(`/api/automations?type=log&booking_id=${bookingId}`);
     const log = await res.json();
     if (!log.length) { container.innerHTML = '<p style="color:#9ca3af;font-size:.8rem;font-style:italic">No emails sent yet.</p>'; return; }
     container.innerHTML = log.map(e => `
@@ -4005,7 +4100,7 @@ async function loadBookingEmailLog(bookingId, container) {
 
 async function loadBookingActivity(bookingId, container) {
   try {
-    const res = await fetch(`/api/booking/${bookingId}?activity=true`);
+    const res = await apiFetch(`/api/booking/${bookingId}?activity=true`);
     const { changes } = await res.json();
     if (!changes || !changes.length) {
       container.innerHTML = '<p style="color:#9ca3af;font-size:.8rem;font-style:italic">No activity recorded.</p>';
@@ -4027,7 +4122,7 @@ async function loadBookingActivity(bookingId, container) {
 // ══════════════════════════════════════════════════
 async function loadBookingTasks(bookingId, container) {
   try {
-    const res = await fetch(`/api/automations?type=tasks&booking_id=${bookingId}`);
+    const res = await apiFetch(`/api/automations?type=tasks&booking_id=${bookingId}`);
     const tasks = await res.json();
     renderBookingTasks(bookingId, tasks, container);
   } catch(e) { container.innerHTML = '<p style="color:#dc2626;font-size:.8rem">Failed to load.</p>'; }
@@ -4051,18 +4146,18 @@ async function addTask(bookingId) {
   const input = document.getElementById('new-task-' + bookingId);
   const task = input?.value.trim();
   if (!task) return;
-  await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'save_task', booking_id:bookingId, task }) });
+  await apiFetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'save_task', booking_id:bookingId, task }) });
   input.value = '';
   const container = input.closest('.tasks-container');
   await loadBookingTasks(bookingId, container);
 }
 
 async function completeTask(taskId, completed, bookingId) {
-  await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'complete_task', task_id:taskId, completed }) });
+  await apiFetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'complete_task', task_id:taskId, completed }) });
 }
 
 async function deleteTask(taskId, bookingId) {
-  await fetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'delete_task', task_id:taskId }) });
+  await apiFetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'delete_task', task_id:taskId }) });
   const row = document.getElementById('task-row-' + taskId);
   if (row) row.remove();
 }
@@ -4163,8 +4258,8 @@ async function loadPayroll() {
   setPayrollRange('week'); // default date range to current week on load
   try {
     const [runsRes, unpaidRes] = await Promise.all([
-      fetch('/api/payroll'),
-      fetch('/api/staff-payments?unpaid=true')
+      apiFetch('/api/payroll'),
+      apiFetch('/api/staff-payments?unpaid=true')
     ]);
 
     const { runs } = await runsRes.json();
@@ -4267,7 +4362,7 @@ async function generatePayroll() {
   if (!confirm(`Generate payroll for ${dateFrom} through ${dateTo}?`)) return;
 
   try {
-    const res = await fetch('/api/payroll', {
+    const res = await apiFetch('/api/payroll', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -4293,7 +4388,7 @@ async function generatePayroll() {
 
 async function viewPayrollRun(runId) {
   try {
-    const res = await fetch(`/api/payroll/${runId}`);
+    const res = await apiFetch(`/api/payroll/${runId}`);
     const run = await res.json();
 
     const statusColors = { draft: '#f59e0b', approved: '#3b82f6', paid: '#10b981' };
@@ -4353,7 +4448,7 @@ async function approvePayroll(runId) {
   if (!confirm('Approve and lock this payroll run? This cannot be undone.')) return;
 
   try {
-    const res = await fetch(`/api/payroll/${runId}`, {
+    const res = await apiFetch(`/api/payroll/${runId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'approved' })
@@ -4375,7 +4470,7 @@ async function markPayrollPaid(runId) {
   if (!confirm('Mark this payroll as paid? This will update all staff_payments to paid=true.')) return;
 
   try {
-    const res = await fetch(`/api/payroll/${runId}`, {
+    const res = await apiFetch(`/api/payroll/${runId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'paid' })
@@ -4441,19 +4536,67 @@ function setExportDates(period) {
   document.getElementById('export-end-date').value = endDate;
 }
 
-function downloadExport(reportType) {
+async function downloadInvoice(reference) {
+  try {
+    const res = await apiFetch(`/api/generate-invoice/${encodeURIComponent(reference)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert('Invoice download failed: ' + (err.error || res.status));
+      return;
+    }
+    const blob = await res.blob();
+    let filename = `invoice-${reference}.pdf`;
+    const cd = res.headers.get('Content-Disposition');
+    if (cd) {
+      const m = cd.match(/filename[^;=\n]*=(['"]?)([^'";\n]+)\1/);
+      if (m && m[2]) filename = m[2].trim();
+    }
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objUrl; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
+  } catch(e) {
+    alert('Invoice download failed: ' + e.message);
+  }
+}
+
+async function downloadExport(reportType) {
   const startDate = document.getElementById('export-start-date').value;
   const endDate = document.getElementById('export-end-date').value;
-  
+
   if (!startDate || !endDate) {
     alert('Please select start and end dates');
     return;
   }
-  
+
   const url = `/api/accounting-export?report_type=${reportType}&start_date=${startDate}&end_date=${endDate}`;
-  
-  // Trigger download
-  window.location.href = url;
+
+  try {
+    const res = await apiFetch(url);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert('Export failed: ' + (err.error || res.status));
+      return;
+    }
+    const blob = await res.blob();
+    // Derive filename from Content-Disposition or build one
+    let filename = `${reportType}_${startDate}_${endDate}.csv`;
+    const cd = res.headers.get('Content-Disposition');
+    if (cd) {
+      const m = cd.match(/filename[^;=\n]*=(['"]?)([^'";\n]+)\1/);
+      if (m && m[2]) filename = m[2].trim();
+    }
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objUrl; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
+  } catch(e) {
+    alert('Export failed: ' + e.message);
+  }
 }
 
 // Initialize export dates to current year on page load

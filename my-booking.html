@@ -353,27 +353,24 @@
       btn.textContent = 'Looking up...';
 
       try {
-        const res = await fetch(`/api/bookings?reference=${reference}`);
+        const res = await fetch(`/api/bookings?reference=${encodeURIComponent(reference)}&email=${encodeURIComponent(email)}`);
         const data = await res.json();
 
-        if (!data.bookings || data.bookings.length === 0) {
-          errorEl.textContent = 'Booking not found. Please check your reference number and try again.';
+        if (res.status === 404 || !data.bookings || data.bookings.length === 0) {
+          errorEl.textContent = 'No booking found for that reference number and email. Please check and try again.';
           errorEl.style.display = 'block';
           return;
         }
 
-        const booking = data.bookings[0];
-
-        // Verify email matches (case insensitive)
-        if (booking.client_email.toLowerCase() !== email) {
-          errorEl.textContent = 'Email address does not match this booking. Please check and try again.';
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Failed to look up booking. Please try again.';
           errorEl.style.display = 'block';
           return;
         }
 
-        // Success!
-        currentBooking = booking;
-        displayBooking(booking);
+        // Success — server already verified the email matches
+        currentBooking = data.bookings[0];
+        displayBooking(currentBooking);
       } catch(e) {
         errorEl.textContent = 'Failed to look up booking. Please try again.';
         errorEl.style.display = 'block';
@@ -464,21 +461,20 @@
 
     async function requestInvoice() {
       if (!currentBooking) return;
-      
-      alert(`Invoice request sent! We'll email your invoice to ${currentBooking.client_email} within 24 hours.`);
-      
-      // TODO: Send email to Joe notifying him of invoice request
+      const url = `/api/generate-invoice/${encodeURIComponent(currentBooking.reference)}?email=${encodeURIComponent(currentBooking.client_email)}`;
+      window.open(url, '_blank');
     }
 
     async function requestCOI() {
       if (!currentBooking) return;
-      
+
       try {
         const res = await fetch('/api/coi-request', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            booking_id: currentBooking.id,
+            reference: currentBooking.reference,
+            client_email: currentBooking.client_email,
             requested_by_email: currentBooking.client_email,
             requested_from: 'my_booking_page'
           })

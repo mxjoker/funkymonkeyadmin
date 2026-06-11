@@ -1,19 +1,11 @@
 // netlify/functions/refund.js
 // Handle Stripe refunds for bookings
 
-const { Pool } = require('pg');
+const { withClient } = require('./_db');
+const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
+const { esc, sendEmail, wrap, logChange } = require('./_email');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-
-const HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Access-Control-Allow-Methods': 'POST,OPTIONS',
-  'Content-Type': 'application/json'
-};
+const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
 // Ensure refunds table exists
 async function ensureRefundsTable(client) {
@@ -32,7 +24,7 @@ async function ensureRefundsTable(client) {
   `);
 
   await client.query(`
-    CREATE INDEX IF NOT EXISTS idx_refunds_booking_id 
+    CREATE INDEX IF NOT EXISTS idx_refunds_booking_id
     ON refunds(booking_id)
   `);
 }
@@ -55,228 +47,196 @@ async function processStripeRefund(paymentIntentId, amount, reason) {
     reason: reason || 'requested_by_customer'
   });
 
-  try {
-    const res = await fetch('https://api.stripe.com/v1/refunds', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${STRIPE_KEY}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: params.toString()
-    });
+  const res = await fetch('https://api.stripe.com/v1/refunds', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${STRIPE_KEY}`,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: params.toString()
+  });
 
-    const data = await res.json();
-    
-    if (!res.ok) {
-      console.error('Stripe refund error:', data.error);
-      throw new Error(data.error?.message || 'Stripe refund failed');
-    }
+  const data = await res.json();
 
-    return data;
-  } catch(e) {
-    console.error('Stripe refund error:', e.message);
-    throw e;
+  if (!res.ok) {
+    console.error('Stripe refund error:', data.error);
+    throw new Error(data.error?.message || 'Stripe refund failed');
   }
+
+  return data;
 }
 
 exports.handler = async (event) => {
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers: HEADERS, body: '' };
-  }
+  const pre = preflight(event);
+  if (pre) return pre;
 
   if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      headers: HEADERS,
-      body: JSON.stringify({ error: 'Method not allowed' })
-    };
+    return json(405, { error: 'Method not allowed' });
   }
 
-  const client = await pool.connect();
+  // Admin token required
+  const auth = await requireAuth(event, ['admin']);
+  if (!auth) return unauthorized();
+
+  let body;
   try {
-    await ensureRefundsTable(client);
+    body = JSON.parse(event.body || '{}');
+  } catch {
+    return json(400, { error: 'Invalid JSON' });
+  }
 
-    const { booking_id, amount, reason, refund_type } = JSON.parse(event.body || '{}');
+  const { booking_id, amount, reason, refund_type } = body;
 
-    if (!booking_id || !amount) {
-      return {
-        statusCode: 400,
-        headers: HEADERS,
-        body: JSON.stringify({ error: 'booking_id and amount are required' })
-      };
-    }
+  if (!booking_id || !amount) {
+    return json(400, { error: 'booking_id and amount are required' });
+  }
 
-    // Get booking details
-    const bookingRes = await client.query(
-      'SELECT * FROM bookings WHERE id = $1',
-      [booking_id]
-    );
-
-    if (bookingRes.rows.length === 0) {
-      return {
-        statusCode: 404,
-        headers: HEADERS,
-        body: JSON.stringify({ error: 'Booking not found' })
-      };
-    }
-
-    const booking = bookingRes.rows[0];
-    const amountCents = Math.round(Number(amount) * 100);
-
-    // Determine refund type and limits
-    let maxRefundAmount;
-    let refundDescription;
-
-    if (refund_type === 'deposit') {
-      maxRefundAmount = Number(booking.deposit_amount || 0);
-      refundDescription = 'Deposit refund';
-    } else if (refund_type === 'partial') {
-      maxRefundAmount = Number(booking.total_price || 0);
-      refundDescription = 'Partial refund';
-    } else {
-      // Full refund
-      maxRefundAmount = Number(booking.total_price || 0);
-      refundDescription = 'Full refund';
-    }
-
-    // Validate refund amount
-    if (Number(amount) > maxRefundAmount) {
-      return {
-        statusCode: 400,
-        headers: HEADERS,
-        body: JSON.stringify({ 
-          error: `Refund amount ($${amount}) exceeds maximum allowed ($${maxRefundAmount})` 
-        })
-      };
-    }
-
-    // Check if we have a Stripe payment to refund
-    if (!booking.stripe_payment_intent_id) {
-      // Manual payment - just log the refund without Stripe
-      const result = await client.query(
-        `INSERT INTO refunds (booking_id, amount, reason, status, refunded_by)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING *`,
-        [booking_id, amount, reason || refundDescription, 'manual', 'admin']
-      );
-
-      // Log the refund to booking changes
-      const { logChange } = require('./_email');
-      await logChange(
-        client, 
-        booking_id, 
-        'Refund processed (manual)', 
-        `$${Number(amount).toFixed(2)} - ${reason || refundDescription}`
-      );
-
-      return {
-        statusCode: 200,
-        headers: HEADERS,
-        body: JSON.stringify({
-          success: true,
-          refund: result.rows[0],
-          type: 'manual',
-          message: 'Manual refund logged. Process refund outside of system (check, Venmo, etc.)'
-        })
-      };
-    }
-
-    // Process Stripe refund
+  return withClient(async (client) => {
     try {
-      const stripeRefund = await processStripeRefund(
-        booking.stripe_payment_intent_id,
-        amountCents,
-        reason || refundDescription
+      await ensureRefundsTable(client);
+
+      // Get booking details
+      const bookingRes = await client.query(
+        'SELECT * FROM bookings WHERE id = $1',
+        [booking_id]
       );
 
-      // Record refund in database
-      const result = await client.query(
-        `INSERT INTO refunds (booking_id, stripe_refund_id, amount, reason, status, refunded_by, processed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())
-         RETURNING *`,
-        [
-          booking_id,
-          stripeRefund.id,
-          amount,
-          reason || refundDescription,
-          stripeRefund.status, // 'succeeded', 'pending', 'failed'
-          'admin'
-        ]
-      );
-
-      // Log the refund to booking changes
-      const { logChange } = require('./_email');
-      await logChange(
-        client,
-        booking_id,
-        'Refund processed',
-        `$${Number(amount).toFixed(2)} via Stripe - ${reason || refundDescription}`
-      );
-
-      // Send confirmation email
-      try {
-        const { sendEmail, wrap } = require('./_email');
-        const emailHTML = `
-          <h2>Refund Processed</h2>
-          <p>Hi ${booking.client_name || 'there'},</p>
-          <p>Your refund has been processed:</p>
-          <ul>
-            <li><strong>Amount:</strong> $${Number(amount).toFixed(2)}</li>
-            <li><strong>Booking:</strong> ${booking.service_name} on ${booking.event_date}</li>
-            <li><strong>Reference:</strong> ${booking.reference}</li>
-          </ul>
-          <p>The refund should appear in your account within 5-10 business days.</p>
-          <p>If you have any questions, please don't hesitate to contact us.</p>
-          <p>Thank you,<br>Funky Monkey Events</p>
-        `;
-        
-        await sendEmail(
-          booking.client_email,
-          `Refund Processed - ${booking.reference}`,
-          wrap(emailHTML)
-        );
-      } catch(emailError) {
-        console.error('Refund confirmation email failed:', emailError);
-        // Don't fail the refund if email fails
+      if (bookingRes.rows.length === 0) {
+        return json(404, { error: 'Booking not found' });
       }
 
-      return {
-        statusCode: 200,
-        headers: HEADERS,
-        body: JSON.stringify({
+      const booking = bookingRes.rows[0];
+      const amountCents = Math.round(Number(amount) * 100);
+
+      // Determine refund type and limits
+      let maxRefundAmount;
+      let refundDescription;
+
+      if (refund_type === 'deposit') {
+        maxRefundAmount = Number(booking.deposit_amount || 0);
+        refundDescription = 'Deposit refund';
+      } else if (refund_type === 'partial') {
+        maxRefundAmount = Number(booking.total_price || 0);
+        refundDescription = 'Partial refund';
+      } else {
+        // Full refund
+        maxRefundAmount = Number(booking.total_price || 0);
+        refundDescription = 'Full refund';
+      }
+
+      // Validate refund amount
+      if (Number(amount) > maxRefundAmount) {
+        return json(400, {
+          error: `Refund amount ($${amount}) exceeds maximum allowed ($${maxRefundAmount})`
+        });
+      }
+
+      // Check if we have a Stripe payment intent to refund
+      if (!booking.stripe_payment_intent_id) {
+        // Manual payment — log the refund without Stripe
+        const result = await client.query(
+          `INSERT INTO refunds (booking_id, amount, reason, status, refunded_by)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING *`,
+          [booking_id, amount, reason || refundDescription, 'manual', 'admin']
+        );
+
+        await logChange(
+          client,
+          booking_id,
+          'Refund processed (manual)',
+          `$${Number(amount).toFixed(2)} - ${reason || refundDescription}`
+        );
+
+        return json(200, {
+          success: true,
+          refund: result.rows[0],
+          path: 'manual',
+          message: 'Manual refund logged (no Stripe payment intent on record). Process refund outside of system (check, Venmo, etc.)'
+        });
+      }
+
+      // Process Stripe refund (stripe_payment_intent_id is set — from webhook)
+      try {
+        const stripeRefund = await processStripeRefund(
+          booking.stripe_payment_intent_id,
+          amountCents,
+          reason || refundDescription
+        );
+
+        // Record refund in database
+        const result = await client.query(
+          `INSERT INTO refunds (booking_id, stripe_refund_id, amount, reason, status, refunded_by, processed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW())
+           RETURNING *`,
+          [
+            booking_id,
+            stripeRefund.id,
+            amount,
+            reason || refundDescription,
+            stripeRefund.status, // 'succeeded', 'pending', 'failed'
+            'admin'
+          ]
+        );
+
+        await logChange(
+          client,
+          booking_id,
+          'Refund processed',
+          `$${Number(amount).toFixed(2)} via Stripe - ${reason || refundDescription}`
+        );
+
+        // Send confirmation email — failure must not fail the refund response
+        try {
+          const emailHTML = `
+            <h2>Refund Processed</h2>
+            <p>Hi ${esc(booking.client_name || 'there')},</p>
+            <p>Your refund has been processed:</p>
+            <ul>
+              <li><strong>Amount:</strong> $${Number(amount).toFixed(2)}</li>
+              <li><strong>Booking:</strong> ${esc(booking.service_name)} on ${booking.event_date}</li>
+              <li><strong>Reference:</strong> ${esc(booking.reference)}</li>
+            </ul>
+            <p>The refund should appear in your account within 5-10 business days.</p>
+            <p>If you have any questions, please don't hesitate to contact us.</p>
+            <p>Thank you,<br>Funky Monkey Events</p>
+          `;
+
+          await sendEmail(
+            booking.client_email,
+            `Refund Processed - ${booking.reference}`,
+            wrap(emailHTML)
+          );
+        } catch(emailError) {
+          console.error('Refund confirmation email failed:', emailError.message);
+        }
+
+        return json(200, {
           success: true,
           refund: result.rows[0],
           stripe_refund: stripeRefund,
+          path: 'stripe',
           message: `Refund of $${Number(amount).toFixed(2)} processed successfully via Stripe`
-        })
-      };
+        });
 
-    } catch(stripeError) {
-      // Stripe refund failed - log as failed
-      await client.query(
-        `INSERT INTO refunds (booking_id, amount, reason, status, refunded_by)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [booking_id, amount, reason || refundDescription, 'failed', 'admin']
-      );
+      } catch(stripeError) {
+        // Stripe refund failed — log as failed
+        await client.query(
+          `INSERT INTO refunds (booking_id, amount, reason, status, refunded_by)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [booking_id, amount, reason || refundDescription, 'failed', 'admin']
+        );
 
-      return {
-        statusCode: 500,
-        headers: HEADERS,
-        body: JSON.stringify({
+        console.error('Stripe refund failed:', stripeError.message);
+        return json(500, {
           error: 'Stripe refund failed',
-          details: stripeError.message
-        })
-      };
-    }
+          path: 'stripe'
+        });
+      }
 
-  } catch(err) {
-    console.error('Refund error:', err.message);
-    return {
-      statusCode: 500,
-      headers: HEADERS,
-      body: JSON.stringify({ error: err.message })
-    };
-  } finally {
-    client.release();
-  }
+    } catch(err) {
+      console.error('Refund error:', err.message);
+      return json(500, { error: 'Internal server error' });
+    }
+  });
 };

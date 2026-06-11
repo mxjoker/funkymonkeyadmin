@@ -51,12 +51,12 @@ body{font-family:'Segoe UI',sans-serif;background:#0F0A1E;min-height:100vh;color
     <div class="login-logo">🐒</div>
     <div class="login-title">Staff Portal</div>
     <div class="login-sub">Funky Monkey Events</div>
-    <input id="login-pin" type="password" inputmode="numeric" maxlength="10"
-      placeholder="••••" autocomplete="current-password"
+    <input id="login-pin" type="text" autocomplete="current-password"
+      placeholder="maple-rocket-fern-42"
       onkeydown="if(event.key==='Enter')doLogin()"/>
     <button id="login-btn" onclick="doLogin()">Log In</button>
-    <div id="login-err">Incorrect PIN. Try again.</div>
-    <div class="login-hint">Enter your 4-digit staff PIN</div>
+    <div id="login-err">Incorrect access code. Try again.</div>
+    <div class="login-hint">Enter your staff access code</div>
   </div>
 </div>
 
@@ -142,13 +142,54 @@ function fmtTime(t) {
 // ═══════════════════════════════════════
 // AUTH
 // ═══════════════════════════════════════
-window.addEventListener('DOMContentLoaded', () => {
+
+// apiFetch: injects Bearer token; on 401 clears session and reloads (login reappears)
+async function apiFetch(url, opts = {}) {
+  const saved = sessionStorage.getItem('fm_staff_auth');
+  let token = null;
+  try { token = saved ? JSON.parse(saved).token : null; } catch {}
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(url, Object.assign({}, opts, { headers }));
+  if (res.status === 401) {
+    sessionStorage.removeItem('fm_staff_auth');
+    location.reload();
+    return res; // unreachable after reload, but keeps return type consistent
+  }
+  return res;
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
   const saved = sessionStorage.getItem('fm_staff_auth');
   if (saved) {
     try {
       currentUser = JSON.parse(saved);
+      // Validate the stored token is still good
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (currentUser.token || '')
+        },
+        body: JSON.stringify({ action: 'check' })
+      });
+      const data = await res.json();
+      if (!data.success) {
+        sessionStorage.removeItem('fm_staff_auth');
+        currentUser = null;
+        return; // login screen stays visible
+      }
+      // Refresh in-memory user with latest server-side data
+      if (data.staffId) {
+        currentUser.staffId = data.staffId;
+        currentUser.staffName = data.staffName || currentUser.staffName;
+        currentUser.staffColor = data.staffColor || currentUser.staffColor;
+        sessionStorage.setItem('fm_staff_auth', JSON.stringify(currentUser));
+      }
       showApp();
-    } catch { sessionStorage.removeItem('fm_staff_auth'); }
+    } catch {
+      sessionStorage.removeItem('fm_staff_auth');
+    }
   }
 });
 
@@ -170,7 +211,13 @@ async function doLogin() {
     const data = await res.json();
 
     if (data.success && data.role === 'staff') {
-      currentUser = { staffId: data.staffId, staffName: data.staffName, staffColor: data.staffColor || '#7c3aed' };
+      currentUser = {
+        staffId: data.staffId,
+        staffName: data.staffName,
+        staffColor: data.staffColor || '#7c3aed',
+        token: data.token,
+        expiresAt: data.expiresAt
+      };
       sessionStorage.setItem('fm_staff_auth', JSON.stringify(currentUser));
       showApp();
     } else if (data.success && data.role === 'admin') {
@@ -186,7 +233,13 @@ async function doLogin() {
   }
 }
 
-function doSignOut() {
+async function doSignOut() {
+  try {
+    await apiFetch('/api/auth', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'logout' })
+    });
+  } catch {}
   sessionStorage.removeItem('fm_staff_auth');
   location.reload();
 }
@@ -207,8 +260,8 @@ async function loadPortal() {
   el.innerHTML = '<div style="text-align:center;padding:48px;color:#a78bca">Loading your gigs…</div>';
   try {
     const [assignRes, staffRes] = await Promise.all([
-      fetch('/api/staff-assignments?staff_id=' + currentUser.staffId),
-      fetch('/api/staff/' + currentUser.staffId)
+      apiFetch('/api/staff-assignments?staff_id=' + currentUser.staffId),
+      apiFetch('/api/staff/' + currentUser.staffId)
     ]);
     const data = await assignRes.json();
     const sr = await staffRes.json();
@@ -216,8 +269,8 @@ async function loadPortal() {
 
     // Load earnings data
     const [earningsRes, unpaidRes] = await Promise.all([
-      fetch('/api/payroll?staff_id=' + currentUser.staffId),
-      fetch('/api/staff-payments?staff_id=' + currentUser.staffId + '&unpaid=true')
+      apiFetch('/api/payroll?staff_id=' + currentUser.staffId),
+      apiFetch('/api/staff-payments?staff_id=' + currentUser.staffId + '&unpaid=true')
     ]);
     const { runs: payrollRuns } = await earningsRes.json();
     const { payments: unpaid } = await unpaidRes.json();
@@ -439,9 +492,8 @@ function openGigCard(g) {
 // ═══════════════════════════════════════
 async function expressInterest(bookingId, tagFilled, status) {
   try {
-    const res = await fetch('/api/staff-assignments', {
+    const res = await apiFetch('/api/staff-assignments', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action:'express_interest', booking_id:bookingId, staff_id:currentUser.staffId, tag_filled:tagFilled, status })
     });
     if (!res.ok) {
@@ -455,9 +507,8 @@ async function expressInterest(bookingId, tagFilled, status) {
 
 async function updateChecklist(logId, assignmentId, bookingId, staffId, status) {
   try {
-    const res = await fetch('/api/staff-assignments', {
+    const res = await apiFetch('/api/staff-assignments', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action:'update_checklist', log_id:logId||undefined, assignment_id:assignmentId, booking_id:bookingId, staff_id:staffId, status })
     });
     if (!res.ok) {
@@ -524,7 +575,7 @@ async function submitSurvey(logId) {
   };
   Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
   try {
-    await fetch('/api/staff-assignments', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    await apiFetch('/api/staff-assignments', { method:'POST', body:JSON.stringify(payload) });
     closeModal();
     alert('Report submitted! Thanks 🎉');
     loadPortal();
@@ -540,7 +591,7 @@ async function openPreferences() {
   // Fetch own record fresh
   let s = {};
   try {
-    const res = await fetch('/api/staff/' + currentUser.staffId);
+    const res = await apiFetch('/api/staff/' + currentUser.staffId);
     s = await res.json();
     staffRecord = s;
   } catch {}
@@ -586,17 +637,16 @@ async function savePreferences() {
   const phone = document.getElementById('pf-phone').value.trim();
   const email = document.getElementById('pf-email').value.trim();
   if (!phone || !email) { alert('Phone and email are required.'); return; }
+  // Only send the fields the server accepts for staff self-PATCH
   const payload = {
     preferred_name:   document.getElementById('pf-pname').value.trim(),
-    pronouns:         document.getElementById('pf-pronouns').value.trim(),
     phone, email,
     comms_preference: document.getElementById('pf-comms').value,
-    staff_notes:      document.getElementById('pf-notes').value.trim(),
+    shared_notes:     document.getElementById('pf-shared').value.trim(),
   };
   try {
-    const res = await fetch('/api/staff/' + currentUser.staffId, {
+    const res = await apiFetch('/api/staff/' + currentUser.staffId, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     if (!res.ok) { const e = await res.json(); throw new Error(e.error||'Save failed'); }

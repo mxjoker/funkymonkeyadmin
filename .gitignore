@@ -16,3 +16,10 @@ netlify/.DS_Store
 # Lock files (optional — remove if you want to commit them)
 # package-lock.json
 # deno.lock
+
+# Session/workflow artifacts
+MORNING_REPORT.md
+admin.html.backup-*
+.claude/admin.html.b1-partial
+.claude/night-plan.md
+.claude/wave-b1-prompt.md

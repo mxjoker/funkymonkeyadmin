@@ -11,6 +11,16 @@
 
 const FROM = 'Funky Monkey Events <bookings@funkymonkeyevents.com>';
 
+// ── HTML escape for user-supplied values in email templates ──────────────────
+function esc(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ── HTML wrapper ──────────────────────────────────────────────────────────────
 function wrap(body) {
   return `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0F0A1E;color:#F3E8FF;border-radius:16px;overflow:hidden">
@@ -41,12 +51,12 @@ function render(template, booking, stripeLink) {
     : '';
 
   return template
-    .replace(/{{client_first_name}}/g, firstName)
-    .replace(/{{client_name}}/g,       booking.client_name   || '')
-    .replace(/{{service_name}}/g,      booking.service_name  || '')
+    .replace(/{{client_first_name}}/g, esc(firstName))
+    .replace(/{{client_name}}/g,       esc(booking.client_name   || ''))
+    .replace(/{{service_name}}/g,      esc(booking.service_name  || ''))
     .replace(/{{event_date}}/g,        dateStr)
-    .replace(/{{event_time}}/g,        booking.event_time    || '')
-    .replace(/{{event_zip}}/g,         booking.event_zip     || '')
+    .replace(/{{event_time}}/g,        esc(booking.event_time    || ''))
+    .replace(/{{event_zip}}/g,         esc(booking.event_zip     || ''))
     .replace(/{{total_price}}/g,       Number(booking.total_price   ||0).toFixed(2))
     .replace(/{{deposit_amount}}/g,    Number(booking.deposit_amount||100).toFixed(2))
     .replace(/{{balance_due}}/g,       Number(booking.balance_due   ||0).toFixed(2))
@@ -131,17 +141,36 @@ async function ensureEmailLog(client) {
   `);
 }
 
-// ── Ensure booking_changes table exists ───────────────────────────────────────
+// ── Ensure booking_changes table exists (superset schema) ────────────────────
+// Owned by booking-changelog.js; this mirrors the exact same DDL so both
+// writers converge to the same shape regardless of creation order.
 async function ensureBookingChanges(client) {
   await client.query(`
     CREATE TABLE IF NOT EXISTS booking_changes (
-      id         SERIAL PRIMARY KEY,
-      booking_id INTEGER NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-      action     VARCHAR(100) NOT NULL,
-      detail     TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
+      id          SERIAL PRIMARY KEY,
+      booking_id  INTEGER NOT NULL,
+      action      VARCHAR(100),
+      detail      TEXT,
+      field_name  VARCHAR(100),
+      old_value   TEXT,
+      new_value   TEXT,
+      changed_by  VARCHAR(100),
+      created_at  TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  // Converge pre-existing tables of either legacy shape
+  const alters = [
+    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS action     VARCHAR(100)`,
+    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS detail     TEXT`,
+    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS field_name VARCHAR(100)`,
+    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS old_value  TEXT`,
+    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS new_value  TEXT`,
+    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS changed_by VARCHAR(100)`,
+    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
+  ];
+  for (const sql of alters) {
+    try { await client.query(sql); } catch(e) { /* ignore if already exists */ }
+  }
   await client.query(`
     CREATE INDEX IF NOT EXISTS idx_booking_changes_booking_id
     ON booking_changes(booking_id)
@@ -160,4 +189,4 @@ async function logChange(client, bookingId, action, detail) {
   }
 }
 
-module.exports = { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange };
+module.exports = { wrap, render, esc, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange };

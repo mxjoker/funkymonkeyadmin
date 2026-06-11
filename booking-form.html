@@ -1016,19 +1016,24 @@ async function submitBooking() {
     if (!res.ok) throw new Error(data.error || 'Submission failed');
     
     const reference = data.reference || 'Submitted!';
+    const clientEmail = document.getElementById('c-email').value.trim();
     document.getElementById('booking-ref').textContent = reference;
-    
-    // Redirect to confirmation page after 2 seconds
+
+    // Redirect to confirmation page after 2 seconds, carrying ref + email
     setTimeout(() => {
-      window.location.href = `/confirmation.html?ref=${reference}`;
+      window.location.href = `/confirmation.html?ref=${encodeURIComponent(reference)}&email=${encodeURIComponent(clientEmail)}`;
     }, 2000);
-    
+
     document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
     document.getElementById('step-success').classList.add('active');
     window.scrollTo(0,0);
   } catch(e) {
     btn.disabled = false; btn.textContent = 'Submit Booking Request 🎉';
-    alert('Something went wrong: ' + e.message + '\n\nPlease try again or call us at (405) 431-6625.');
+    // Show the server's validation message if available, else a generic fallback
+    const msg = e.message && e.message !== 'Submission failed'
+      ? e.message
+      : 'Something went wrong. Please try again or call us at (405) 431-6625.';
+    alert(msg);
   }
 }
 

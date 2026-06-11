@@ -1,0 +1,28 @@
+name: PR Visual Recap
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-visual-recap-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  visual-recap:
+    permissions:
+      checks: write
+      contents: read
+      issues: write
+      pull-requests: read
+    uses: BuilderIO/agent-native/.github/workflows/pr-visual-recap-reusable.yml@main
+    with:
+      skill-source: repo
+    secrets:
+      PLAN_RECAP_TOKEN: ${{ secrets.PLAN_RECAP_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PLAN_RECAP_APP_URL: ${{ secrets.PLAN_RECAP_APP_URL }}

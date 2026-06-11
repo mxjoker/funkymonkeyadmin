@@ -1,10 +1,24 @@
-const { Pool } = require('pg');
+const crypto = require('crypto');
+const { withClient } = require('./_db');
+const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
+const { esc, wrap, sendEmail } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
+
+// Public field subset per API contract
+const PUBLIC_FIELDS = [
+  'reference', 'status', 'service_id', 'service_name', 'event_type',
+  'event_date', 'start_time', 'end_time', 'guest_count', 'venue_name',
+  'event_address', 'client_name', 'addons', 'total_price', 'mileage_cost',
+  'deposit_amount', 'deposit_paid', 'balance_due', 'payment_amount', 'created_at',
+];
+
+function pickPublicFields(row) {
+  const out = {};
+  for (const f of PUBLIC_FIELDS) out[f] = row[f] ?? null;
+  return out;
+}
 
 async function ensureTable(client) {
   await client.query(`
@@ -26,6 +40,7 @@ async function ensureTable(client) {
       deposit_paid BOOLEAN DEFAULT FALSE,
       deposit_paid_at TIMESTAMPTZ,
       stripe_session_id VARCHAR(255),
+      stripe_payment_intent_id VARCHAR(255),
       stripe_payment_link TEXT DEFAULT '',
 
       event_date DATE,
@@ -54,7 +69,7 @@ async function ensureTable(client) {
     )
   `);
 
-  // Add any missing columns for backwards compat (covers old tables missing Rev 6 cols)
+  // Add any missing columns for backwards compat
   const cols = [
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS reference VARCHAR(20)",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'review'",
@@ -71,6 +86,7 @@ async function ensureTable(client) {
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_paid BOOLEAN DEFAULT FALSE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_paid_at TIMESTAMPTZ",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_payment_intent_id VARCHAR(255)",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_payment_link TEXT DEFAULT ''",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_date DATE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_time VARCHAR(10)",
@@ -105,66 +121,173 @@ async function ensureTable(client) {
   }
 }
 
+// Generates FM- + 8 chars of crypto-random base32 (no ambiguous chars I/O/1/0)
+// ~40 bits of randomness. Caller retries on UNIQUE violation.
 function generateReference() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 chars, no I/O/1/0
   let r = 'FM-';
-  for (let i = 0; i < 6; i++) r += chars[Math.floor(Math.random() * chars.length)];
+  const bytes = crypto.randomBytes(8);
+  for (let i = 0; i < 8; i++) r += chars[bytes[i] % 32];
   return r;
 }
 
 exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json'
-  };
+  const pre = preflight(event);
+  if (pre) return pre;
 
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
+  // ── GET ─────────────────────────────────────────────────────────────────────
+  if (event.httpMethod === 'GET') {
+    const qs = event.queryStringParameters || {};
 
-  const client = await pool.connect();
-  try {
-    await ensureTable(client);
+    // GET single booking by reference — public requires ?email matching
+    if (qs.reference) {
+      const ref = qs.reference.toUpperCase();
 
-    // GET all bookings
-    if (event.httpMethod === 'GET') {
-      // GET single booking by reference
-      if (event.queryStringParameters?.reference) {
-        const ref = event.queryStringParameters.reference.toUpperCase();
+      // Check for admin token first (bypasses email requirement)
+      const auth = await requireAuth(event, ['admin']);
+      if (auth) {
+        // Admin: full row
+        return withClient(async (client) => {
+          await ensureTable(client);
+          const { rows } = await client.query(
+            'SELECT * FROM bookings WHERE reference = $1',
+            [ref]
+          );
+          if (!rows.length) return json(404, { error: 'Not found' });
+          return json(200, { bookings: rows });
+        });
+      }
+
+      // Public: require email param, case-insensitive match — 404 on any mismatch
+      const emailParam = (qs.email || '').trim().toLowerCase();
+      if (!emailParam) return json(404, { error: 'Not found' });
+
+      return withClient(async (client) => {
+        await ensureTable(client);
         const { rows } = await client.query(
           'SELECT * FROM bookings WHERE reference = $1',
           [ref]
         );
-        return { 
-          statusCode: 200, 
-          headers, 
-          body: JSON.stringify({ bookings: rows }) 
-        };
-      }
-      
-      // staff_view=true — strip client contact, financials, admin notes
-      if (event.queryStringParameters?.staff_view === 'true') {
+        // Return 404 on not-found OR email mismatch (don't reveal existence)
+        if (!rows.length) return json(404, { error: 'Not found' });
+        if ((rows[0].client_email || '').toLowerCase() !== emailParam) {
+          return json(404, { error: 'Not found' });
+        }
+        return json(200, { bookings: [pickPublicFields(rows[0])] });
+      });
+    }
+
+    // GET availability by service_id+date — admin or staff
+    if (qs.service_id && qs.date) {
+      const auth = await requireAuth(event, ['admin', 'staff']);
+      if (!auth) return unauthorized();
+      return withClient(async (client) => {
+        await ensureTable(client);
         const { rows } = await client.query(
-          `SELECT id, reference, status, service_id, service_name,
-                  event_date, event_time, event_zip, event_type, guest_count
-           FROM bookings
-           WHERE status NOT IN ('cancelled')
-           ORDER BY event_date ASC`
+          `SELECT * FROM bookings WHERE service_id=$1 AND event_date=$2`,
+          [qs.service_id, qs.date]
         );
-        return { statusCode: 200, headers, body: JSON.stringify(rows) };
-      }
+        return json(200, rows);
+      });
+    }
+
+    // GET all/filtered — admin only
+    const auth = await requireAuth(event, ['admin']);
+    if (!auth) return unauthorized();
+
+    return withClient(async (client) => {
+      await ensureTable(client);
       const { rows } = await client.query(
         'SELECT * FROM bookings ORDER BY created_at DESC'
       );
-      return { statusCode: 200, headers, body: JSON.stringify(rows) };
+      return json(200, rows);
+    });
+  }
+
+  // ── POST new booking (public) ────────────────────────────────────────────────
+  if (event.httpMethod === 'POST') {
+    let b;
+    try {
+      b = JSON.parse(event.body || '{}');
+    } catch {
+      return json(400, { error: 'Invalid JSON' });
     }
 
-    // POST new booking
-    if (event.httpMethod === 'POST') {
-      const b = JSON.parse(event.body || '{}');
+    // ── Validation (contract §POST /api/bookings) ────────────────────────────
+    const clientName = String(b.client_name || '').trim();
+    if (!clientName) return json(400, { error: 'client_name is required' });
+    if (clientName.length > 120) return json(400, { error: 'client_name too long (max 120)' });
 
-      const reference = generateReference();
-      const deposit = 100;
-      const balance = (Number(b.total_price) || 0) - deposit;
+    const clientEmail = String(b.client_email || '').trim();
+    if (!clientEmail) return json(400, { error: 'client_email is required' });
+    if (clientEmail.length > 200) return json(400, { error: 'client_email too long (max 200)' });
+    // Plausible email check
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) {
+      return json(400, { error: 'client_email is not valid' });
+    }
+
+    if (!b.event_date || isNaN(Date.parse(String(b.event_date)))) {
+      return json(400, { error: 'event_date must be a parseable date' });
+    }
+
+    if (!b.service_id && !b.service_name) {
+      return json(400, { error: 'service_id or service_name is required' });
+    }
+
+    // Clamp / sanitize numerics — reject NaN
+    const rawGuestCount = b.guest_count !== undefined ? Number(b.guest_count) : 0;
+    if (isNaN(rawGuestCount)) return json(400, { error: 'guest_count must be a number' });
+    const guestCount = Math.min(Math.max(Math.floor(rawGuestCount), 0), 10000);
+
+    const clampPrice = (v, label) => {
+      const n = Number(v);
+      if (v !== undefined && v !== null && v !== '' && isNaN(n)) {
+        throw Object.assign(new Error(`${label} must be a number`), { statusCode: 400 });
+      }
+      return Math.min(Math.max(n || 0, 0), 100000);
+    };
+
+    let servicePrice, addonTotal, mileageCost, totalPrice, extraHoursCost;
+    try {
+      servicePrice    = clampPrice(b.service_price,    'service_price');
+      addonTotal      = clampPrice(b.addon_total,       'addon_total');
+      mileageCost     = clampPrice(b.mileage_cost,      'mileage_cost');
+      totalPrice      = clampPrice(b.total_price,       'total_price');
+      extraHoursCost  = clampPrice(b.extra_hours_cost,  'extra_hours_cost');
+    } catch (e) {
+      return json(400, { error: e.message });
+    }
+
+    const rawExtraHours = b.extra_hours !== undefined ? Number(b.extra_hours) : 0;
+    if (isNaN(rawExtraHours)) return json(400, { error: 'extra_hours must be a number' });
+    const extraHours = Math.max(0, Math.floor(rawExtraHours));
+
+    const rawMileageMiles = b.mileage_miles !== undefined ? Number(b.mileage_miles) : 0;
+    const mileageMiles = Math.max(0, Math.floor(isNaN(rawMileageMiles) ? 0 : rawMileageMiles));
+
+    // Trim strings, cap free text at 5000
+    const cap5k = (v) => String(v || '').trim().slice(0, 5000);
+    const cap255 = (v) => String(v || '').trim().slice(0, 255);
+
+    // Get deposit_amount from request or default to 100
+    const depositAmount = Math.min(Math.max(Number(b.deposit_amount) || 100, 0), 100000);
+
+    // Balance calc: total_price + mileage_cost - deposit_amount
+    const balanceDue = Math.max(0, totalPrice + mileageCost - depositAmount);
+
+    return withClient(async (client) => {
+      await ensureTable(client);
+
+      // Retry loop for unique reference
+      let reference;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const candidate = generateReference();
+        const { rows: existing } = await client.query(
+          'SELECT 1 FROM bookings WHERE reference=$1', [candidate]
+        );
+        if (!existing.length) { reference = candidate; break; }
+      }
+      if (!reference) return json(500, { error: 'Could not generate unique reference' });
 
       const { rows } = await client.query(`
         INSERT INTO bookings (
@@ -190,125 +313,111 @@ exports.handler = async (event) => {
         ) RETURNING *
       `, [
         reference,
-        b.service_id || null,
-        b.service_name || '',
-        Number(b.service_price) || 0,
+        cap255(b.service_id),
+        cap255(b.service_name),
+        servicePrice,
         JSON.stringify(b.addons || []),
-        Number(b.addon_total) || 0,
-        Number(b.mileage_cost) || 0,
-        Number(b.mileage_miles) || 0,
-        Number(b.total_price) || 0,
-        deposit,
-        balance,
-        b.event_date || null,
-        b.event_time || '',
-        b.event_zip || '',
-        b.event_location || '',
-        b.event_type || '',
-        b.event_type_id || '',
-        parseInt(b.guest_count) || 0,
-        b.notes || '',
+        addonTotal,
+        mileageCost,
+        mileageMiles,
+        totalPrice,
+        depositAmount,
+        balanceDue,
+        b.event_date,
+        cap255(b.event_time),
+        cap255(b.event_zip),
+        cap5k(b.event_location),
+        cap255(b.event_type),
+        cap255(b.event_type_id),
+        guestCount,
+        cap5k(b.notes),
         b.is_custom_quote === true,
-        parseInt(b.extra_hours) || 0,
-        Number(b.extra_hours_cost) || 0,
-        b.client_name || '',
-        b.client_phone || '',
-        b.client_email || '',
-        b.referral_source || '',
-        b.child_name || ''
+        extraHours,
+        extraHoursCost,
+        clientName,
+        cap255(b.client_phone),
+        clientEmail,
+        cap255(b.referral_source),
+        cap255(b.child_name),
       ]);
 
       const booking = rows[0];
 
-      // Send emails (fire and forget)
-      sendEmails(booking).catch(e => console.error('Email error:', e));
+      // Fire-and-forget emails — admin failure must not prevent client email
+      sendBookingEmails(booking);
+
       // Notify matching staff automatically
-      notifyMatchingStaff(booking).catch(e => console.error('Staff notify error:', e));
+      notifyMatchingStaff(booking).catch(e => console.error('Staff notify error:', e.message));
 
-      return {
-        statusCode: 201,
-        headers,
-        body: JSON.stringify({ success: true, reference: booking.reference, id: booking.id })
-      };
-    }
-
-    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
-
-  } catch (err) {
-    console.error('Bookings error:', err);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
-  } finally {
-    client.release();
+      return json(201, { success: true, reference: booking.reference, id: booking.id });
+    });
   }
+
+  return json(405, { error: 'Method not allowed' });
 };
 
-async function sendEmails(booking) {
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
+// Fire-and-forget: send admin then client email independently
+function sendBookingEmails(booking) {
   const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
-  const FROM = 'Funky Monkey Events <bookings@funkymonkeyevents.com>';
 
   const dateStr = booking.event_date
-    ? new Date(booking.event_date + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
+    ? new Date(String(booking.event_date).split('T')[0] + 'T00:00:00').toLocaleDateString('en-US', {
+        weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+      })
     : 'TBD';
 
-  const addonList = (booking.addons || []).map(a => `<li>${a.name} — $${Number(a.price).toFixed(2)}</li>`).join('');
+  const addons = Array.isArray(booking.addons) ? booking.addons : [];
+  const addonList = addons.map(a =>
+    `<li>${esc(a.name)} — $${Number(a.price).toFixed(2)}</li>`
+  ).join('');
 
-  // Admin notification
-  await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: FROM,
-      to: NOTIFY_EMAIL,
-      subject: `🐒 New Booking Request — ${booking.reference} — ${booking.service_name}`,
-      html: `
-        <h2>New Booking Request</h2>
-        <p><strong>Ref:</strong> ${booking.reference}</p>
-        <p><strong>Service:</strong> ${booking.service_name}</p>
-        <p><strong>Date:</strong> ${dateStr} at ${booking.event_time}</p>
-        <p><strong>ZIP:</strong> ${booking.event_zip}${booking.event_location ? ' — ' + booking.event_location : ''}</p>
-        <p><strong>Event Type:</strong> ${booking.event_type} · ${booking.guest_count} guests</p>
-        <hr/>
-        <p><strong>Client:</strong> ${booking.client_name}</p>
-        <p><strong>Phone:</strong> ${booking.client_phone}</p>
-        <p><strong>Email:</strong> ${booking.client_email}</p>
-        ${booking.referral_source ? `<p><strong>Referral:</strong> ${booking.referral_source}</p>` : ''}
-        <hr/>
-        <p><strong>Service:</strong> $${Number(booking.service_price).toFixed(2)}</p>
-        ${addonList ? `<ul>${addonList}</ul>` : ''}
-        ${Number(booking.mileage_cost) > 0 ? `<p><strong>Travel:</strong> $${Number(booking.mileage_cost).toFixed(2)} (${booking.mileage_miles} mi)</p>` : ''}
-        <p><strong>Total:</strong> $${Number(booking.total_price).toFixed(2)}</p>
-        <p><strong>Deposit:</strong> $${Number(booking.deposit_amount).toFixed(2)}</p>
-        <p><strong>Balance Due:</strong> $${Number(booking.balance_due).toFixed(2)}</p>
-        ${booking.notes ? `<p><strong>Notes:</strong> ${booking.notes}</p>` : ''}
-        <br/>
-        <a href="https://funkymonkeyadmin.netlify.app/admin.html" style="background:#7c3aed;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">View in Admin</a>
-      `
-    })
-  });
+  // Admin notification — failure logged but does NOT skip client email
+  sendEmail(
+    NOTIFY_EMAIL,
+    `🐒 New Booking Request — ${esc(booking.reference)} — ${esc(booking.service_name)}`,
+    wrap(`
+      <h2>New Booking Request</h2>
+      <p><strong>Ref:</strong> ${esc(booking.reference)}</p>
+      <p><strong>Service:</strong> ${esc(booking.service_name)}</p>
+      <p><strong>Date:</strong> ${dateStr} at ${esc(booking.event_time)}</p>
+      <p><strong>ZIP:</strong> ${esc(booking.event_zip)}${booking.event_location ? ' — ' + esc(booking.event_location) : ''}</p>
+      <p><strong>Event Type:</strong> ${esc(booking.event_type)} · ${booking.guest_count} guests</p>
+      <hr/>
+      <p><strong>Client:</strong> ${esc(booking.client_name)}</p>
+      <p><strong>Phone:</strong> ${esc(booking.client_phone)}</p>
+      <p><strong>Email:</strong> ${esc(booking.client_email)}</p>
+      ${booking.referral_source ? `<p><strong>Referral:</strong> ${esc(booking.referral_source)}</p>` : ''}
+      <hr/>
+      <p><strong>Service:</strong> $${Number(booking.service_price).toFixed(2)}</p>
+      ${addonList ? `<ul>${addonList}</ul>` : ''}
+      ${Number(booking.mileage_cost) > 0 ? `<p><strong>Travel:</strong> $${Number(booking.mileage_cost).toFixed(2)} (${booking.mileage_miles} mi)</p>` : ''}
+      <p><strong>Total:</strong> $${Number(booking.total_price).toFixed(2)}</p>
+      <p><strong>Deposit:</strong> $${Number(booking.deposit_amount).toFixed(2)}</p>
+      <p><strong>Balance Due:</strong> $${Number(booking.balance_due).toFixed(2)}</p>
+      ${booking.notes ? `<p><strong>Notes:</strong> ${esc(booking.notes)}</p>` : ''}
+      <br/>
+      <a href="https://funkymonkeyadmin.netlify.app/admin.html" style="background:#7c3aed;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">View in Admin</a>
+    `)
+  ).catch(e => console.error('Admin email error:', e.message));
 
-  // Client confirmation
-  await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: FROM,
-      to: booking.client_email,
-      subject: `🎉 Booking Request Received — Funky Monkey Events (${booking.reference})`,
-      html: `
-        <h2>Thanks, ${booking.client_name.split(' ')[0]}!</h2>
-        <p>We've received your booking request and will get back to you within 24 hours to confirm availability.</p>
-        <p><strong>Your reference number:</strong> ${booking.reference}</p>
-        <h3>Booking Summary</h3>
-        <p><strong>Service:</strong> ${booking.service_name}</p>
-        <p><strong>Date:</strong> ${dateStr} at ${booking.event_time}</p>
-        ${Number(booking.total_price) > 0 ? `<p><strong>Estimated Total:</strong> $${Number(booking.total_price).toFixed(2)}</p>` : '<p><em>A custom quote will be included in our follow-up.</em></p>'}
-        <p><strong>Deposit to Confirm:</strong> $${Number(booking.deposit_amount).toFixed(2)}</p>
-        ${Number(booking.total_price) > 0 ? `<p><strong>Balance Due at Event:</strong> $${Number(booking.balance_due).toFixed(2)}</p>` : ''}
-        <br/>
-        <p>Questions? Call or text us at <strong>(405) 431-6625</strong></p>
-        <p>— The Funky Monkey Events Team 🐒</p>
-      `
-    })
-  });
+  // Client confirmation — always attempted regardless of admin email outcome
+  const firstName = esc(booking.client_name.split(' ')[0] || 'there');
+  sendEmail(
+    booking.client_email,
+    `🎉 Booking Request Received — Funky Monkey Events (${booking.reference})`,
+    wrap(`
+      <h2>Thanks, ${firstName}!</h2>
+      <p>We've received your booking request and will get back to you within 24 hours to confirm availability.</p>
+      <p><strong>Your reference number:</strong> ${esc(booking.reference)}</p>
+      <h3>Booking Summary</h3>
+      <p><strong>Service:</strong> ${esc(booking.service_name)}</p>
+      <p><strong>Date:</strong> ${dateStr} at ${esc(booking.event_time)}</p>
+      ${Number(booking.total_price) > 0 ? `<p><strong>Estimated Total:</strong> $${Number(booking.total_price).toFixed(2)}</p>` : '<p><em>A custom quote will be included in our follow-up.</em></p>'}
+      <p><strong>Deposit to Confirm:</strong> $${Number(booking.deposit_amount).toFixed(2)}</p>
+      ${Number(booking.total_price) > 0 ? `<p><strong>Balance Due at Event:</strong> $${Number(booking.balance_due).toFixed(2)}</p>` : ''}
+      <br/>
+      <p>Questions? Call or text us at <strong>(405) 431-6625</strong></p>
+      <p>— The Funky Monkey Events Team 🐒</p>
+    `)
+  ).catch(e => console.error('Client email error:', e.message));
 }
