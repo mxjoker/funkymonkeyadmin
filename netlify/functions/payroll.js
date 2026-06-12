@@ -179,8 +179,11 @@ exports.handler = async (event) => {
         try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
         const action = body.action;
 
-        // action: generate
-        if (action === 'generate') {
+        // action: generate — or 'preflight', which runs the exact same
+        // computation as a dry run and returns per-event pay for review
+        // (plus bookings in range with no staff assigned) without writing.
+        if (action === 'generate' || action === 'preflight') {
+          const dryRun = action === 'preflight';
           const { week_ending, date_from, date_to, label } = body;
 
           let rangeStart, rangeEnd, runLabel;
@@ -196,11 +199,13 @@ exports.handler = async (event) => {
             return json(400, { error: 'date_from + date_to or week_ending required' });
           }
 
-          const { rows: existing } = await client.query(
-            'SELECT * FROM payroll_runs WHERE week_ending = $1', [rangeEnd]
-          );
-          if (existing.length > 0) {
-            return json(400, { error: 'A payroll run already exists ending on this date', run: existing[0] });
+          if (!dryRun) {
+            const { rows: existing } = await client.query(
+              'SELECT * FROM payroll_runs WHERE week_ending = $1', [rangeEnd]
+            );
+            if (existing.length > 0) {
+              return json(400, { error: 'A payroll run already exists ending on this date', run: existing[0] });
+            }
           }
 
           const { rows: assignments } = await client.query(`
@@ -226,7 +231,7 @@ exports.handler = async (event) => {
             ORDER BY s.id, b.event_date
           `, [rangeStart, rangeEnd]);
 
-          if (assignments.length === 0) {
+          if (assignments.length === 0 && !dryRun) {
             return json(200, {
               message: 'No unpaid assigned staff found for this date range',
               date_from: rangeStart, date_to: rangeEnd, count: 0
@@ -342,14 +347,65 @@ exports.handler = async (event) => {
               total_minutes: totalMins,
             });
 
-            await client.query(`
-              UPDATE staff_assignments SET
-                drive_minutes_each_way = $1,
-                total_minutes = $2,
-                updated_at = NOW()
-              WHERE id = $3
-                AND (drive_minutes_each_way IS NULL OR total_minutes IS NULL)
-            `, [drive, totalMins, a.assignment_id]);
+            if (!dryRun) {
+              await client.query(`
+                UPDATE staff_assignments SET
+                  drive_minutes_each_way = $1,
+                  total_minutes = $2,
+                  updated_at = NOW()
+                WHERE id = $3
+                  AND (drive_minutes_each_way IS NULL OR total_minutes IS NULL)
+              `, [drive, totalMins, a.assignment_id]);
+            }
+          }
+
+          // ── preflight: return the review payload, write nothing ──────────
+          if (dryRun) {
+            const { rows: rangeBookings } = await client.query(`
+              SELECT b.id, b.reference, b.service_name, b.event_date, b.event_time,
+                     b.status, COALESCE(cnt.n, 0)::int AS assigned_count
+              FROM bookings b
+              LEFT JOIN (
+                SELECT booking_id, COUNT(*) AS n FROM staff_assignments
+                WHERE status='assigned' GROUP BY booking_id
+              ) cnt ON cnt.booking_id = b.id
+              WHERE b.event_date >= $1 AND b.event_date <= $2
+                AND b.status IN ('confirmed','completed')
+              ORDER BY b.event_date, b.event_time
+            `, [rangeStart, rangeEnd]);
+
+            const byBooking = {};
+            for (const p of paymentsToCreate) {
+              const a = assignments.find(x => x.assignment_id === p.assignment_id);
+              (byBooking[p.booking_id] = byBooking[p.booking_id] || []).push({
+                staff_id: p.staff_id,
+                staff_name: a ? (a.preferred_name || a.staff_name) : String(p.staff_id),
+                pay_type: p.pay_type,
+                hours: p.hours,
+                amount: p.amount !== null ? p.amount : 0,
+                already_recorded: !!p.existingId,
+              });
+            }
+
+            const events = rangeBookings.map(b => ({
+              booking_id: b.id,
+              reference: b.reference,
+              service_name: b.service_name,
+              event_date: b.event_date,
+              event_time: b.event_time,
+              status: b.status,
+              staff: byBooking[b.id] || [],
+              unassigned: b.assigned_count === 0,
+            }));
+
+            return json(200, {
+              date_from: rangeStart,
+              date_to: rangeEnd,
+              events,
+              unassigned_count: events.filter(e => e.unassigned).length,
+              total: Math.round(paymentsToCreate.reduce((s, p) => s + (p.amount !== null ? p.amount : 0), 0) * 100) / 100,
+              warnings: warnings.length ? warnings : [],
+            });
           }
 
           const paymentIds = [];

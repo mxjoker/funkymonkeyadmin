@@ -524,9 +524,12 @@ input,select,textarea{font-family:inherit}
           </div>
           <button class="btn btn-outline btn-sm" onclick="setPayrollRange('week')" title="Current week (Mon–Sun)">This Week</button>
           <button class="btn btn-outline btn-sm" onclick="setPayrollRange('month')" title="Current month">This Month</button>
+          <button class="btn btn-outline btn-sm" onclick="preflightPayroll()" title="Review pay calculations before generating">🔍 Review Pay First</button>
           <button class="btn btn-primary btn-sm" onclick="generatePayroll()">Generate Payroll</button>
         </div>
       </div>
+      <!-- Preflight review panel (hidden until used) -->
+      <div id="payroll-preflight-panel" style="display:none;margin-bottom:24px"></div>
       <!-- Current Week Summary -->
       <div class="dash-card" style="margin-bottom:24px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -2623,15 +2626,19 @@ function openStaffModal(id) {
       <div style="font-weight:700;color:#374151;font-size:.82rem;margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em">💰 Pay Settings</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div>
-          <label style="font-size:.78rem;font-weight:600;color:#6b7280">Pay Type</label>
+          <label style="font-size:.78rem;font-weight:600;color:#6b7280">Default pay basis</label>
           <select id="sm-pay-type" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px">
-            <option value="flat" ${(s?.pay_type||'flat')==='flat'?'selected':''}>Flat rate per gig</option>
+            <option value="flat" ${(s?.pay_type||'flat')==='flat'?'selected':''}>Flat per gig</option>
             <option value="hourly" ${s?.pay_type==='hourly'?'selected':''}>Hourly</option>
           </select>
         </div>
         <div>
-          <label style="font-size:.78rem;font-weight:600;color:#6b7280" id="sm-rate-label">${s?.pay_type==='hourly'?'Hourly Rate ($)':'Flat Rate ($)'}</label>
-          <input type="number" id="sm-pay-rate" min="0" step="0.01" value="${s?.pay_type==='hourly' ? (s?.hourly_rate||0) : (s?.flat_rate||0)}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px"/>
+          <label style="font-size:.78rem;font-weight:600;color:#6b7280">Flat rate ($ per gig)</label>
+          <input type="number" id="sm-flat-rate" min="0" step="0.01" value="${s?.flat_rate||0}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px"/>
+        </div>
+        <div>
+          <label style="font-size:.78rem;font-weight:600;color:#6b7280">Hourly rate ($/hr)</label>
+          <input type="number" id="sm-hourly-rate" min="0" step="0.01" value="${s?.hourly_rate||0}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px"/>
         </div>
         <div>
           <label style="font-size:.78rem;font-weight:600;color:#6b7280">Payment Method</label>
@@ -2654,13 +2661,6 @@ function openStaffModal(id) {
       <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
     </div>`;
   document.getElementById('booking-modal').classList.add('open');
-  const payTypeEl = document.getElementById('sm-pay-type');
-  const rateLabelEl = document.getElementById('sm-rate-label');
-  if (payTypeEl && rateLabelEl) {
-    payTypeEl.addEventListener('change', () => {
-      rateLabelEl.textContent = payTypeEl.value === 'hourly' ? 'Hourly Rate ($)' : 'Flat Rate ($)';
-    });
-  }
 }
 
 async function saveStaffModal(id) {
@@ -2681,11 +2681,9 @@ async function saveStaffModal(id) {
     admin_notes:      document.getElementById('sf-anotes').value.trim(),
     shared_notes:     document.getElementById('sf-shared-notes').value.trim(),
   };
-  const payType = document.getElementById('sm-pay-type')?.value || 'flat';
-  const payRate = parseFloat(document.getElementById('sm-pay-rate')?.value) || 0;
-  payload.pay_type        = payType;
-  payload.flat_rate       = payType === 'flat' ? payRate : 0;
-  payload.hourly_rate     = payType === 'hourly' ? payRate : 0;
+  payload.pay_type        = document.getElementById('sm-pay-type')?.value || 'flat';
+  payload.flat_rate       = parseFloat(document.getElementById('sm-flat-rate')?.value) || 0;
+  payload.hourly_rate     = parseFloat(document.getElementById('sm-hourly-rate')?.value) || 0;
   payload.payment_method  = document.getElementById('sm-payment-method')?.value || '';
   payload.payment_handle  = document.getElementById('sm-payment-handle')?.value || '';
   try {
@@ -4271,7 +4269,115 @@ function flash(id) {
 // PAYROLL
 // ══════════════════════════════════════════════════
 
+// Track whether preflight was run this page-visit (reset on loadPayroll)
+let _preflightRan = false;
+
+async function preflightPayroll() {
+  const dateFrom = document.getElementById('payroll-date-from')?.value;
+  const dateTo   = document.getElementById('payroll-date-to')?.value;
+  if (!dateFrom || !dateTo) { alert('Please select a date range first.'); return; }
+  if (dateFrom > dateTo)    { alert('Start date must be before end date.'); return; }
+
+  const panel = document.getElementById('payroll-preflight-panel');
+  panel.style.display = 'block';
+  panel.innerHTML = '<div class="dash-card" style="border:2px solid #7c3aed"><div style="padding:20px;color:#9ca3af;text-align:center">🔍 Loading pay preview…</div></div>';
+
+  try {
+    const res = await apiFetch('/api/payroll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'preflight',
+        date_from: dateFrom,
+        date_to:   dateTo,
+        label: `${dateFrom} – ${dateTo}`
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) { panel.innerHTML = `<div class="dash-card" style="border:2px solid #ef4444"><p style="color:#ef4444;padding:16px">${esc(data.error||'Preflight failed')}</p></div>`; return; }
+
+    _preflightRan = true;
+
+    const events = data.events || [];
+    const unassignedCount = data.unassigned_count || 0;
+
+    let html = `<div class="dash-card" style="border:2px solid #7c3aed">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <h3 style="font-size:1.1rem;font-weight:700;color:#7c3aed">🔍 Pay Review: ${esc(dateFrom)} – ${esc(dateTo)}</h3>
+        <div style="font-size:1.4rem;font-weight:900;color:#1e1b4b">Grand Total: $${Number(data.total||0).toFixed(2)}</div>
+      </div>`;
+
+    if (unassignedCount > 0) {
+      html += `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 14px;margin-bottom:14px;color:#b91c1c;font-weight:700">
+        ⚠️ ${unassignedCount} event${unassignedCount!==1?'s':''} have no staff assigned
+      </div>`;
+    }
+
+    if (data.warnings && data.warnings.length) {
+      html += `<div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:8px;padding:10px 14px;margin-bottom:14px">
+        <div style="font-weight:700;color:#92400e;margin-bottom:6px">⚠️ Warnings</div>
+        <ul style="margin:0;padding-left:18px;color:#92400e;font-size:0.85rem">
+          ${data.warnings.map(w => `<li>${esc(w)}</li>`).join('')}
+        </ul>
+      </div>`;
+    }
+
+    events.forEach(ev => {
+      if (ev.unassigned) {
+        html += `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer" onclick="openBooking(${ev.booking_id})">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+            <div>
+              <span style="font-weight:700;color:#1e1b4b">${new Date(ev.event_date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</span>
+              ${ev.event_time ? `<span style="color:#6b7280;margin-left:6px;font-size:.85rem">${fmtTime(ev.event_time)}</span>` : ''}
+              <span style="margin-left:8px;font-size:.85rem;color:#374151">${esc(ev.service_name)}</span>
+              <a href="#" onclick="event.stopPropagation();openBooking(${ev.booking_id})" style="margin-left:8px;font-size:.82rem;color:#7c3aed;text-decoration:none">${esc(ev.reference)}</a>
+            </div>
+            <span style="background:#fca5a5;color:#b91c1c;font-weight:700;padding:3px 10px;border-radius:10px;font-size:.78rem">NO STAFF</span>
+          </div>
+          <div style="margin-top:8px;color:#b91c1c;font-weight:600;font-size:.875rem">⚠️ No staff assigned — tap to open &amp; assign</div>
+        </div>`;
+      } else {
+        const staffLines = ev.staff.map(st => {
+          const adj = st.already_recorded
+            ? `<span style="background:#fef3c7;color:#92400e;font-size:.72rem;padding:1px 7px;border-radius:8px;margin-left:6px;font-weight:600">already recorded</span>`
+            : '';
+          const payLabel = st.pay_type === 'hourly'
+            ? `${st.hours}h × hourly`
+            : `flat rate`;
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:.84rem;color:#374151;border-bottom:1px solid #f3f4f6">
+            <span><span style="font-weight:600">${esc(st.staff_name)}</span> <span style="color:#9ca3af">(${payLabel})</span>${adj}</span>
+            <span style="font-weight:700;color:#1e1b4b">$${Number(st.amount).toFixed(2)}</span>
+          </div>`;
+        }).join('');
+        const evTotal = ev.staff.reduce((s,st)=>s+Number(st.amount),0);
+        html += `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+            <div>
+              <span style="font-weight:700;color:#1e1b4b">${new Date(ev.event_date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</span>
+              ${ev.event_time ? `<span style="color:#6b7280;margin-left:6px;font-size:.85rem">${fmtTime(ev.event_time)}</span>` : ''}
+              <span style="margin-left:8px;font-size:.85rem;color:#374151">${esc(ev.service_name)}</span>
+              <a href="#" onclick="openBooking(${ev.booking_id})" style="margin-left:8px;font-size:.82rem;color:#7c3aed;text-decoration:none">${esc(ev.reference)}</a>
+            </div>
+            <span style="font-weight:700;color:#7c3aed">$${evTotal.toFixed(2)}</span>
+          </div>
+          ${staffLines}
+        </div>`;
+      }
+    });
+
+    if (events.length === 0) {
+      html += `<p style="color:#9ca3af;padding:16px;text-align:center">No confirmed/completed bookings in this range with assigned staff.</p>`;
+    }
+
+    html += `</div>`;
+    panel.innerHTML = html;
+  } catch(e) {
+    panel.innerHTML = `<div class="dash-card" style="border:2px solid #ef4444"><p style="color:#ef4444;padding:16px">Preflight error: ${esc(e.message)}</p></div>`;
+  }
+}
+
 async function loadPayroll() {
+  _preflightRan = false; // reset preflight flag on each page-visit
   setPayrollRange('week'); // default date range to current week on load
   try {
     const [runsRes, unpaidRes] = await Promise.all([
@@ -4376,7 +4482,11 @@ async function generatePayroll() {
     return;
   }
 
-  if (!confirm(`Generate payroll for ${dateFrom} through ${dateTo}?`)) return;
+  if (!_preflightRan) {
+    if (!confirm('Generate payroll without reviewing pay first?')) return;
+  } else {
+    if (!confirm(`Generate payroll for ${dateFrom} through ${dateTo}?`)) return;
+  }
 
   try {
     const res = await apiFetch('/api/payroll', {
@@ -4410,6 +4520,7 @@ async function viewPayrollRun(runId) {
 
     const statusColors = { draft: '#f59e0b', approved: '#3b82f6', paid: '#10b981' };
     const staffGroups = run.staff_groups || [];
+    const canAdjust = run.status === 'draft' || run.status === 'approved';
 
     let actionsHtml = '';
     if (run.status === 'draft') {
@@ -4443,12 +4554,27 @@ async function viewPayrollRun(runId) {
             <span>${esc(sg.preferred_name || sg.staff_name)}</span>
             <span style="color:#7c3aed">$${sg.total.toFixed(2)}</span>
           </div>
-          ${sg.items.map(item => `
-            <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:0.875rem;color:#6b7280;border-bottom:1px solid #e5e7eb">
-              <span>${item.reference} — ${esc(item.service_name)} — ${new Date(item.event_date).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
-              <span style="font-weight:600">$${Number(item.amount).toFixed(2)}</span>
-            </div>
-          `).join('')}
+          ${sg.items.map(item => {
+            const adjAmt = Number(item.adjustment_amount || 0);
+            const adjNote = item.adjustment_note || '';
+            const lineTotal = Number(item.amount) + adjAmt;
+            const adjHtml = adjAmt !== 0
+              ? `<span style="font-size:.78rem;color:${adjAmt>0?'#166534':'#991b1b'};background:${adjAmt>0?'#dcfce7':'#fee2e2'};padding:1px 8px;border-radius:8px;margin-left:6px">${adjAmt>0?'+':''}$${adjAmt.toFixed(2)}${adjNote ? ' ('+esc(adjNote)+')' : ''}</span>`
+              : '';
+            const adjustBtn = canAdjust
+              ? `<button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:.75rem;margin-left:8px" onclick="addPayrollAdjustment(${item.id},${runId})">± Adjust</button>`
+              : '';
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:0.875rem;color:#6b7280;border-bottom:1px solid #e5e7eb;flex-wrap:wrap;gap:4px">
+              <span style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
+                <span>${item.reference} — ${esc(item.service_name)} — ${new Date(item.event_date).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
+                ${adjHtml}
+              </span>
+              <span style="display:flex;align-items:center;gap:4px">
+                <span style="font-weight:600">${adjAmt!==0?`<span style="color:#9ca3af;font-size:.8rem;text-decoration:line-through">$${Number(item.amount).toFixed(2)}</span> $${lineTotal.toFixed(2)}`:`$${Number(item.amount).toFixed(2)}`}</span>
+                ${adjustBtn}
+              </span>
+            </div>`;
+          }).join('')}
         </div>
       `).join('')}
 
@@ -4458,6 +4584,33 @@ async function viewPayrollRun(runId) {
     document.getElementById('booking-modal').classList.add('open');
   } catch(e) {
     alert('Failed to load payroll run: ' + e.message);
+  }
+}
+
+async function addPayrollAdjustment(lineItemId, runId) {
+  const rawAmt = prompt('Adjustment amount (positive = bonus/tip, negative = deduction):');
+  if (rawAmt === null) return; // cancelled
+  const amount = parseFloat(rawAmt);
+  if (isNaN(amount)) { alert('Please enter a valid number (e.g. 25 or -10).'); return; }
+  const note = prompt('Note for this adjustment (e.g. "tip from client"):') || '';
+
+  try {
+    const res = await apiFetch('/api/payroll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'add_adjustment',
+        line_item_id: lineItemId,
+        adjustment_amount: amount,
+        adjustment_note: note,
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Adjustment failed'); return; }
+    // Re-render the run view
+    await viewPayrollRun(runId);
+  } catch(e) {
+    alert('Error saving adjustment: ' + e.message);
   }
 }
 
