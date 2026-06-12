@@ -1828,17 +1828,25 @@ async function saveAssignmentTimes(aid, bookingId) {
   const party   = booking?.duration_minutes || 60; // fallback
 
   try {
-    await callApi('staff-assignments', 'POST', {
-      action: 'update_assignment_times',
-      assignment_id: parseInt(aid),
-      load_minutes: load,
-      drive_minutes_each_way: drive,
-      unload_minutes: setup,
-      pack_out_minutes: pack,
-      home_unload_minutes: homeUn,
-      party_minutes: party,
-      event_time: booking?.event_time || null
+    const res = await apiFetch('/api/staff-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'update_assignment_times',
+        assignment_id: parseInt(aid),
+        load_minutes: load,
+        drive_minutes_each_way: drive,
+        unload_minutes: setup,
+        pack_out_minutes: pack,
+        home_unload_minutes: homeUn,
+        party_minutes: party,
+        event_time: booking?.event_time || null
+      })
     });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || 'Failed');
+    }
     await loadStaffAssignments(bookingId);
   } catch(e) { alert('Save failed: ' + e.message); }
 }
