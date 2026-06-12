@@ -299,8 +299,10 @@ async function loadPortal() {
       }
     }
 
-    renderEarnings(currentWeekTotal, lastPaymentAmount, lastPaymentDate, payrollRuns || []);
+    // Gigs first — on a phone "where do I need to be" beats "what am I owed"
+    el.innerHTML = '';
     renderGigs(data.myGigs || [], data.openGigs || []);
+    renderEarnings(currentWeekTotal, lastPaymentAmount, lastPaymentDate, payrollRuns || []);
   } catch(e) {
     el.innerHTML = '<div style="text-align:center;padding:48px;color:#f87171">Failed to load. Try refreshing.</div>';
   }
@@ -361,9 +363,9 @@ function renderEarnings(currentWeekTotal, lastPaymentAmount, lastPaymentDate, pa
     </div>
   `;
 
-  // Prepend earnings before gigs
+  // Earnings go below the gigs list
   const contentEl = document.getElementById('portal-content');
-  contentEl.innerHTML = html + (contentEl.innerHTML || '');
+  contentEl.innerHTML += html;
 }
 
 // ═══════════════════════════════════════
@@ -438,9 +440,13 @@ function gigCard(g, isAssigned) {
 
   const contactInfo = isAssigned ? `
     <div style="margin-top:10px;padding:10px;background:rgba(168,85,247,.08);border-radius:8px;font-size:.8rem">
-      <div style="font-weight:700;color:#c084fc;margin-bottom:4px">👤 ${esc(g.client_name||'—')}</div>
-      ${g.client_phone?`<div><a href="tel:${g.client_phone}" style="color:#a78bca;text-decoration:none">📞 ${esc(g.client_phone)}</a></div>`:''}
-      ${g.client_email?`<div><a href="mailto:${g.client_email}" style="color:#a78bca;text-decoration:none;font-size:.75rem">✉️ ${esc(g.client_email)}</a></div>`:''}
+      <div style="font-weight:700;color:#c084fc;margin-bottom:8px">👤 ${esc(g.client_name||'—')}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${g.client_phone?`<a href="tel:${g.client_phone}" style="display:inline-block;padding:8px 14px;border:1.5px solid rgba(192,132,252,.5);border-radius:8px;color:#c084fc;font-weight:700;text-decoration:none">📞 Call</a>
+        <a href="sms:${g.client_phone}" style="display:inline-block;padding:8px 14px;border:1.5px solid rgba(192,132,252,.5);border-radius:8px;color:#c084fc;font-weight:700;text-decoration:none">💬 Text</a>`:''}
+        ${g.client_email?`<a href="mailto:${g.client_email}" style="display:inline-block;padding:8px 14px;border:1.5px solid rgba(168,85,247,.3);border-radius:8px;color:#a78bca;font-weight:700;text-decoration:none">✉️ Email</a>`:''}
+      </div>
+      ${g.client_phone?`<div style="font-size:.75rem;color:#a78bca;margin-top:6px">${esc(g.client_phone)}</div>`:''}
       ${g.client_notes?`<div style="margin-top:6px;color:#9ca3af;font-style:italic">${esc(g.client_notes)}</div>`:''}
     </div>` : '';
 
@@ -459,9 +465,15 @@ function gigCard(g, isAssigned) {
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:.78rem;color:#a78bca;margin-top:10px">
-      <div>📍 ${esc(g.event_zip||'OKC area')}${isAssigned&&g.event_location?' — '+esc(g.event_location):''}</div>
-      <div>👥 ${g.guest_count||'?'} guests</div>
-      <div>🎉 ${esc(g.event_type||'—')}</div>
+      ${(() => {
+        const place = [isAssigned ? g.event_location : '', g.event_zip].filter(Boolean).join(', ');
+        const label = isAssigned && g.event_location ? `${esc(g.event_location)} (${esc(g.event_zip||'')})` : esc(g.event_zip || 'OKC area');
+        return place
+          ? `<div style="grid-column:1/-1"><a href="https://maps.google.com/?q=${encodeURIComponent(place)}" target="_blank" rel="noopener" style="color:#c084fc;font-weight:700;text-decoration:underline">📍 ${label} →</a></div>`
+          : `<div>📍 OKC area</div>`;
+      })()}
+      ${g.guest_count ? `<div>👥 ${g.guest_count} guests</div>` : ''}
+      ${g.event_type ? `<div>🎉 ${esc(g.event_type)}</div>` : ''}
     </div>
     ${contactInfo}
     ${checklist}

@@ -235,6 +235,15 @@ input,select,textarea{font-family:inherit}
   .filter-bar{width:100%}
   .filter-bar input{flex:1}
 }
+@media(max-width:640px){
+  /* Booking tables collapse to Client / Date / Status — rows stay tappable */
+  .bk-table th:nth-child(1),.bk-table td:nth-child(1),
+  .bk-table th:nth-child(3),.bk-table td:nth-child(3),
+  .bk-table th:nth-child(5),.bk-table td:nth-child(5),
+  .bk-table th:nth-child(7),.bk-table td:nth-child(7){display:none}
+  .bk-table td:nth-child(2) .text-muted{display:none} /* email line — widest, least useful on phone */
+  .bk-table td,.bk-table th{padding:10px 8px}
+}
 </style>
 </head>
 <body>
@@ -330,7 +339,7 @@ input,select,textarea{font-family:inherit}
           <h2>Recent Inquiries</h2>
           <button class="btn btn-primary btn-sm" onclick="showPage('bookings')">View All</button>
         </div>
-        <table>
+        <table class="bk-table">
           <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th></tr></thead>
           <tbody id="dash-tbody"></tbody>
         </table>
@@ -340,7 +349,7 @@ input,select,textarea{font-family:inherit}
           <h2>Upcoming Gigs</h2>
           <button class="btn btn-primary btn-sm" onclick="showPage('bookings')">View All</button>
         </div>
-        <table>
+        <table class="bk-table">
           <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Staff</th></tr></thead>
           <tbody id="dash-upcoming-tbody"></tbody>
         </table>
@@ -414,7 +423,7 @@ input,select,textarea{font-family:inherit}
       </div>
       
       <div class="card">
-        <table>
+        <table class="bk-table">
           <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th><th></th></tr></thead>
           <tbody id="bookings-tbody"></tbody>
         </table>
