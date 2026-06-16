@@ -283,6 +283,7 @@ input,select,textarea{font-family:inherit}
       <a id="nav-calendar"  onclick="showPage('calendar')"><span class="nav-icon">📅</span>Calendar</a>
       <a id="nav-clients"   onclick="showPage('clients')"><span class="nav-icon">👥</span>Clients</a>
       <a id="nav-staff"     onclick="showPage('staff')"><span class="nav-icon">🎭</span>Staffing</a>
+      <a id="nav-leads"     onclick="showPage('leads')"><span class="nav-icon">🎯</span>Leads</a>
       <a id="nav-catalogue" onclick="showPage('catalogue')"><span class="nav-icon">🗂</span>Catalogue</a>
       <a id="nav-payroll" onclick="showPage('payroll')"><span class="nav-icon">💰</span>Payroll</a>
       <a id="nav-automations" onclick="showPage('automations')"><span class="nav-icon">⚡</span>Automations</a>
@@ -311,6 +312,29 @@ input,select,textarea{font-family:inherit}
         <h1>Dashboard</h1>
         <span class="text-muted" id="dash-date"></span>
       </div>
+
+      <div id="stale-leads-warning" style="display:none;background:#fef9c3;border:1px solid #fde047;border-radius:10px;padding:16px 20px;margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:20px">⚠️</span>
+          <div>
+            <strong id="stale-leads-count" style="color:#92400e"></strong>
+            <span style="color:#78350f"> — </span>
+            <a href="#" onclick="showPage('leads');document.getElementById('lead-filter-overdue').checked=true;loadLeads();return false" style="color:#92400e;font-weight:600">View overdue leads →</a>
+          </div>
+        </div>
+      </div>
+
+      <div id="stale-review-warning" style="display:none;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:16px 20px;margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:20px">🔴</span>
+          <div>
+            <strong id="stale-review-count" style="color:#991b1b"></strong>
+            <span style="color:#7f1d1d"> stuck in Review for 2+ days — </span>
+            <a href="#" onclick="showPage('bookings');return false" style="color:#991b1b;font-weight:600">Review now →</a>
+          </div>
+        </div>
+      </div>
+
       <div class="stats-grid">
         <div class="stat-card accent">
           <div class="s-label">Revenue This Month</div>
@@ -589,6 +613,118 @@ input,select,textarea{font-family:inherit}
       <div class="card">
         <div class="card-hdr"><h2>Recent Emails Sent</h2></div>
         <div id="auto-log-body"><div style="text-align:center;padding:32px;color:#9ca3af">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- ══ LEADS ══ -->
+    <div class="page" id="page-leads">
+      <div class="page-hdr">
+        <h1>🎯 Leads Pipeline</h1>
+        <div class="page-hdr-actions">
+          <button onclick="openLeadModal()" style="background:#f97316;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600">+ Add Lead</button>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+        <select id="lead-filter-stage" onchange="loadLeads()" style="padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
+          <option value="">All Stages</option>
+          <option value="new">New</option>
+          <option value="contacted">Contacted</option>
+          <option value="following_up">Following Up</option>
+          <option value="quoted">Quoted</option>
+          <option value="converted">Converted ✅</option>
+          <option value="lost">Lost</option>
+        </select>
+        <select id="lead-filter-type" onchange="loadLeads()" style="padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
+          <option value="">All Types</option>
+          <option value="corporate">Corporate</option>
+          <option value="venue">Venue / Planner</option>
+          <option value="school">School / PTA</option>
+          <option value="birthday">Birthday</option>
+          <option value="general">General</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:14px;cursor:pointer">
+          <input type="checkbox" id="lead-filter-overdue" onchange="loadLeads()"> Show overdue only
+        </label>
+      </div>
+
+      <div id="leads-container">
+        <div style="color:#94a3b8;text-align:center;padding:40px">Loading leads...</div>
+      </div>
+    </div>
+
+    <div id="lead-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;overflow-y:auto">
+      <div style="background:#fff;max-width:520px;margin:40px auto;border-radius:12px;padding:32px;position:relative">
+        <button onclick="closeLeadModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;font-size:20px;cursor:pointer">✕</button>
+        <h3 id="lead-modal-title" style="margin:0 0 24px">Add Lead</h3>
+        <input type="hidden" id="lead-id">
+        <div style="display:grid;gap:14px">
+          <div>
+            <label style="font-size:13px;font-weight:600;color:#64748b">Name *</label>
+            <input id="lead-name" type="text" placeholder="Contact name" style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;box-sizing:border-box">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="font-size:13px;font-weight:600;color:#64748b">Organization</label>
+              <input id="lead-org" type="text" placeholder="Company / school / venue" style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:13px;font-weight:600;color:#64748b">Their Role</label>
+              <input id="lead-role" type="text" placeholder="e.g. Event Coordinator" style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;box-sizing:border-box">
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="font-size:13px;font-weight:600;color:#64748b">Phone</label>
+              <input id="lead-phone" type="text" placeholder="(405) 000-0000" style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:13px;font-weight:600;color:#64748b">Email</label>
+              <input id="lead-email" type="email" placeholder="email@example.com" style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;box-sizing:border-box">
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="font-size:13px;font-weight:600;color:#64748b">Lead Type</label>
+              <select id="lead-type" style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
+                <option value="general">General</option>
+                <option value="corporate">Corporate</option>
+                <option value="venue">Venue / Planner</option>
+                <option value="school">School / PTA</option>
+                <option value="birthday">Birthday</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:13px;font-weight:600;color:#64748b">Stage</label>
+              <select id="lead-stage" style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
+                <option value="new">New</option>
+                <option value="contacted">Contacted</option>
+                <option value="following_up">Following Up</option>
+                <option value="quoted">Quoted</option>
+                <option value="converted">Converted ✅</option>
+                <option value="lost">Lost</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="font-size:13px;font-weight:600;color:#64748b">Source</label>
+              <input id="lead-source" type="text" placeholder="e.g. Google, referral, cold" style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:13px;font-weight:600;color:#64748b">Next Follow-Up</label>
+              <input id="lead-followup" type="date" style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;box-sizing:border-box">
+            </div>
+          </div>
+          <div>
+            <label style="font-size:13px;font-weight:600;color:#64748b">Notes</label>
+            <textarea id="lead-notes" rows="3" placeholder="What do you know about this lead?" style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;box-sizing:border-box;resize:vertical"></textarea>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:24px;justify-content:flex-end">
+          <button onclick="closeLeadModal()" style="padding:10px 20px;border:1px solid #e2e8f0;background:#fff;border-radius:6px;cursor:pointer">Cancel</button>
+          <button onclick="saveLead()" style="padding:10px 20px;background:#f97316;color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer">Save Lead</button>
+        </div>
       </div>
     </div>
 
@@ -881,9 +1017,11 @@ function showPage(name) {
   document.getElementById('page-' + name).classList.add('active');
   document.getElementById('nav-' + name).classList.add('active');
   if (name === 'staff') { renderStaff(); }
+  if (name === 'leads') loadLeads();
   if (name === 'catalogue') loadCatalogue();
   if (name === 'automations') loadAutomations();
   if (name === 'payroll') loadPayroll();
+  if (name === 'dashboard') checkStaleWarnings();
   closeNav(); // close drawer after navigation on mobile
 }
 
@@ -4773,6 +4911,249 @@ async function downloadExport(reportType) {
 window.addEventListener('DOMContentLoaded', () => {
   setExportDates('ytd');
 });
+
+// ── LEADS ────────────────────────────────────────────────────
+
+const STAGE_LABELS = {
+  new: { label: 'New', color: '#e2e8f0', text: '#1e293b' },
+  contacted: { label: 'Contacted', color: '#dbeafe', text: '#1d4ed8' },
+  following_up: { label: 'Following Up', color: '#fef9c3', text: '#92400e' },
+  quoted: { label: 'Quoted', color: '#ede9fe', text: '#6d28d9' },
+  converted: { label: 'Converted ✅', color: '#dcfce7', text: '#166534' },
+  lost: { label: 'Lost', color: '#f1f5f9', text: '#94a3b8' },
+};
+
+const TYPE_LABELS = {
+  corporate: '🏢 Corporate',
+  venue: '🎪 Venue/Planner',
+  school: '🏫 School/PTA',
+  birthday: '🎂 Birthday',
+  general: '📋 General',
+};
+
+// Thin wrapper around apiFetch so lead calls read like callApi(...) but use
+// the shared authenticated fetch helper. Returns parsed JSON, throws on error.
+async function leadsApi(path, method = 'GET', body = null) {
+  const opts = { method, headers: {} };
+  if (body) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await apiFetch('/api/' + path, opts);
+  let data = null;
+  try { data = await res.json(); } catch { data = null; }
+  if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+  return data || {};
+}
+
+async function loadLeads() {
+  const stage = document.getElementById('lead-filter-stage')?.value || '';
+  const type = document.getElementById('lead-filter-type')?.value || '';
+  const overdue = document.getElementById('lead-filter-overdue')?.checked || false;
+
+  let qs = [];
+  if (stage) qs.push(`stage=${encodeURIComponent(stage)}`);
+  if (type) qs.push(`lead_type=${encodeURIComponent(type)}`);
+  if (overdue) qs.push(`overdue=true`);
+
+  const container = document.getElementById('leads-container');
+  if (!container) return;
+  container.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:40px">Loading...</div>';
+
+  try {
+    const data = await leadsApi('leads' + (qs.length ? '?' + qs.join('&') : ''));
+    renderLeads(data.leads || []);
+  } catch (e) {
+    container.innerHTML = `<div style="color:#ef4444;padding:20px">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderLeads(leads) {
+  const container = document.getElementById('leads-container');
+  if (!leads.length) {
+    container.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:60px"><div style="font-size:40px;margin-bottom:12px">🎯</div><div>No leads yet. Add your first prospect!</div></div>';
+    return;
+  }
+
+  const now = new Date();
+  const rows = leads.map(l => {
+    const stage = STAGE_LABELS[l.stage] || { label: l.stage, color: '#e2e8f0', text: '#1e293b' };
+    const isOverdue = l.next_followup_at && new Date(l.next_followup_at) < now && !['converted','lost'].includes(l.stage);
+    const followupStr = l.next_followup_at ? new Date(l.next_followup_at).toLocaleDateString('en-US', { month:'short', day:'numeric' }) : '—';
+
+    return `<tr style="border-bottom:1px solid #f1f5f9;${isOverdue ? 'background:#fff7ed;' : ''}">
+      <td style="padding:12px 14px">
+        <div style="font-weight:600">${esc(l.name)}</div>
+        ${l.org ? `<div style="font-size:12px;color:#64748b">${esc(l.org)}${l.role ? ' · ' + esc(l.role) : ''}</div>` : ''}
+      </td>
+      <td style="padding:12px 14px;font-size:13px;color:#64748b">${TYPE_LABELS[l.lead_type] || esc(l.lead_type)}</td>
+      <td style="padding:12px 14px">
+        <span style="background:${stage.color};color:${stage.text};padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600">${stage.label}</span>
+      </td>
+      <td style="padding:12px 14px;font-size:13px${isOverdue ? ';color:#ef4444;font-weight:600' : ';color:#64748b'}">
+        ${isOverdue ? '⚠️ ' : ''}${followupStr}
+      </td>
+      <td style="padding:12px 14px;font-size:13px">
+        ${l.phone ? `<a href="tel:${esc(l.phone)}" style="color:#3b82f6;display:block">${esc(l.phone)}</a>` : ''}
+        ${l.email ? `<a href="mailto:${esc(l.email)}" style="color:#3b82f6;font-size:12px">${esc(l.email)}</a>` : ''}
+      </td>
+      <td style="padding:12px 14px">
+        <div style="display:flex;gap:8px">
+          <button onclick="openLeadModal(${l.id})" style="padding:5px 12px;background:#f1f5f9;border:none;border-radius:5px;cursor:pointer;font-size:12px">Edit</button>
+          <button onclick="markContacted(${l.id})" title="Mark contacted today" style="padding:5px 12px;background:#dbeafe;color:#1d4ed8;border:none;border-radius:5px;cursor:pointer;font-size:12px">✓ Contacted</button>
+          <button onclick="deleteLead(${l.id})" style="padding:5px 10px;background:#fee2e2;color:#ef4444;border:none;border-radius:5px;cursor:pointer;font-size:12px">✕</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  container.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      <thead>
+        <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
+          <th style="padding:12px 14px;text-align:left;font-size:12px;color:#64748b;font-weight:600">CONTACT</th>
+          <th style="padding:12px 14px;text-align:left;font-size:12px;color:#64748b;font-weight:600">TYPE</th>
+          <th style="padding:12px 14px;text-align:left;font-size:12px;color:#64748b;font-weight:600">STAGE</th>
+          <th style="padding:12px 14px;text-align:left;font-size:12px;color:#64748b;font-weight:600">FOLLOW-UP</th>
+          <th style="padding:12px 14px;text-align:left;font-size:12px;color:#64748b;font-weight:600">CONTACT INFO</th>
+          <th style="padding:12px 14px;text-align:left;font-size:12px;color:#64748b;font-weight:600">ACTIONS</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div style="color:#94a3b8;font-size:13px;text-align:right;margin-top:8px">${leads.length} lead${leads.length !== 1 ? 's' : ''}</div>
+  `;
+}
+
+function openLeadModal(id) {
+  document.getElementById('lead-modal-title').textContent = id ? 'Edit Lead' : 'Add Lead';
+  document.getElementById('lead-id').value = id || '';
+  ['name','org','role','phone','email','type','stage','source','notes','followup'].forEach(f => {
+    const el = document.getElementById(`lead-${f}`);
+    if (el) el.value = '';
+  });
+  document.getElementById('lead-stage').value = 'new';
+  document.getElementById('lead-type').value = 'general';
+
+  if (id) {
+    leadsApi(`leads/${id}`).then(data => {
+      const l = data.lead;
+      document.getElementById('lead-name').value = l.name || '';
+      document.getElementById('lead-org').value = l.org || '';
+      document.getElementById('lead-role').value = l.role || '';
+      document.getElementById('lead-phone').value = l.phone || '';
+      document.getElementById('lead-email').value = l.email || '';
+      document.getElementById('lead-type').value = l.lead_type || 'general';
+      document.getElementById('lead-stage').value = l.stage || 'new';
+      document.getElementById('lead-source').value = l.source || '';
+      document.getElementById('lead-notes').value = l.notes || '';
+      if (l.next_followup_at) {
+        document.getElementById('lead-followup').value = l.next_followup_at.split('T')[0];
+      }
+    }).catch(e => alert('Error loading lead: ' + e.message));
+  }
+
+  document.getElementById('lead-modal').style.display = 'block';
+}
+
+function closeLeadModal() {
+  document.getElementById('lead-modal').style.display = 'none';
+}
+
+async function saveLead() {
+  const id = document.getElementById('lead-id').value;
+  const payload = {
+    name: document.getElementById('lead-name').value.trim(),
+    org: document.getElementById('lead-org').value.trim(),
+    role: document.getElementById('lead-role').value.trim(),
+    phone: document.getElementById('lead-phone').value.trim(),
+    email: document.getElementById('lead-email').value.trim(),
+    lead_type: document.getElementById('lead-type').value,
+    stage: document.getElementById('lead-stage').value,
+    source: document.getElementById('lead-source').value.trim(),
+    notes: document.getElementById('lead-notes').value.trim(),
+    next_followup_at: document.getElementById('lead-followup').value || null,
+  };
+
+  if (!payload.name) { alert('Name is required'); return; }
+
+  try {
+    if (id) {
+      await leadsApi(`leads/${id}`, 'PATCH', payload);
+    } else {
+      await leadsApi('leads', 'POST', payload);
+    }
+    closeLeadModal();
+    loadLeads();
+  } catch (e) {
+    alert('Error saving lead: ' + e.message);
+  }
+}
+
+async function markContacted(id) {
+  const today = new Date();
+  const nextFollowup = new Date(today);
+  nextFollowup.setDate(nextFollowup.getDate() + 7);
+
+  try {
+    await leadsApi(`leads/${id}`, 'PATCH', {
+      last_contact_at: today.toISOString(),
+      next_followup_at: nextFollowup.toISOString().split('T')[0],
+      stage: 'contacted',
+    });
+    loadLeads();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function deleteLead(id) {
+  if (!confirm('Delete this lead?')) return;
+  try {
+    await leadsApi(`leads/${id}`, 'DELETE');
+    loadLeads();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// ── DASHBOARD STALE WARNINGS ─────────────────────────────────
+
+async function checkStaleWarnings() {
+  try {
+    const data = await leadsApi('leads?overdue=true');
+    const count = (data.leads || []).length;
+    const el = document.getElementById('stale-leads-warning');
+    if (el) {
+      if (count > 0) {
+        el.style.display = 'block';
+        document.getElementById('stale-leads-count').textContent =
+          `${count} lead${count !== 1 ? 's' : ''} overdue for follow-up`;
+      } else {
+        el.style.display = 'none';
+      }
+    }
+  } catch(e) { /* leads table may not exist yet on first load */ }
+
+  // Bookings are already loaded into the in-memory allBookings array at init.
+  try {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 2);
+    const stale = (allBookings || []).filter(b =>
+      b.status === 'review' && new Date(b.created_at) < cutoff
+    );
+    const el = document.getElementById('stale-review-warning');
+    if (el) {
+      if (stale.length > 0) {
+        el.style.display = 'block';
+        document.getElementById('stale-review-count').textContent =
+          `${stale.length} booking${stale.length !== 1 ? 's' : ''}`;
+      } else {
+        el.style.display = 'none';
+      }
+    }
+  } catch(e) {}
+}
 </script>
 </body>
 </html>

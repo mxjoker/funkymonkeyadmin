@@ -173,6 +173,30 @@ async function runScheduledAutomations(client) {
     }
   }
 
+  // days_after_created — fire N days after a booking was created while it is
+  // still sitting in a given status (e.g. stale "review" bookings the owner
+  // hasn't actioned). Uses created_at rather than event_date.
+  const { rows: createdRules } = await client.query(
+    `SELECT * FROM automation_rules
+     WHERE active=TRUE AND trigger_event='days_after_created' AND trigger_days IS NOT NULL
+     ORDER BY sort_order`
+  );
+  for (const rule of createdRules) {
+    const { rows: bookings } = await client.query(
+      `SELECT * FROM bookings
+       WHERE status = $1
+         AND created_at::date = (CURRENT_DATE - $2::int)
+         AND id NOT IN (
+           SELECT booking_id FROM email_log WHERE rule_id=$3 AND status='sent'
+         )`,
+      [rule.trigger_status, rule.trigger_days, rule.id]
+    );
+    for (const booking of bookings) {
+      await sendAutomationEmail(client, rule, booking, null);
+      sent++;
+    }
+  }
+
   return sent;
 }
 

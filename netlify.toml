@@ -69,6 +69,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/leads"
+  to = "/.netlify/functions/leads"
+  status = 200
+
+[[redirects]]
+  from = "/api/leads/*"
+  to = "/.netlify/functions/leads"
+  status = 200
+
+[[redirects]]
   from = "/api/generate-invoice/:id"
   to = "/.netlify/functions/generate-invoice/:id"
   status = 200
