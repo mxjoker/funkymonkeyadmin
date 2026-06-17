@@ -11,6 +11,21 @@
 
 const FROM = 'Funky Monkey Events <bookings@funkymonkeyevents.com>';
 
+// Google review profiles. Magic-show bookings point clients at Joe's personal
+// "Joe Coover Magic" profile; everything else goes to "Funky Monkey Events".
+// Env vars override so the URLs can change without a code deploy.
+const REVIEW_LINK_MAGIC   = process.env.REVIEW_LINK_MAGIC || 'https://g.page/r/CasLGRjeMqxuEAI/review';
+const REVIEW_LINK_DEFAULT = process.env.REVIEW_LINK_FM    || 'https://g.page/r/CWyWrqOMWC01EAI/review';
+
+// A booking is "magic" when its service name/id mentions magic (Deluxe/Basic/
+// Corporate Birthday Magic Show, Magic School Assembly, Walk-Around Cocktail
+// Hour Magic, Library Magic Show/Workshop). Game Show, DJ Piñata, balloons,
+// foam, etc. fall through to the Funky Monkey Events profile.
+function reviewLinkFor(booking) {
+  const blob = `${booking.service_name || ''} ${booking.service || ''} ${booking.service_id || ''} ${booking.event_type || ''}`;
+  return /magic/i.test(blob) ? REVIEW_LINK_MAGIC : REVIEW_LINK_DEFAULT;
+}
+
 // ── HTML escape for user-supplied values in email templates ──────────────────
 function esc(value) {
   return String(value ?? '')
@@ -50,9 +65,16 @@ function render(template, booking, stripeLink) {
       </div>`
     : '';
 
+  // Guests of honour falls back to the child's name, then to a friendly
+  // generic so the sentence still reads if neither field is set.
+  const guestsOfHonour = booking.guests_of_honour || booking.child_name || 'everyone';
+
   return template
     .replace(/{{client_first_name}}/g, esc(firstName))
     .replace(/{{client_name}}/g,       esc(booking.client_name   || ''))
+    .replace(/{{guests_of_honour}}/g,  esc(guestsOfHonour))
+    .replace(/{{child_name}}/g,        esc(booking.child_name    || ''))
+    .replace(/{{review_link}}/g,       reviewLinkFor(booking))
     .replace(/{{service_name}}/g,      esc(booking.service_name  || ''))
     .replace(/{{event_date}}/g,        dateStr)
     .replace(/{{event_time}}/g,        esc(booking.event_time    || ''))
