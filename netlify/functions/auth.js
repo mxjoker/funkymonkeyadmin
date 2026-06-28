@@ -50,6 +50,32 @@ exports.handler = async (event) => {
       return json(200, { success: true, role: auth.role });
     }
 
+    // ── send a test email to diagnose Resend configuration ────────────
+    if (body.action === 'test_email') {
+      const auth = await requireAuth(event, ['admin']);
+      if (!auth) return unauthorized();
+      const key = process.env.RESEND_API_KEY;
+      if (!key) return json(500, { ok: false, error: 'RESEND_API_KEY env var is not set in Netlify' });
+      const to = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
+      try {
+        const res = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: 'Funky Monkey Events <bookings@funkymonkeyevents.com>',
+            to,
+            subject: '🐒 Funky Monkey — Resend Test Email',
+            html: '<p>If you received this, Resend is configured correctly.</p>',
+          }),
+        });
+        const data = await res.json();
+        if (data.error) return json(500, { ok: false, resend_error: data.error });
+        return json(200, { ok: true, message: `Test email sent to ${to}`, resend_id: data.id });
+      } catch (e) {
+        return json(500, { ok: false, error: e.message });
+      }
+    }
+
     // ── change admin password (requires a valid admin session) ─────────
     if (body.action === 'set_admin_password') {
       const auth = await requireAuth(event, ['admin']);
