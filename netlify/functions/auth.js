@@ -69,7 +69,7 @@ exports.handler = async (event) => {
           }),
         });
         const data = await res.json();
-        if (data.error) return json(500, { ok: false, resend_error: data.error });
+        if (!res.ok || data.statusCode || data.name) return json(500, { ok: false, resend_error: data });
         return json(200, { ok: true, message: `Test email sent to ${to}`, resend_id: data.id });
       } catch (e) {
         return json(500, { ok: false, error: e.message });
