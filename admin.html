@@ -2499,7 +2499,7 @@ async function renderStaff() {
         <div><a href="tel:${s.phone||''}" style="color:#374151;text-decoration:none">📞 ${esc(s.phone||'—')}</a></div>
         <div><a href="mailto:${s.email||''}" style="color:#7c3aed;text-decoration:none">✉️ ${esc(s.email||'—')}</a></div>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <span>🔑 PIN: <code style="background:#f3f4f6;padding:1px 6px;border-radius:4px">${esc(s.pin||'—')}</code></span>
+          <span>${s.has_access_code ? '🔑 Access Code: <code style="background:#d1fae5;padding:1px 6px;border-radius:4px">set ✓</code>' : '🔑 Access Code: <code style="background:#fee2e2;padding:1px 6px;border-radius:4px">not set</code>'}</span>
           <span style="color:#9ca3af;font-size:.72rem">${s.comms_preference||'email'}</span>
         </div>
       </div>

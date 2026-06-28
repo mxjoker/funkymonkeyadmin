@@ -104,6 +104,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/test-email"
+  to = "/.netlify/functions/test-email"
+  status = 200
+
+[[redirects]]
   from = "/api/add-indexes"
   to = "/.netlify/functions/add-indexes"
   status = 200

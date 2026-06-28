@@ -9,8 +9,9 @@ const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stri
 // Public field subset per API contract
 const PUBLIC_FIELDS = [
   'reference', 'status', 'service_id', 'service_name', 'event_type',
-  'event_date', 'start_time', 'end_time', 'guest_count', 'venue_name',
-  'event_address', 'client_name', 'addons', 'total_price', 'mileage_cost',
+  'event_date', 'event_time', 'event_zip', 'event_location',
+  'start_time', 'end_time', 'guest_count', 'venue_name',
+  'event_address', 'client_name', 'client_email', 'addons', 'total_price', 'mileage_cost',
   'deposit_amount', 'deposit_paid', 'balance_due', 'payment_amount', 'created_at',
 ];
 
@@ -343,11 +344,10 @@ exports.handler = async (event) => {
 
       const booking = rows[0];
 
-      // Fire-and-forget emails — admin failure must not prevent client email
-      sendBookingEmails(booking);
-
-      // Notify matching staff automatically
-      notifyMatchingStaff(booking).catch(e => console.error('Staff notify error:', e.message));
+      // Await both — in a serverless function the container may terminate as soon
+      // as the handler returns, dropping any unawaited fetch calls to Resend.
+      await sendBookingEmails(booking);
+      await notifyMatchingStaff(booking).catch(e => console.error('Staff notify error:', e.message));
 
       return json(201, { success: true, reference: booking.reference, id: booking.id });
     });
@@ -356,8 +356,10 @@ exports.handler = async (event) => {
   return json(405, { error: 'Method not allowed' });
 };
 
-// Fire-and-forget: send admin then client email independently
-function sendBookingEmails(booking) {
+// Send admin notification then client acknowledgment, both awaited so the
+// serverless container doesn't terminate before the Resend calls complete.
+// Each is caught independently so admin failure never blocks client email.
+async function sendBookingEmails(booking) {
   const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
 
   const dateStr = booking.event_date
@@ -372,7 +374,7 @@ function sendBookingEmails(booking) {
   ).join('');
 
   // Admin notification — failure logged but does NOT skip client email
-  sendEmail(
+  await sendEmail(
     NOTIFY_EMAIL,
     `🐒 New Booking Request — ${esc(booking.reference)} — ${esc(booking.service_name)}`,
     wrap(`
@@ -400,9 +402,9 @@ function sendBookingEmails(booking) {
     `)
   ).catch(e => console.error('Admin email error:', e.message));
 
-  // Client confirmation — always attempted regardless of admin email outcome
+  // Client acknowledgment — always attempted regardless of admin email outcome
   const firstName = esc(booking.client_name.split(' ')[0] || 'there');
-  sendEmail(
+  await sendEmail(
     booking.client_email,
     `🎉 Booking Request Received — Funky Monkey Events (${booking.reference})`,
     wrap(`

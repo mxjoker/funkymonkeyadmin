@@ -14,6 +14,10 @@ const SAFE_COLS = `
   payment_method, payment_handle, created_at, updated_at
 `.trim();
 
+// Admin-only extras: boolean so admins know whether a code is configured
+// without ever exposing the hash itself.
+const ADMIN_EXTRA_COLS = `, (access_code_hash IS NOT NULL) AS has_access_code`;
+
 // Fields a staff member may update on their own record.
 // Fields admin may update (anything except the credential columns).
 const ADMIN_FORBIDDEN_FIELDS = new Set(['pin', 'access_code_hash']);
@@ -136,8 +140,9 @@ exports.handler = async (event) => {
 
     return withClient(async (client) => {
       await ensureTable(client);
+      const cols = auth.role === 'admin' ? SAFE_COLS + ADMIN_EXTRA_COLS : SAFE_COLS;
       const { rows } = await client.query(
-        `SELECT ${SAFE_COLS} FROM staff WHERE id=$1 AND active=TRUE`,
+        `SELECT ${cols} FROM staff WHERE id=$1 AND active=TRUE`,
         [pathId]
       );
       if (!rows.length) return json(404, { error: 'Not found' });
@@ -157,10 +162,11 @@ exports.handler = async (event) => {
 
     return withClient(async (client) => {
       await ensureTable(client);
-      // Staff role: return safe cols for everyone (they need it for scheduling context)
-      // Admin: also safe cols (never expose pin/access_code_hash to anyone)
+      // Admin gets has_access_code so they know which staff need codes generated.
+      // Staff role never gets pin/access_code_hash or this derived flag.
+      const cols = auth.role === 'admin' ? SAFE_COLS + ADMIN_EXTRA_COLS : SAFE_COLS;
       const { rows } = await client.query(
-        `SELECT ${SAFE_COLS} FROM staff WHERE active=TRUE ORDER BY sort_order, id`
+        `SELECT ${cols} FROM staff WHERE active=TRUE ORDER BY sort_order, id`
       );
       // Strip admin_notes for staff callers
       const out = auth.role === 'staff'
