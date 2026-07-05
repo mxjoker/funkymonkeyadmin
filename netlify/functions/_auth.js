@@ -147,6 +147,13 @@ function bearerToken(event) {
 async function requireAuth(event, roles = ['admin', 'staff']) {
   const token = bearerToken(event);
   if (!token) return null;
+  // Long-lived agent token (Booked Solid / Otto): set AGENT_API_TOKEN in the
+  // Netlify env to enable. Admin role, no session row, no expiry. Min-length
+  // guard so a short or mis-set var can never match. Unset = disabled.
+  const agentToken = process.env.AGENT_API_TOKEN;
+  if (agentToken && agentToken.length >= 32 && safeEqual(token, agentToken)) {
+    return roles.includes('admin') ? { role: 'admin', staffId: null, tokenHash: null } : null;
+  }
   const tokenHash = hashToken(token);
   const pool = getPool();
   const client = await pool.connect();

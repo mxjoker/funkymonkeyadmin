@@ -15,7 +15,10 @@ const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
+let schemaReady;
 async function ensureTable(client) {
+  if (!schemaReady) {
+    schemaReady = (async () => {
   await client.query(`
     CREATE TABLE IF NOT EXISTS leads (
       id SERIAL PRIMARY KEY,
@@ -49,10 +52,19 @@ async function ensureTable(client) {
     `ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_contact_at TIMESTAMPTZ`,
     `ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_followup_at TIMESTAMPTZ`,
     `ALTER TABLE leads ADD COLUMN IF NOT EXISTS converted_booking_id INTEGER`,
+    `ALTER TABLE leads ADD COLUMN IF NOT EXISTS brand TEXT DEFAULT 'fme'`,
+    `ALTER TABLE leads ADD COLUMN IF NOT EXISTS external_ref TEXT`,
   ];
   for (const sql of cols) {
     await client.query(sql).catch(() => {});
   }
+  // external_ref = Booked Solid lead-folder slug; unique so agent pushes are idempotent
+  await client.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS leads_external_ref_uniq ON leads (external_ref) WHERE external_ref IS NOT NULL`
+  ).catch(() => {});
+    })().catch(e => { schemaReady = null; throw e; });
+  }
+  return schemaReady;
 }
 
 exports.handler = async (event) => {
@@ -84,6 +96,14 @@ exports.handler = async (event) => {
           params.push(qs.lead_type);
           conditions.push(`lead_type = $${params.length}`);
         }
+        if (qs?.brand) {
+          params.push(qs.brand);
+          conditions.push(`brand = $${params.length}`);
+        }
+        if (qs?.external_ref) {
+          params.push(qs.external_ref);
+          conditions.push(`external_ref = $${params.length}`);
+        }
         if (qs?.overdue === 'true') {
           conditions.push(`next_followup_at < NOW() AND converted_booking_id IS NULL AND stage NOT IN ('lost', 'converted')`);
         }
@@ -113,8 +133,8 @@ exports.handler = async (event) => {
 
         const { rows } = await client.query(`
           INSERT INTO leads
-            (name, org, role, phone, email, lead_type, stage, source, notes, last_contact_at, next_followup_at)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            (name, org, role, phone, email, lead_type, stage, source, notes, last_contact_at, next_followup_at, brand, external_ref)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
           RETURNING *`,
           [
             d.name,
@@ -128,6 +148,8 @@ exports.handler = async (event) => {
             d.notes || null,
             d.last_contact_at || null,
             d.next_followup_at || null,
+            d.brand === 'jcm' ? 'jcm' : 'fme',
+            d.external_ref || null,
           ]
         );
         return json(201, { lead: rows[0] });
@@ -149,6 +171,8 @@ exports.handler = async (event) => {
           last_contact_at: 'last_contact_at',
           next_followup_at: 'next_followup_at',
           converted_booking_id: 'converted_booking_id',
+          brand: 'brand',
+          external_ref: 'external_ref',
         };
 
         const sets = [];
@@ -179,6 +203,7 @@ exports.handler = async (event) => {
       return json(405, { error: 'Method not allowed' });
 
     } catch (err) {
+      if (err.code === '23505') return json(409, { error: 'external_ref already exists' });
       console.error('leads error:', err.message);
       return json(500, { error: 'Internal server error' });
     }

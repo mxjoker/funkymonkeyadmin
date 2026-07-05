@@ -21,7 +21,10 @@ function pickPublicFields(row) {
   return out;
 }
 
+let schemaReady;
 async function ensureTable(client) {
+  if (!schemaReady) {
+    schemaReady = (async () => {
   await client.query(`
     CREATE TABLE IF NOT EXISTS bookings (
       id SERIAL PRIMARY KEY,
@@ -115,11 +118,15 @@ async function ensureTable(client) {
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS customer_type VARCHAR(64) DEFAULT ''",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS venue VARCHAR(255) DEFAULT ''",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS confirmation_deadline DATE",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_ref VARCHAR(255) DEFAULT ''"
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_ref VARCHAR(255) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS brand VARCHAR(8) DEFAULT 'fme'"
   ];
   for (const sql of cols) {
     try { await client.query(sql); } catch (_) {}
   }
+    })().catch(e => { schemaReady = null; throw e; });
+  }
+  return schemaReady;
 }
 
 // Generates FM- + 8 chars of crypto-random base32 (no ambiguous chars I/O/1/0)
@@ -198,8 +205,21 @@ exports.handler = async (event) => {
 
     return withClient(async (client) => {
       await ensureTable(client);
+      // Optional filters for agent delta-sync: ?brand=jcm|fme, ?since=ISO-date
+      const conditions = [];
+      const params = [];
+      if (qs.brand) {
+        params.push(qs.brand);
+        conditions.push(`brand = $${params.length}`);
+      }
+      if (qs.since && !isNaN(Date.parse(qs.since))) {
+        params.push(qs.since);
+        conditions.push(`updated_at >= $${params.length}`);
+      }
+      const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
       const { rows } = await client.query(
-        'SELECT * FROM bookings ORDER BY created_at DESC'
+        `SELECT * FROM bookings ${where} ORDER BY created_at DESC`,
+        params
       );
       return json(200, rows);
     });
@@ -300,7 +320,7 @@ exports.handler = async (event) => {
           event_type, event_type_id, guest_count, notes,
           is_custom_quote, extra_hours, extra_hours_cost,
           client_name, client_phone, client_email, referral_source,
-          child_name
+          child_name, brand
         ) VALUES (
           $1, 'review',
           $2, $3, $4,
@@ -310,7 +330,7 @@ exports.handler = async (event) => {
           $16, $17, $18, $19,
           $20, $21, $22,
           $23, $24, $25, $26,
-          $27
+          $27, $28
         ) RETURNING *
       `, [
         reference,
@@ -340,6 +360,7 @@ exports.handler = async (event) => {
         clientEmail,
         cap255(b.referral_source),
         cap255(b.child_name),
+        b.brand === 'jcm' ? 'jcm' : 'fme',
       ]);
 
       const booking = rows[0];
