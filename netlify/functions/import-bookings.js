@@ -16,9 +16,13 @@ const path = require('path');
 // Status mapping from old system
 const STATUS_MAP = {
   'Confirmed': 'confirmed',
+  'Confirmed+': 'confirmed',
+  'Balance settled': 'completed',
   'Processing': 'pending',
+  'Pending': 'review',
   'Unprocessed': 'review',
   'Cancelled': 'cancelled',
+  'Dropped / Cancelled': 'cancelled',
   'Completed': 'completed'
 };
 
@@ -28,7 +32,8 @@ const SERVICE_MAP = {
   'Basic Birthday Show': 'Magic Birthday Show',
   'Stage Show': 'Stage Magic Show',
   '45 Minute Foam Party': 'Foam Party Experience',
-  '90 Minute Foam Party': 'Foam Party Experience'
+  '90 Minute Foam Party': 'Foam Party Experience',
+  '90 minute Foam Party': 'Foam Party Experience'
 };
 
 // Oklahoma ZIP codes by town
@@ -132,9 +137,14 @@ function transformRow(row, headers) {
   // Parse date
   const eventDate = parseDate(obj['Event date']);
 
+  // Brand: magic/bubbles/balloons = Joe Coover Magic, everything else = Funky Monkey Events
+  const brandText = [obj['Package'], obj['Pathway'], obj['Celebration'], obj['Organisation']].join(' ');
+  const brand = /magic|bubble|balloon/i.test(brandText) ? 'jcm' : 'fme';
+
   return {
     reference: obj['Ref.'] || null,
     status,
+    brand,
     service_name: serviceName,
     service_price: parseDecimal(obj['Party price']),
     addon_total: parseDecimal(obj['Price of extras']),
@@ -156,7 +166,8 @@ function transformRow(row, headers) {
     customer_type: obj['Customer type'] || '',
     referral_source: obj['Heard about us'] || '',
     admin_notes: obj['Admin notes'] || '',
-    balance_due: parseDecimal(obj['Tot. price']) - parseDecimal(obj['Deposit'])
+    // Settled gigs carry no balance; otherwise remaining = total minus deposit
+    balance_due: status === 'completed' ? 0 : Math.max(0, parseDecimal(obj['Tot. price']) - parseDecimal(obj['Deposit']))
   };
 }
 
@@ -253,7 +264,7 @@ exports.handler = async (event) => {
           if (!isDryRun) {
             await client.query(`
               INSERT INTO bookings (
-                reference, status, service_name, service_price,
+                reference, status, brand, service_name, service_price,
                 addon_total, mileage_cost, total_price, deposit_amount,
                 balance_due, deposit_paid, event_date, event_time,
                 event_zip, event_location, event_type, guest_count,
@@ -261,10 +272,10 @@ exports.handler = async (event) => {
                 child_name, customer_type, referral_source, admin_notes
               ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+                $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
               )
             `, [
-              booking.reference, booking.status, booking.service_name,
+              booking.reference, booking.status, booking.brand, booking.service_name,
               booking.service_price, booking.addon_total, booking.mileage_cost,
               booking.total_price, booking.deposit_amount, booking.balance_due,
               booking.deposit_paid, booking.event_date, booking.event_time,
