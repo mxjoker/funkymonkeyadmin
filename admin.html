@@ -284,6 +284,7 @@ input,select,textarea{font-family:inherit}
       <a id="nav-clients"   onclick="showPage('clients')"><span class="nav-icon">👥</span>Clients</a>
       <a id="nav-staff"     onclick="showPage('staff')"><span class="nav-icon">🎭</span>Staffing</a>
       <a id="nav-leads"     onclick="showPage('leads')"><span class="nav-icon">🎯</span>Leads</a>
+      <a id="nav-otto"      onclick="showPage('otto')"><span class="nav-icon">🌙</span>Otto<span id="otto-nav-badge" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:6px"></span></a>
       <a id="nav-catalogue" onclick="showPage('catalogue')"><span class="nav-icon">🗂</span>Catalogue</a>
       <a id="nav-payroll" onclick="showPage('payroll')"><span class="nav-icon">💰</span>Payroll</a>
       <a id="nav-automations" onclick="showPage('automations')"><span class="nav-icon">⚡</span>Automations</a>
@@ -728,6 +729,37 @@ input,select,textarea{font-family:inherit}
       </div>
     </div>
 
+    <!-- ══ OTTO ══ -->
+    <div class="page" id="page-otto">
+      <div class="page-hdr">
+        <h1>🌙 Otto</h1>
+        <div class="page-hdr-actions">
+          <button onclick="requestOttoRun()" id="otto-run-btn" style="background:#7c3aed;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600">Run a sweep</button>
+        </div>
+      </div>
+
+      <div id="otto-status" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#64748b">Loading…</div>
+
+      <!-- Ask Otto -->
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-bottom:20px">
+        <label style="font-size:13px;font-weight:600;color:#64748b">Ask Otto to…</label>
+        <div style="display:flex;gap:10px;margin-top:6px;flex-wrap:wrap">
+          <input id="otto-task-input" type="text" placeholder="e.g. draft a follow-up for Shawna Houle" style="flex:1;min-width:220px;padding:9px 12px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px"
+                 onkeydown="if(event.key==='Enter')sendOttoTask()">
+          <button onclick="sendOttoTask()" style="padding:9px 18px;background:#0f172a;color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer">Send</button>
+        </div>
+        <div style="font-size:12px;color:#94a3b8;margin-top:6px">Picked up on Otto's next run. Otto drafts; nothing sends itself.</div>
+      </div>
+
+      <!-- Needs your call -->
+      <h2 style="font-size:16px;margin:0 0 10px">Needs your call</h2>
+      <div id="otto-gates" style="margin-bottom:28px"></div>
+
+      <!-- Latest briefing -->
+      <h2 style="font-size:16px;margin:0 0 10px">Latest briefing</h2>
+      <div id="otto-briefing" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;font-size:14px;line-height:1.6;color:#334155;overflow-x:auto"></div>
+    </div>
+
     <!-- ══ ANALYTICS ══ -->
     <div class="page" id="page-analytics">
       <div class="page-hdr"><h1>Analytics</h1></div>
@@ -941,6 +973,7 @@ async function init() {
   await loadCalStaffMap();
   renderDashboard();
   showPage('dashboard');
+  loadOtto(); // populates the nav badge so Otto's open items are visible from any page
 }
 
 async function loadStaffList() {
@@ -1018,6 +1051,7 @@ function showPage(name) {
   document.getElementById('nav-' + name).classList.add('active');
   if (name === 'staff') { renderStaff(); }
   if (name === 'leads') loadLeads();
+  if (name === 'otto') loadOtto();
   if (name === 'catalogue') loadCatalogue();
   if (name === 'automations') loadAutomations();
   if (name === 'payroll') loadPayroll();
@@ -4944,6 +4978,137 @@ async function leadsApi(path, method = 'GET', body = null) {
   try { data = await res.json(); } catch { data = null; }
   if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
   return data || {};
+}
+
+// ══════════════════════════════════════════════════
+// OTTO — the Booked Solid autopilot's queue
+// Otto pushes briefings and gates; Joe decides here; Otto picks the decisions
+// up on its NEXT run (Netlify can't reach his Mac, so both sides poll).
+// ══════════════════════════════════════════════════
+
+// ponytail: markdown-ish renderer, ~15 lines instead of a library. esc() FIRST,
+// then formatting, so nothing Otto wrote can inject HTML. Handles what Otto
+// actually emits: headings, bold, bullets, code spans, links, rules.
+function renderMarkdown(md) {
+  return esc(md || '')
+    .replace(/^### (.*)$/gm, '<h4 style="margin:16px 0 6px;font-size:14px">$1</h4>')
+    .replace(/^## (.*)$/gm, '<h3 style="margin:20px 0 8px;font-size:15px">$1</h3>')
+    .replace(/^# (.*)$/gm, '<h2 style="margin:0 0 12px;font-size:17px">$1</h2>')
+    .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0">')
+    .replace(/`([^`]+)`/g, '<code style="background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:13px">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/^\s*[-*] (.*)$/gm, '<li style="margin-left:18px">$1</li>')
+    .replace(/^(\d+)\. (.*)$/gm, '<li style="margin-left:18px">$2</li>')
+    .replace(/\n{2,}/g, '<br><br>')
+    .replace(/\n/g, '<br>')
+    // headings, rules and list items bring their own spacing — drop the <br>s around them
+    .replace(/(<\/h[234]>|<hr[^>]*>|<\/li>)(<br>)+/g, '$1')
+    .replace(/(<br>)+(<h[234]|<hr|<li)/g, '$2');
+}
+
+async function loadOtto() {
+  const gatesEl = document.getElementById('otto-gates');
+  const briefEl = document.getElementById('otto-briefing');
+  const statusEl = document.getElementById('otto-status');
+  if (!gatesEl) return;
+  gatesEl.innerHTML = '<div style="color:#94a3b8;padding:20px">Loading…</div>';
+
+  try {
+    const [gateData, briefData, runData] = await Promise.all([
+      leadsApi('agent-queue?kind=gate&status=open'),
+      leadsApi('agent-queue?kind=briefing&limit=1'),
+      leadsApi('agent-queue?kind=run&status=open'),
+    ]);
+
+    const gates = gateData.items || [];
+    const briefing = (briefData.items || [])[0];
+    const pendingRun = (runData.items || [])[0];
+
+    // Status strip — last briefing tells you whether Otto actually ran.
+    const last = briefing ? new Date(briefing.created_at) : null;
+    const staleHrs = last ? (Date.now() - last) / 36e5 : null;
+    statusEl.innerHTML = last
+      ? `Last run <strong>${last.toLocaleString('en-US',{ month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}</strong>`
+        + ` · ${gates.length} waiting on you`
+        + (pendingRun ? ' · <span style="color:#7c3aed;font-weight:600">sweep requested</span>' : '')
+        + (staleHrs > 30 ? ' · <span style="color:#ef4444;font-weight:600">⚠️ no run in over a day</span>' : '')
+      : 'No briefing yet. Otto pushes one at the end of each run.';
+
+    // Nav badge so open items are visible from any page.
+    const badge = document.getElementById('otto-nav-badge');
+    if (badge) {
+      badge.textContent = gates.length;
+      badge.style.display = gates.length ? '' : 'none';
+    }
+
+    gatesEl.innerHTML = gates.length ? gates.map(g => {
+      const m = g.meta || {};
+      const fee = Number(m.fee) > 0
+        ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600;margin-left:8px">$${Number(m.fee).toFixed(2)}</span>` : '';
+      return `<div style="background:#fff;border:1px solid #e2e8f0;border-left:3px solid #7c3aed;border-radius:8px;padding:16px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+          <span style="background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;text-transform:uppercase">${esc(m.kind || 'decision')}</span>
+          ${g.title ? `<strong style="font-size:15px">${esc(g.title)}</strong>` : ''}${fee}
+        </div>
+        ${m.to ? `<div style="font-size:12px;color:#64748b;margin-bottom:6px">To: ${esc(m.to)}</div>` : ''}
+        <div style="font-size:14px;color:#334155;margin-bottom:10px">${esc(g.summary || '')}</div>
+        ${g.body ? `<details style="margin-bottom:10px"><summary style="cursor:pointer;font-size:13px;color:#7c3aed">Show the draft</summary>
+          <div style="background:#f8fafc;border-radius:6px;padding:12px;margin-top:8px;font-size:13px;line-height:1.6">${renderMarkdown(g.body)}</div></details>` : ''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button onclick="decideGate(${g.id},'approved')" style="padding:8px 16px;background:#16a34a;color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer">Approve</button>
+          <button onclick="decideGate(${g.id},'rejected')" style="padding:8px 16px;background:#fff;color:#ef4444;border:1px solid #fecaca;border-radius:6px;font-weight:600;cursor:pointer">No</button>
+          <button onclick="noteGate(${g.id})" style="padding:8px 16px;background:#fff;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Add a note</button>
+        </div>
+      </div>`;
+    }).join('') : '<div style="color:#94a3b8;padding:20px;text-align:center">Nothing waiting on you. 🎉</div>';
+
+    briefEl.innerHTML = briefing
+      ? renderMarkdown(briefing.body)
+      : '<div style="color:#94a3b8">No briefing yet.</div>';
+  } catch (e) {
+    gatesEl.innerHTML = `<div style="color:#ef4444;padding:20px">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+async function decideGate(id, status) {
+  try {
+    await leadsApi('agent-queue/' + id, 'PATCH', { status });
+    loadOtto();
+  } catch (e) { alert('Could not save: ' + e.message); }
+}
+
+async function noteGate(id) {
+  const note = prompt('Note for Otto (he reads this on the next run):');
+  if (note === null || !note.trim()) return;
+  try {
+    await leadsApi('agent-queue/' + id, 'PATCH', { note: note.trim() });
+    loadOtto();
+  } catch (e) { alert('Could not save: ' + e.message); }
+}
+
+async function requestOttoRun() {
+  const btn = document.getElementById('otto-run-btn');
+  btn.disabled = true;
+  try {
+    const res = await leadsApi('agent-queue', 'POST', { kind: 'run', title: 'Sweep requested from the dashboard' });
+    alert(res.deduped
+      ? 'A sweep is already queued — Otto will pick it up on his next wake.'
+      : 'Queued. Otto runs it at his next wake.');
+    loadOtto();
+  } catch (e) { alert('Could not queue: ' + e.message); }
+  finally { btn.disabled = false; }
+}
+
+async function sendOttoTask() {
+  const input = document.getElementById('otto-task-input');
+  const text = input.value.trim();
+  if (!text) return;
+  try {
+    await leadsApi('agent-queue', 'POST', { kind: 'task', title: text, summary: text });
+    input.value = '';
+    alert('Sent. Otto picks it up on his next run.');
+    loadOtto();
+  } catch (e) { alert('Could not send: ' + e.message); }
 }
 
 async function loadLeads() {

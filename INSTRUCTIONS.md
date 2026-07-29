@@ -98,7 +98,8 @@ Netlify Functions (serverless Node.js)
     ├── stripe-webhook.js               ← checkout.session.completed → confirms booking (signature-required, idempotent)
     ├── accounting-export.js            ← Financial export
     ├── booking-changelog.js            ← Audit trail for booking changes
-    └── client.js                       ← CRM-style client view built from bookings
+    ├── client.js                       ← CRM-style client view built from bookings
+    └── agent-queue.js                  ← Otto queue: briefings, decision gates, tasks, run requests
 ```
 
 **API routes (all proxied via netlify.toml):**
@@ -124,6 +125,8 @@ Netlify Functions (serverless Node.js)
 | `/api/accounting-export` | `accounting-export.js` |
 | `/api/booking-changelog` | `booking-changelog.js` |
 | `/api/client` | `client.js` |
+| `/api/agent-queue` | `agent-queue.js` |
+| `/api/agent-queue/:id` | `agent-queue.js` |
 
 ---
 
@@ -248,6 +251,12 @@ Schema owned by `_email.js`. Other files add columns via `ALTER TABLE ... ADD CO
 
 ### `booking_changes` table
 Schema owned by `booking-changelog.js`. Columns: `field_name`, `old_value`, `new_value` (plus booking/timestamp metadata). Do not redefine this shape elsewhere.
+
+### `agent_queue` table
+The Otto ↔ dashboard transport (schema owned by `agent-queue.js`). Netlify can't reach Joe's Mac, so both sides poll this table.
+`id`, `token` (unique when set — Otto's gate token, makes re-pushes idempotent), `kind` (`briefing`/`gate`/`task`/`run`), `status` (`open`/`approved`/`rejected`/`done`/`cancelled`), `title`, `summary`, `body` (markdown), `meta` (JSONB: `kind`, `to`, `fee`, `currency`), `note` (Joe's reply back), `booking_id`, `lead_id`, `created_at`, `decided_at`, `updated_at`
+
+Otto pushes `briefing` + `gate` rows and polls `GET /api/agent-queue?for=otto` for decisions and pushed work; the admin **Otto** tab renders them and PATCHes decisions. Approvals therefore take effect on Otto's **next scheduled run**, not instantly.
 
 ### Other tables
 `addons`, `service_addons`, `service_event_types`, `coi_requests`, `refunds`, `assignment_feedback`, `google_reviews`, `staff_bonuses`
@@ -458,7 +467,7 @@ Always use `esc()` when injecting user data into HTML strings.
 ## LOCAL DEV SETUP
 
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 npx netlify dev
 # → http://localhost:8888/admin.html
 ```
