@@ -24,9 +24,20 @@ test('reports Stripe test-mode as a distinct state, not a pass', () => {
   assert.match(c.detail, /test mode/i, 'but it must say so loudly');
 });
 
+test('a malformed Stripe key is not passed off as live', () => {
+  for (const bad of ['sk_liv', 'pk_live_abc', ' sk_live_abc', 'rk_live_abc']) {
+    const c = find(inspectConfig({ STRIPE_SECRET_KEY: bad }), 'stripe_key');
+    assert.strictEqual(c.ok, false, `${bad} must not pass`);
+    assert.doesNotMatch(c.detail, /^present \(live mode\)$/, `${bad} must not read as live`);
+  }
+});
+
 test('reports the allowlist as active when set', () => {
   const r = inspectConfig({ EMAIL_ALLOWLIST: 'joe.coover@gmail.com' });
   const c = find(r, 'email_allowlist');
+  // An active allowlist is expected during phases 1-3. If this ever reports
+  // unhealthy, /api/health returns 503 for the entire rollout.
+  assert.strictEqual(c.ok, true, 'an active allowlist is a state, not a failure');
   assert.match(c.detail, /joe\.coover@gmail\.com/);
 });
 

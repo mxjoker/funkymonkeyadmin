@@ -134,9 +134,12 @@ async function sendEmail(to, subject, html) {
 // A suppressed send never left the building, so it must NOT be logged as 'sent'.
 // automations.js de-dupes its scheduled batches with `status='sent'`; logging
 // suppressed mail as sent would permanently skip those clients once the
-// allowlist is lifted. Returns undefined for a real send so logEmail defaults.
+// allowlist is lifted. A {skipped:'no recipient'} result never had an address
+// at all — logging it 'sent' makes /api/health's last_successful_email report
+// a send that never happened. Returns undefined for a real send so logEmail
+// defaults to 'sent'.
 function logStatus(sendResult) {
-  return sendResult && sendResult.suppressed ? 'suppressed' : undefined;
+  return sendResult && (sendResult.suppressed ? 'suppressed' : sendResult.skipped ? 'skipped' : undefined);
 }
 
 // ── Log to email_log table ────────────────────────────────────────────────────

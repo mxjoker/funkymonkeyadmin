@@ -3,7 +3,7 @@
 
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { sendEmail, logStatus, wrap, esc, logEmail } = require('./_email');
+const { sendEmail, logStatus, wrap, esc, logEmail, ensureEmailLog } = require('./_email');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -31,6 +31,9 @@ exports.handler = async (event, context) => {
   return withClient(async (client) => {
     try {
       await ensureTable(client);
+      // logEmail INSERTs error_detail, which the ALTER inside ensureEmailLog
+      // creates. Without this, a first deploy loses the COI log row silently.
+      await ensureEmailLog(client);
 
       // ──────────────────────────────────────────────────────────
       // POST /api/coi-request — Create new COI request (public)
@@ -161,6 +164,7 @@ exports.handler = async (event, context) => {
         // already committed, so a failed notification must not turn the whole
         // request into a 500 — report it instead.
         let emailSent = true;
+        let suppressed = false;
         try {
           const res = await sendEmail(
             notifyEmail,
@@ -177,6 +181,8 @@ exports.handler = async (event, context) => {
             'Admin',
             logStatus(res)
           );
+          suppressed = !!(res && res.suppressed);
+          if (suppressed) emailSent = false;
         } catch (e) {
           emailSent = false;
           console.error('COI request notification failed:', notifyEmail, '|', e.message);
@@ -187,9 +193,12 @@ exports.handler = async (event, context) => {
           success: true,
           coi_request_id: coiRequest.id,
           email_sent: emailSent,
+          suppressed,
           message: emailSent
             ? 'COI request logged and notification sent'
-            : 'COI request logged, but the admin notification email failed'
+            : suppressed
+              ? `COI request logged, but the admin notification was suppressed by EMAIL_ALLOWLIST — ${notifyEmail} is not on the list`
+              : 'COI request logged, but the admin notification email failed'
         });
       }
 

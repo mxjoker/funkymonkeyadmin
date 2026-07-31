@@ -140,24 +140,23 @@ test('suppressed sends return {suppressed:true} rather than a Resend id', async 
 
 // A pg client that answers the automation_rules SELECT with one rule and
 // records every other query (the email_log INSERT is what we assert on).
-function fakeRuleClient() {
+const ONE_RULE = [{ id: 7, name: 'Deposit Paid', recipient: 'client',
+                    subject: 'Hi {{client_first_name}}', body_html: '<p>hi</p>' }];
+
+function fakeRuleClient(rules = ONE_RULE) {
   const queries = [];
   return {
     queries,
     query: async (sql, params) => {
       queries.push({ sql, params });
-      return {
-        rows: /FROM automation_rules/.test(sql)
-          ? [{ id: 7, name: 'Deposit Paid', recipient: 'client',
-               subject: 'Hi {{client_first_name}}', body_html: '<p>hi</p>' }]
-          : []
-      };
+      return { rows: /FROM automation_rules/.test(sql) ? rules : [] };
     }
   };
 }
 
 const BOOKING = { id: 42, client_email: 'client@example.com', client_name: 'Ada Lovelace' };
 const logRow = (client) => client.queries.find(q => /INSERT INTO email_log/.test(q.sql));
+const logRows = (client) => client.queries.filter(q => /INSERT INTO email_log/.test(q.sql));
 
 // Fix round 1: a suppressed send never left the building. Logging it as 'sent'
 // makes automations.js's `status='sent'` de-dupe skip that client forever once
@@ -197,6 +196,61 @@ test('logStatus maps only a suppressed result, leaving logEmail to default', () 
   assert.strictEqual(logStatus({ suppressed: true }), 'suppressed');
   assert.strictEqual(logStatus({ id: 'resend-abc-123' }), undefined);
   assert.strictEqual(logStatus(undefined), undefined);
+});
+
+// A booking imported with no email address still runs through senders (e.g.
+// stripe-webhook on deposit paid). sendEmail returns {skipped:'no recipient'};
+// logging that as 'sent' makes /api/health's last_successful_email report a
+// send that never happened.
+test('logStatus maps a skipped send to "skipped", never "sent"', () => {
+  const { logStatus } = loadEmail();
+
+  assert.strictEqual(logStatus({ skipped: 'no recipient' }), 'skipped');
+});
+
+// The central claim of this branch: sendEmail now throws, and no caller may
+// break because of it. A status change must still complete and still leave an
+// honest email_log row.
+test('a throwing sendEmail is caught, logged "failed", and does not propagate', async () => {
+  process.env.RESEND_API_KEY = 'test-key';
+  delete process.env.EMAIL_ALLOWLIST;
+  stubFetch({ ok: false, json: { statusCode: 403, message: 'x' } });
+  const { fireStatusAutomations } = loadEmail();
+  const client = fakeRuleClient();
+
+  // Returning rules.length (not 0) proves the throw was handled per-rule
+  // rather than escaping into fireStatusAutomations' outer catch.
+  const fired = await fireStatusAutomations(client, BOOKING, 'confirmed');
+
+  assert.strictEqual(fired, 1, 'the function must return normally, not via its outer catch');
+  const row = logRow(client);
+  assert.ok(row, 'a failed send must still be recorded');
+  assert.strictEqual(row.params[6], 'failed');
+  assert.match(row.params[7], /x/, 'the failure reason must be recorded');
+});
+
+test('a second rule still fires after the first rule\'s send throws', async () => {
+  process.env.RESEND_API_KEY = 'test-key';
+  delete process.env.EMAIL_ALLOWLIST;
+  // First send fails, second succeeds.
+  let n = 0;
+  globalThis.fetch = async () => (++n === 1)
+    ? { ok: false, json: async () => ({ statusCode: 403, message: 'bad address' }) }
+    : { ok: true,  json: async () => ({ id: 'resend-ok' }) };
+  const { fireStatusAutomations } = loadEmail();
+  const client = fakeRuleClient([
+    { id: 1, name: 'First',  recipient: 'client', subject: 'A', body_html: '<p>a</p>' },
+    { id: 2, name: 'Second', recipient: 'client', subject: 'B', body_html: '<p>b</p>' }
+  ]);
+
+  const fired = await fireStatusAutomations(client, BOOKING, 'confirmed');
+
+  assert.strictEqual(fired, 2);
+  assert.strictEqual(n, 2, 'the second rule must still have attempted its send');
+  const rows = logRows(client);
+  assert.strictEqual(rows.length, 2, 'both rules must be logged');
+  assert.strictEqual(rows[0].params[6], 'failed');
+  assert.strictEqual(rows[1].params[6], 'sent');
 });
 
 function fakeClient() {

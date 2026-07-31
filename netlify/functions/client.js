@@ -201,18 +201,26 @@ exports.handler = async (event) => {
 
         // Shared sendEmail throws on failure. Only log the interaction if the
         // send actually happened — a failed send must not leave a "sent" note.
+        let res;
         try {
-          await sendEmail(email, finalSubject, htmlBody);
+          res = await sendEmail(email, finalSubject, htmlBody);
         } catch (e) {
           console.error('client.js email failed:', email, '|', e.message);
           return { statusCode: 502, headers: CORS, body: JSON.stringify({ error: 'Email send failed', detail: e.message }) };
         }
 
-        const logNote = type === 'rebook' ? 'Rebooking email sent' : 'Custom email sent — Subject: ' + finalSubject;
+        // A suppressed send never left the building. The interaction note is
+        // permanent client history — it must not claim a send that never was.
+        const suppressed = !!(res && res.suppressed);
+        const logNote = suppressed
+          ? (type === 'rebook' ? 'Rebooking email SUPPRESSED by EMAIL_ALLOWLIST — not sent' : 'Custom email SUPPRESSED by EMAIL_ALLOWLIST — not sent — Subject: ' + finalSubject)
+          : type === 'rebook' ? 'Rebooking email sent' : 'Custom email sent — Subject: ' + finalSubject;
         await c.query('INSERT INTO client_interactions (client_email, type, note) VALUES ($1, $2, $3)',
           [email.toLowerCase(), type === 'rebook' ? 'email_rebook' : 'email_custom', logNote]);
         await c.query('UPDATE clients SET updated_at=NOW() WHERE LOWER(email)=$1', [email.toLowerCase()]);
-        return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) };
+        return { statusCode: 200, headers: CORS, body: JSON.stringify(suppressed
+          ? { success: true, suppressed: true, message: `Suppressed by EMAIL_ALLOWLIST — ${email} is not on the list, so nothing was sent` }
+          : { success: true }) };
       }
 
       // DELETE

@@ -293,18 +293,27 @@ exports.handler = async (event) => {
         const booking = rows[0];
         if (!booking) return json(404, { error: 'Booking not found' });
 
-        const RESEND_API_KEY = process.env.RESEND_API_KEY;
-        if (RESEND_API_KEY && booking.client_email) {
-          // A manual send is admin-initiated: report the failure rather than
-          // claiming success, but still record it in email_log.
-          try {
-            const res = await sendEmail(booking.client_email, subject, wrap(html));
-            await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client', logStatus(res));
-          } catch (e) {
-            console.error('manual email failed:', booking.client_email, '|', e.message);
-            await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client', 'failed', e.message);
-            return json(502, { success: false, error: e.message });
-          }
+        // No address = nothing to send. Say so instead of returning success.
+        if (!booking.client_email) {
+          return json(400, { success: false, error: 'This booking has no client email address, so nothing was sent' });
+        }
+
+        // A manual send is admin-initiated: report the failure rather than
+        // claiming success, but still record it in email_log. No
+        // RESEND_API_KEY pre-check — sendEmail throws on a missing key and
+        // that must surface here, not be silently skipped.
+        let res;
+        try {
+          res = await sendEmail(booking.client_email, subject, wrap(html));
+          await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client', logStatus(res));
+        } catch (e) {
+          console.error('manual email failed:', booking.client_email, '|', e.message);
+          await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client', 'failed', e.message);
+          return json(502, { success: false, error: e.message });
+        }
+
+        if (res && res.suppressed) {
+          return json(200, { success: true, suppressed: true, message: `Suppressed by EMAIL_ALLOWLIST — ${booking.client_email} is not on the list, so nothing was sent` });
         }
         return json(200, { success: true });
       }

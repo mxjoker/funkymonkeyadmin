@@ -10,11 +10,17 @@ function inspectConfig(env) {
   add('resend_key', !!env.RESEND_API_KEY,
       env.RESEND_API_KEY ? 'present' : 'MISSING — no email can send');
 
+  // Only sk_test/sk_live are real Stripe secret keys. A truncated key, a
+  // pasted pk_, or stray whitespace must not be waved through as "live" —
+  // this line is read immediately before a live charge.
   const sk = env.STRIPE_SECRET_KEY || '';
-  add('stripe_key', !!sk,
+  const skTest = sk.startsWith('sk_test');
+  const skLive = sk.startsWith('sk_live');
+  add('stripe_key', !!sk && (skTest || skLive),
       !sk ? 'MISSING — no deposit links can be created'
-          : sk.startsWith('sk_test') ? 'present (TEST mode — no real money moves)'
-          : 'present (live mode)');
+          : skTest ? 'present (TEST mode — no real money moves)'
+          : skLive ? 'present (live mode)'
+          : 'UNRECOGNIZED FORMAT — not an sk_test/sk_live secret key; check for a truncated key, a pk_ paste, or stray whitespace');
 
   add('stripe_webhook_secret', !!env.STRIPE_WEBHOOK_SECRET,
       env.STRIPE_WEBHOOK_SECRET ? 'present'
