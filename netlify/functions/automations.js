@@ -99,11 +99,21 @@ async function ensureTables(client) {
 async function sendAutomationEmail(client, rule, booking, stripeLink) {
   const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
   const toEmail = rule.recipient === 'admin' ? NOTIFY : booking.client_email;
-  if (!toEmail) return;
+  if (!toEmail) return false;
   const subject = render(rule.subject, booking, stripeLink);
   const html    = wrap(render(rule.body_html, booking, stripeLink));
-  await sendEmail(toEmail, subject, html);
-  await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient);
+  // Guarded here rather than at each loop: this is the single choke point for
+  // triggerStatusChange and all three scheduled loops, so one bad recipient
+  // can never abort the rest of the batch.
+  try {
+    await sendEmail(toEmail, subject, html);
+    await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient);
+    return true;
+  } catch (e) {
+    console.error('automation email failed:', toEmail, '| rule:', rule.name, '|', e.message);
+    await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient, 'failed', e.message);
+    return false;
+  }
 }
 
 // ── Trigger: status_change ────────────────────────────────────────────────────
@@ -148,8 +158,7 @@ async function runScheduledAutomations(client) {
       [dateStr, rule.id]
     );
     for (const booking of bookings) {
-      await sendAutomationEmail(client, rule, booking, null);
-      sent++;
+      if (await sendAutomationEmail(client, rule, booking, null)) sent++;
     }
   }
 
@@ -174,8 +183,7 @@ async function runScheduledAutomations(client) {
       [dateStr, rule.id]
     );
     for (const booking of bookings) {
-      await sendAutomationEmail(client, rule, booking, null);
-      sent++;
+      if (await sendAutomationEmail(client, rule, booking, null)) sent++;
     }
   }
 
@@ -198,8 +206,7 @@ async function runScheduledAutomations(client) {
       [rule.trigger_status, rule.trigger_days, rule.id]
     );
     for (const booking of bookings) {
-      await sendAutomationEmail(client, rule, booking, null);
-      sent++;
+      if (await sendAutomationEmail(client, rule, booking, null)) sent++;
     }
   }
 
@@ -288,8 +295,16 @@ exports.handler = async (event) => {
 
         const RESEND_API_KEY = process.env.RESEND_API_KEY;
         if (RESEND_API_KEY && booking.client_email) {
-          await sendEmail(booking.client_email, subject, wrap(html));
-          await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client');
+          // A manual send is admin-initiated: report the failure rather than
+          // claiming success, but still record it in email_log.
+          try {
+            await sendEmail(booking.client_email, subject, wrap(html));
+            await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client');
+          } catch (e) {
+            console.error('manual email failed:', booking.client_email, '|', e.message);
+            await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client', 'failed', e.message);
+            return json(502, { success: false, error: e.message });
+          }
         }
         return json(200, { success: true });
       }

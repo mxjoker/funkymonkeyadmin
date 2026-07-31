@@ -5,6 +5,7 @@ const {
   checkAndRecordAttempt, markAttemptSuccess, clientIp,
   ensureAuthTables, unauthorized,
 } = require('./_auth');
+const { sendEmail } = require('./_email');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -57,20 +58,19 @@ exports.handler = async (event) => {
       const key = process.env.RESEND_API_KEY;
       if (!key) return json(500, { ok: false, error: 'RESEND_API_KEY env var is not set in Netlify' });
       const to = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
+      // Routed through the shared sender so this diagnostic exercises the same
+      // code path (allowlist + error detection) that real mail uses. It throws
+      // on failure; catch so the auth endpoint reports rather than 500s blind.
       try {
-        const res = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            from: 'Funky Monkey Events <bookings@funkymonkeyevents.com>',
-            to,
-            subject: '🐒 Funky Monkey — Resend Test Email',
-            html: '<p>If you received this, Resend is configured correctly.</p>',
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok || data.statusCode || data.name) return json(500, { ok: false, resend_error: data });
-        return json(200, { ok: true, message: `Test email sent to ${to}`, resend_id: data.id });
+        const data = await sendEmail(
+          to,
+          '🐒 Funky Monkey — Resend Test Email',
+          '<p>If you received this, Resend is configured correctly.</p>'
+        );
+        if (data && data.suppressed) {
+          return json(200, { ok: true, suppressed: true, message: `Suppressed by EMAIL_ALLOWLIST — ${to} is not on the list, so nothing was sent` });
+        }
+        return json(200, { ok: true, message: `Test email sent to ${to}`, resend_id: data && data.id });
       } catch (e) {
         return json(500, { ok: false, error: e.message });
       }

@@ -157,28 +157,38 @@ exports.handler = async (event, context) => {
           </div>
         `;
 
-        // Send email via _email.js shared module
-        await sendEmail(
-          notifyEmail,
-          emailSubject,
-          wrap(emailBody)
-        );
-
-        // Log email to email_log table
-        await logEmail(
-          client,
-          booking.id,
-          null, // No automation rule for this
-          'coi_request',
-          emailSubject,
-          notifyEmail,
-          'Admin'
-        );
+        // Send email via _email.js shared module. The COI request row is
+        // already committed, so a failed notification must not turn the whole
+        // request into a 500 — report it instead.
+        let emailSent = true;
+        try {
+          await sendEmail(
+            notifyEmail,
+            emailSubject,
+            wrap(emailBody)
+          );
+          await logEmail(
+            client,
+            booking.id,
+            null, // No automation rule for this
+            'coi_request',
+            emailSubject,
+            notifyEmail,
+            'Admin'
+          );
+        } catch (e) {
+          emailSent = false;
+          console.error('COI request notification failed:', notifyEmail, '|', e.message);
+          await logEmail(client, booking.id, null, 'coi_request', emailSubject, notifyEmail, 'Admin', 'failed', e.message);
+        }
 
         return json(200, {
           success: true,
           coi_request_id: coiRequest.id,
-          message: 'COI request logged and notification sent'
+          email_sent: emailSent,
+          message: emailSent
+            ? 'COI request logged and notification sent'
+            : 'COI request logged, but the admin notification email failed'
         });
       }
 

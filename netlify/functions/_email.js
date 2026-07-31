@@ -161,8 +161,16 @@ async function fireStatusAutomations(client, booking, newStatus, stripeLink) {
       if (!toEmail) continue;
       const subject = render(rule.subject, booking, stripeLink);
       const html    = wrap(render(rule.body_html, booking, stripeLink));
-      await sendEmail(toEmail, subject, html);
-      await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient);
+      // Per-rule guard: sendEmail throws, and this runs inside a booking status
+      // change. One bad address must not abort the status update or the
+      // remaining rules.
+      try {
+        await sendEmail(toEmail, subject, html);
+        await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient);
+      } catch (e) {
+        console.error('fireStatusAutomations email failed:', toEmail, '|', e.message);
+        await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient, 'failed', e.message);
+      }
     }
 
     return rules.length;

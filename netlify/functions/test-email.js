@@ -1,8 +1,7 @@
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
+const { sendEmail } = require('./_email');
 
 const json = (status, body) => ({ statusCode: status, headers: CORS, body: JSON.stringify(body) });
-
-const FROM = 'Funky Monkey Events <bookings@funkymonkeyevents.com>';
 
 exports.handler = async (event) => {
   const pre = preflight(event);
@@ -18,20 +17,18 @@ exports.handler = async (event) => {
 
   const to = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
 
+  // Uses the shared sender so this diagnostic exercises the real path
+  // (EMAIL_ALLOWLIST + Resend error detection) rather than a parallel one.
   try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: FROM,
-        to,
-        subject: '🐒 Funky Monkey — Resend Test Email',
-        html: '<p>If you received this, Resend is configured correctly.</p>',
-      }),
-    });
-    const data = await res.json();
-    if (data.error) return json(500, { ok: false, resend_error: data.error });
-    return json(200, { ok: true, message: `Test email sent to ${to}`, resend_id: data.id });
+    const data = await sendEmail(
+      to,
+      '🐒 Funky Monkey — Resend Test Email',
+      '<p>If you received this, Resend is configured correctly.</p>'
+    );
+    if (data && data.suppressed) {
+      return json(200, { ok: true, suppressed: true, message: `Suppressed by EMAIL_ALLOWLIST — ${to} is not on the list, so nothing was sent` });
+    }
+    return json(200, { ok: true, message: `Test email sent to ${to}`, resend_id: data && data.id });
   } catch (e) {
     return json(500, { ok: false, error: e.message });
   }

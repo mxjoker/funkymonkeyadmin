@@ -101,6 +101,43 @@ test('returns the Resend id on success', async () => {
   assert.strictEqual(result.id, 'resend-abc-123');
 });
 
+// Task 5: client.js, auth.js and test-email.js used to hand-roll their own
+// Resend fetch, bypassing EMAIL_ALLOWLIST and the corrected error detection.
+// _email.js must stay the only place that talks to Resend.
+test('_email.js is the only module that calls the Resend API', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, '..', 'netlify', 'functions');
+
+  const offenders = fs.readdirSync(dir)
+    .filter(f => f.endsWith('.js') && f !== '_email.js')
+    .filter(f => fs.readFileSync(path.join(dir, f), 'utf8').includes('api.resend.com'));
+
+  assert.deepStrictEqual(offenders, [], 'these bypass the guarded sender');
+});
+
+test('client.js sends through the shared sendEmail', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'netlify', 'functions', 'client.js'), 'utf8');
+
+  assert.match(src, /require\('\.\/_email'\)/);
+  assert.match(src, /sendEmail[^=]*\}\s*=\s*require\('\.\/_email'\)/, 'sendEmail must be imported, not shadowed');
+  assert.doesNotMatch(src, /const sendEmail\s*=/, 'a local sendEmail would shadow the guarded one');
+});
+
+test('suppressed sends return {suppressed:true} rather than a Resend id', async () => {
+  process.env.RESEND_API_KEY = 'test-key';
+  process.env.EMAIL_ALLOWLIST = 'joe.coover@gmail.com';
+  stubFetch({ ok: true });
+  const { sendEmail } = loadEmail();
+
+  const result = await sendEmail('someone@example.com', 'Test', '<p>hi</p>');
+
+  assert.strictEqual(result.suppressed, true);
+  assert.strictEqual(result.id, undefined, 'callers must not read an id off a suppressed send');
+});
+
 function fakeClient() {
   const calls = [];
   return { calls, query: async (sql, params) => { calls.push({ sql, params }); return { rows: [] }; } };

@@ -1,6 +1,6 @@
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { esc } = require('./_email');
+const { esc, sendEmail } = require('./_email');
 
 const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
 const SITE   = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
@@ -8,22 +8,9 @@ const SITE   = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 // Run ensureTables only once per function instance (avoids concurrent migration conflicts)
 let tablesReady = false;
 
-// ── Email helper ─────────────────────────────────────────────────────────────
-const sendEmail = async (to, subject, html) => {
-  if (!process.env.RESEND_API_KEY || !to) return { ok: false, error: 'No API key or recipient' };
-  try {
-    const FROM = 'Funky Monkey Events <bookings@funkymonkeyevents.com>';
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: FROM, to, subject, html })
-    });
-    const data = await res.json();
-    if (data.error) { console.error('Resend error:', JSON.stringify(data)); return { ok: false, error: data.error.message || 'Resend error' }; }
-    console.log('Email sent to:', to, 'id:', data.id);
-    return { ok: true, id: data.id };
-  } catch(e) { console.error('Email error:', e.message); return { ok: false, error: 'Email send failed' }; }
-};
+// Email sending is the shared sendEmail from _email.js — it carries the
+// EMAIL_ALLOWLIST guard and the corrected Resend error detection, and throws
+// on failure. Do not reintroduce a local sender here.
 
 const wrap = (body) => `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0F0A1E;color:#F3E8FF;border-radius:16px;overflow:hidden">
   <div style="background:linear-gradient(135deg,#FF6B00,#FFD600);padding:20px 24px"><div style="font-size:22px;font-weight:900;color:#0F0A1E">🐒 Funky Monkey Events</div></div>
@@ -212,8 +199,14 @@ exports.handler = async (event) => {
           return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'Unknown POST type' }) };
         }
 
-        const result = await sendEmail(email, finalSubject, htmlBody);
-        if (!result.ok) return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: 'Email send failed' }) };
+        // Shared sendEmail throws on failure. Only log the interaction if the
+        // send actually happened — a failed send must not leave a "sent" note.
+        try {
+          await sendEmail(email, finalSubject, htmlBody);
+        } catch (e) {
+          console.error('client.js email failed:', email, '|', e.message);
+          return { statusCode: 502, headers: CORS, body: JSON.stringify({ error: 'Email send failed', detail: e.message }) };
+        }
 
         const logNote = type === 'rebook' ? 'Rebooking email sent' : 'Custom email sent — Subject: ' + finalSubject;
         await c.query('INSERT INTO client_interactions (client_email, type, note) VALUES ($1, $2, $3)',

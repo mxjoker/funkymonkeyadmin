@@ -6,7 +6,13 @@ const { sendEmail, wrap } = require('./_email');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
-const notify = ({ to_email, subject, html }) => sendEmail(to_email, subject, html);
+// sendEmail throws on failure. Staff notifications are fire-and-forget: a bad
+// address must never fail the assignment/claim/survey it accompanies, nor stop
+// the loop that notifies the remaining staff. Guarded here so all four call
+// sites (and any future one) are covered by one catch.
+const notify = ({ to_email, subject, html }) =>
+  sendEmail(to_email, subject, html)
+    .catch(e => console.error('staff notify failed:', to_email, '|', e.message));
 
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 
