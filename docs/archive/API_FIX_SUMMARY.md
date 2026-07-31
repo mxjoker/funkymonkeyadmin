@@ -51,7 +51,7 @@ if (event.queryStringParameters?.reference) {
 # You'll get something like: FM-ABC123
 
 # 2. Start dev server
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 npx netlify dev
 
 # 3. Test confirmation page
@@ -128,7 +128,7 @@ fetch('/api/bookings?reference=FM-ABC123')
 Once you've tested locally and confirmed it works:
 
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 
 # Commit the fix
 git add netlify/functions/bookings.js

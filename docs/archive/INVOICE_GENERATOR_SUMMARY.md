@@ -155,7 +155,7 @@ Before deploying:
 
 1. **Install dependencies:**
    ```bash
-   cd ~/Downloads/funky-monkey-email
+   cd ~/Downloads/FME-Backend
    npm install
    ```
 

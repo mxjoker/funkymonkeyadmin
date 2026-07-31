@@ -139,7 +139,7 @@ Returns array of all COI requests for a booking (newest first).
 **To deploy:**
 
 ```bash
-cd /Users/joecoover2022/Downloads/funky-monkey-email
+cd /Users/joecoover2022/Downloads/FME-Backend
 
 # Commit everything
 git add netlify/functions/coi-request.js netlify.toml confirmation.html my-booking.html admin.html INSTRUCTIONS.md
@@ -268,7 +268,7 @@ Uses existing:
 
 **Local dev testing:**
 ```bash
-cd /Users/joecoover2022/Downloads/funky-monkey-email
+cd /Users/joecoover2022/Downloads/FME-Backend
 npx netlify dev  # Runs on http://localhost:8888
 ```
 

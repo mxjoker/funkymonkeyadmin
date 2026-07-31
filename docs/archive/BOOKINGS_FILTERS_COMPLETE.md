@@ -195,7 +195,7 @@ Filters are **additive** — they all work together:
 ## 🚀 Deployment
 
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 git add admin.html
 git commit -m "feat: add comprehensive bookings filters and sorting"
 git push

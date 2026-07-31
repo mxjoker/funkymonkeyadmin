@@ -108,7 +108,7 @@ Added two new high-priority features:
 Both fixes are ready to test and deploy:
 
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 
 # Test locally first
 npx netlify dev

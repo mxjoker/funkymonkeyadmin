@@ -326,7 +326,7 @@ No automated tests exist for this frontend — verify manually via the dev serve
 - [ ] **Step 1: Start dev server**
 
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 npx netlify dev
 ```
 

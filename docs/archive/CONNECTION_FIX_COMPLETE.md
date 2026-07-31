@@ -180,7 +180,7 @@ exports.handler = async (event) => {
 
 ### Local Testing (Recommended)
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 npx netlify dev
 
 # In browser:
@@ -193,7 +193,7 @@ npx netlify dev
 
 ### Deployment
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 git add netlify/functions/booking.js
 git add netlify/functions/client.js
 git add netlify/functions/stripe-webhook.js

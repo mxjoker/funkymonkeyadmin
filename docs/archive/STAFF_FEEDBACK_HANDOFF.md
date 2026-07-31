@@ -208,7 +208,7 @@ CREATE TABLE IF NOT EXISTS staff_bonuses (
 **To deploy:**
 
 ```bash
-cd /Users/joecoover2022/Downloads/funky-monkey-email
+cd /Users/joecoover2022/Downloads/FME-Backend
 
 # Commit everything
 git add netlify/functions/staff-feedback.js netlify.toml admin.html INSTRUCTIONS.md

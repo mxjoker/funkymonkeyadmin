@@ -85,7 +85,7 @@ const serviceMap = {
 **Step 1: Upload CSV to server**
 ```bash
 # Place CSV in project root
-cp ~/Downloads/party-tracker-export.csv /Users/joecoover2022/Downloads/funky-monkey-email/import-data.csv
+cp ~/Downloads/party-tracker-export.csv /Users/joecoover2022/Downloads/FME-Backend/import-data.csv
 ```
 
 **Step 2: Run dry-run first**

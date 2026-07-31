@@ -14,7 +14,7 @@
 ### 1. Add CSV to Project
 
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 
 # Copy your CSV export (rename to import-data.csv)
 cp ~/path/to/your/export.csv import-data.csv

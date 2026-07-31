@@ -5,7 +5,7 @@
 ### 1. Deploy the Code (2 minutes)
 
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 
 # Add new files
 git add netlify/functions/add-indexes.js

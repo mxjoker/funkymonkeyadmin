@@ -61,7 +61,7 @@ Authentication, staff management, audit logs, and specialized lookups.
 
 1. **Deploy the code:**
    ```bash
-   cd ~/Downloads/funky-monkey-email
+   cd ~/Downloads/FME-Backend
    git add netlify/functions/add-indexes.js netlify.toml
    git commit -m "feat: add database indexes migration function"
    git push
@@ -91,7 +91,7 @@ Authentication, staff management, audit logs, and specialized lookups.
 ### Option 2: Local Testing First
 
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 npx netlify dev
 
 # In another terminal:

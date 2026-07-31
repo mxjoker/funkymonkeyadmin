@@ -81,7 +81,7 @@ Updated the master instructions file:
 **To deploy:**
 
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 
 # Already done in this session:
 # npm install  ✅ (installed pdf-lib)
@@ -106,7 +106,7 @@ git push
 
 ## 📦 DOCUMENTATION CREATED
 
-All files in `~/Downloads/funky-monkey-email/`:
+All files in `~/Downloads/FME-Backend/`:
 
 1. **INVOICE_GENERATOR_SUMMARY.md** (208 lines) — Complete technical specification
 2. **INSTRUCTIONS.md** — Updated with invoice generator info
@@ -218,7 +218,7 @@ The slot-based UI enhancement from earlier today is working perfectly:
 
 **Local dev setup:**
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 npm install  # Installs pg + pdf-lib
 npx netlify dev  # Runs on http://localhost:8888
 ```

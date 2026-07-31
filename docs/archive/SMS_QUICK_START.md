@@ -89,7 +89,7 @@ CREATE TABLE sms_log (
 ### 2. Deploy the Code
 All code is already written and ready:
 ```bash
-cd /Users/joecoover2022/Downloads/funky-monkey-email
+cd /Users/joecoover2022/Downloads/FME-Backend
 git add netlify/functions/_sms.js
 git commit -m "feat: Add SMS notification system with Twilio"
 git push

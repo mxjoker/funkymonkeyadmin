@@ -71,7 +71,7 @@ Authentication, staff management, specialized lookups
 ### Quick Deploy (5 minutes)
 
 ```bash
-cd ~/Downloads/funky-monkey-email
+cd ~/Downloads/FME-Backend
 
 # Deploy code
 git add netlify/functions/add-indexes.js netlify.toml *.md
