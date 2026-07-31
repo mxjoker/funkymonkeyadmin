@@ -62,7 +62,7 @@ exports.handler = async (event) => {
       "line_items[0][price_data][currency]": "usd",
       "line_items[0][price_data][unit_amount]": String(Math.round(amountNum * 100)),
       "line_items[0][price_data][product_data][name]": `Deposit — ${service || 'Event'}`,
-      "line_items[0][price_data][product_data][description]": `50% deposit for ${client || ''}'s event. Balance due day-of.`,
+      "line_items[0][price_data][product_data][description]": `Deposit for ${client || ''}'s event. Balance due day-of.`,
       "line_items[0][quantity]": "1",
       "payment_method_types[0]": "card",
     });
