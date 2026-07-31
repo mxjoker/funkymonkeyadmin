@@ -63,3 +63,40 @@ test('unset allowlist permits everyone (production behavior)', async () => {
 
   assert.strictEqual(calls.length, 1, 'no allowlist means no filtering');
 });
+
+test('throws when Resend returns its error shape', async () => {
+  process.env.RESEND_API_KEY = 'test-key';
+  delete process.env.EMAIL_ALLOWLIST;
+  stubFetch({ ok: false, json: { statusCode: 403, message: 'Domain not verified', name: 'validation_error' } });
+  const { sendEmail } = loadEmail();
+
+  await assert.rejects(
+    () => sendEmail('anyone@example.com', 'Test', '<p>hi</p>'),
+    /Domain not verified/,
+    'a Resend rejection must throw, not return quietly'
+  );
+});
+
+test('throws when the API key is missing', async () => {
+  delete process.env.RESEND_API_KEY;
+  delete process.env.EMAIL_ALLOWLIST;
+  stubFetch({ ok: true });
+  const { sendEmail } = loadEmail();
+
+  await assert.rejects(
+    () => sendEmail('anyone@example.com', 'Test', '<p>hi</p>'),
+    /RESEND_API_KEY/,
+    'a missing key is a configuration failure, not a silent no-op'
+  );
+});
+
+test('returns the Resend id on success', async () => {
+  process.env.RESEND_API_KEY = 'test-key';
+  delete process.env.EMAIL_ALLOWLIST;
+  stubFetch({ ok: true, json: { id: 'resend-abc-123' } });
+  const { sendEmail } = loadEmail();
+
+  const result = await sendEmail('anyone@example.com', 'Test', '<p>hi</p>');
+
+  assert.strictEqual(result.id, 'resend-abc-123');
+});

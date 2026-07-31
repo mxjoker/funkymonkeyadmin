@@ -102,24 +102,32 @@ function allowedToSend(to) {
 // ── Core send function ────────────────────────────────────────────────────────
 async function sendEmail(to, subject, html) {
   const key = process.env.RESEND_API_KEY;
-  if (!key || !to) return;
+  if (!to) return { skipped: 'no recipient' };
+  if (!key) throw new Error('RESEND_API_KEY is not set');
+
   if (!allowedToSend(to)) {
     console.log('Email SUPPRESSED by EMAIL_ALLOWLIST:', to, '| subject:', subject);
     return { suppressed: true };
   }
-  try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: FROM, to, subject, html })
-    });
-    const data = await res.json();
-    if (data.error) console.error('Resend error:', JSON.stringify(data.error));
-    else console.log('Email sent to:', to, '| id:', data.id, '| subject:', subject);
-    return data;
-  } catch(e) {
-    console.error('sendEmail error:', e.message);
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: FROM, to, subject, html })
+  });
+  const data = await res.json();
+
+  // Resend signals failure with {statusCode, message, name} — NOT {error}.
+  // The old `if (data.error)` check never matched, so every failure looked
+  // like a success. Do not "simplify" this back.
+  if (!res.ok || data.statusCode || data.name) {
+    const reason = data.message || data.name || `HTTP ${res.status}`;
+    console.error('Resend error:', to, '|', reason);
+    throw new Error(`Resend send failed: ${reason}`);
   }
+
+  console.log('Email sent to:', to, '| id:', data.id, '| subject:', subject);
+  return data;
 }
 
 // ── Log to email_log table ────────────────────────────────────────────────────
