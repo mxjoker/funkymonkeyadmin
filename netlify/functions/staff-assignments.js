@@ -2,32 +2,11 @@ const { withClient, getPool } = require('./_db');
 const {
   CORS, preflight, requireAuth, unauthorized, forbidden,
 } = require('./_auth');
+const { sendEmail, wrap } = require('./_email');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
-// ── Notification helper ───────────────────────────────────────────────────────
-const notify = async ({ to_email, to_name, subject, html }) => {
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  if (!RESEND_API_KEY || !to_email) return;
-  try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${RESEND_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        from: 'Funky Monkey Events <bookings@funkymonkeyevents.com>',
-        to: to_email,
-        subject,
-        html
-      })
-    });
-    const data = await res.json();
-    if (data.error) console.error('Resend error:', JSON.stringify(data.error));
-    else console.log('Notified:', to_email, 'id:', data.id);
-  } catch(e) { console.error('notify error:', e.message); }
-};
+const notify = ({ to_email, subject, html }) => sendEmail(to_email, subject, html);
 
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 
@@ -139,15 +118,11 @@ async function autoCalcTimes(client, assignmentId, bookingId, forceRecalc = fals
   }
 }
 
-const wrap = (body) => `
-  <div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0F0A1E;color:#F3E8FF;border-radius:16px;overflow:hidden">
-    <div style="background:linear-gradient(135deg,#FF6B00,#FFD600);padding:20px 24px">
-      <div style="font-size:22px;font-weight:900;color:#0F0A1E">🐒 Funky Monkey Events</div>
-    </div>
-    <div style="padding:24px">${body}</div>
-  </div>`;
 
+let schemaReady;
 async function ensureTables(client) {
+  if (!schemaReady) {
+    schemaReady = (async () => {
   await client.query(`
     CREATE TABLE IF NOT EXISTS staff_slots (
       id SERIAL PRIMARY KEY,
@@ -231,6 +206,9 @@ async function ensureTables(client) {
   for (const sql of migrations) {
     try { await client.query(sql); } catch (_) {}
   }
+    })().catch(e => { schemaReady = null; throw e; });
+  }
+  return schemaReady;
 }
 
 exports.handler = async (event) => {

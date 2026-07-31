@@ -10,6 +10,7 @@
  */
 
 const FROM = 'Funky Monkey Events <bookings@funkymonkeyevents.com>';
+const { ensureTable: ensureBookingChanges } = require('./booking-changelog');
 
 // Google review profiles. Magic-show bookings point clients at Joe's personal
 // "Joe Coover Magic" profile; everything else goes to "Funky Monkey Events".
@@ -163,41 +164,6 @@ async function ensureEmailLog(client) {
   `);
 }
 
-// ── Ensure booking_changes table exists (superset schema) ────────────────────
-// Owned by booking-changelog.js; this mirrors the exact same DDL so both
-// writers converge to the same shape regardless of creation order.
-async function ensureBookingChanges(client) {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS booking_changes (
-      id          SERIAL PRIMARY KEY,
-      booking_id  INTEGER NOT NULL,
-      action      VARCHAR(100),
-      detail      TEXT,
-      field_name  VARCHAR(100),
-      old_value   TEXT,
-      new_value   TEXT,
-      changed_by  VARCHAR(100),
-      created_at  TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  // Converge pre-existing tables of either legacy shape
-  const alters = [
-    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS action     VARCHAR(100)`,
-    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS detail     TEXT`,
-    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS field_name VARCHAR(100)`,
-    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS old_value  TEXT`,
-    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS new_value  TEXT`,
-    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS changed_by VARCHAR(100)`,
-    `ALTER TABLE booking_changes ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
-  ];
-  for (const sql of alters) {
-    try { await client.query(sql); } catch(e) { /* ignore if already exists */ }
-  }
-  await client.query(`
-    CREATE INDEX IF NOT EXISTS idx_booking_changes_booking_id
-    ON booking_changes(booking_id)
-  `);
-}
 
 // ── Log a booking change ───────────────────────────────────────────────────────
 async function logChange(client, bookingId, action, detail) {

@@ -6,7 +6,10 @@ const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
+let schemaReady;
 async function ensureTables(client) {
+  if (!schemaReady) {
+    schemaReady = (async () => {
   // automation_rules: defines when/what to send
   await client.query(`
     CREATE TABLE IF NOT EXISTS automation_rules (
@@ -87,6 +90,9 @@ async function ensureTables(client) {
       );
     }
   }
+    })().catch(e => { schemaReady = null; throw e; });
+  }
+  return schemaReady;
 }
 
 // ── Send one automation email (uses shared _email helpers) ───────────────────
@@ -355,6 +361,4 @@ exports.handler = async (event) => {
   });
 };
 
-// Export helpers for use in booking.js
-module.exports.triggerStatusChange = triggerStatusChange;
 module.exports.handler = exports.handler;

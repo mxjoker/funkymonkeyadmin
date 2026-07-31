@@ -8,8 +8,10 @@ const {
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
-// Ensure feedback tables exist
+let schemaReady;
 async function ensureTables(client) {
+  if (!schemaReady) {
+    schemaReady = (async () => {
   await client.query(`
     CREATE TABLE IF NOT EXISTS assignment_feedback (
       id SERIAL PRIMARY KEY,
@@ -57,6 +59,9 @@ async function ensureTables(client) {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+    })().catch(e => { schemaReady = null; throw e; });
+  }
+  return schemaReady;
 }
 
 exports.handler = async (event) => {

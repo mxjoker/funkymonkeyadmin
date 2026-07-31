@@ -27,7 +27,10 @@ const DEFAULT_STAFF = [
   { staff_id:'troy_scott',  name:'Troy Scott', preferred_name:'Troy', role:'Performer',        color:'#0ea5e9', pin:'1234', phone:'',              email:'',                      pronouns:'',       comms_preference:'email', skills:[],                                                                                                                                                             admin_notes:'',      staff_notes:'', sort_order:2 },
 ];
 
+let schemaReady;
 async function ensureTable(client) {
+  if (!schemaReady) {
+    schemaReady = (async () => {
   await client.query(`
     CREATE TABLE IF NOT EXISTS staff (
       id SERIAL PRIMARY KEY,
@@ -94,6 +97,9 @@ async function ensureTable(client) {
        s.admin_notes, s.staff_notes, s.sort_order]
     );
   }
+    })().catch(e => { schemaReady = null; throw e; });
+  }
+  return schemaReady;
 }
 
 exports.handler = async (event) => {

@@ -175,3 +175,4 @@ exports.handler = async (event) => {
 
 // Export helper function for use in booking.js
 exports.logBookingChanges = logBookingChanges;
+exports.ensureTable = ensureTable;
