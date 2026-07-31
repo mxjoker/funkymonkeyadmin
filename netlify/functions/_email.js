@@ -87,10 +87,26 @@ function render(template, booking, stripeLink) {
     .replace(/{{deposit_link}}/g,      depositBtn);
 }
 
+// ── Email allowlist ───────────────────────────────────────────────────────────
+// When EMAIL_ALLOWLIST is set, only those addresses actually receive mail;
+// everything else is logged and dropped. This exists so that fixing the Resend
+// error-detection bug does not wake every dormant send in the system at once.
+// Unset (production) = no filtering.
+function allowedToSend(to) {
+  const list = process.env.EMAIL_ALLOWLIST;
+  if (!list) return true;
+  const allowed = list.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  return allowed.includes(String(to).trim().toLowerCase());
+}
+
 // ── Core send function ────────────────────────────────────────────────────────
 async function sendEmail(to, subject, html) {
   const key = process.env.RESEND_API_KEY;
   if (!key || !to) return;
+  if (!allowedToSend(to)) {
+    console.log('Email SUPPRESSED by EMAIL_ALLOWLIST:', to, '| subject:', subject);
+    return { suppressed: true };
+  }
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
