@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const { withClient } = require('./_db');
-const { esc, sendEmail, wrap, logEmail, logChange, ensureEmailLog, ensureBookingChanges } = require('./_email');
+const { esc, sendEmail, logStatus, wrap, logEmail, logChange, ensureEmailLog, ensureBookingChanges } = require('./_email');
 
 const NOTIFY = process.env.NOTIFY_EMAIL || "Joe.Coover@gmail.com";
 
@@ -128,7 +128,7 @@ exports.handler = async (event) => {
 
           // Client confirmation email
           try {
-            await sendEmail(
+            const res = await sendEmail(
               b.client_email,
               "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events",
               wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${esc(b.client_name)}</strong>! 🎉</p>
@@ -144,7 +144,7 @@ exports.handler = async (event) => {
                 </div>
                 <p style="color:#A78BCA;font-size:13px;text-align:center">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`)
             );
-            await logEmail(c, b.id, null, 'Deposit Paid', "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events", b.client_email, 'client');
+            await logEmail(c, b.id, null, 'Deposit Paid', "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events", b.client_email, 'client', logStatus(res));
           } catch(emailErr) {
             console.error("Webhook: client email failed:", emailErr.message);
             await logEmail(c, b.id, null, 'Deposit Paid', "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events", b.client_email, 'client', 'failed', emailErr.message);
@@ -152,7 +152,7 @@ exports.handler = async (event) => {
 
           // Admin notification email
           try {
-            await sendEmail(
+            const res = await sendEmail(
               NOTIFY,
               `💰 Deposit In: ${b.client_name} — $${amountPaid.toFixed(2)}`,
               wrap(`<p style="font-size:15px;font-weight:700;color:#10B981;margin-bottom:16px">💰 Stripe deposit received — booking auto-confirmed!</p>
@@ -168,7 +168,7 @@ exports.handler = async (event) => {
                   <a href="https://funkymonkeyadmin.netlify.app/admin.html" style="background:linear-gradient(135deg,#FF6B00,#FFD600);color:#0F0A1E;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:900;font-size:14px">View in Dashboard →</a>
                 </div>`)
             );
-            await logEmail(c, b.id, null, 'Deposit Paid', `💰 Deposit In: ${b.client_name} — $${amountPaid.toFixed(2)}`, NOTIFY, 'admin');
+            await logEmail(c, b.id, null, 'Deposit Paid', `💰 Deposit In: ${b.client_name} — $${amountPaid.toFixed(2)}`, NOTIFY, 'admin', logStatus(res));
           } catch(emailErr) {
             console.error("Webhook: admin email failed:", emailErr.message);
             await logEmail(c, b.id, null, 'Deposit Paid', `💰 Deposit In: ${b.client_name} — $${amountPaid.toFixed(2)}`, NOTIFY, 'admin', 'failed', emailErr.message);

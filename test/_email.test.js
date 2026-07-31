@@ -138,6 +138,67 @@ test('suppressed sends return {suppressed:true} rather than a Resend id', async 
   assert.strictEqual(result.id, undefined, 'callers must not read an id off a suppressed send');
 });
 
+// A pg client that answers the automation_rules SELECT with one rule and
+// records every other query (the email_log INSERT is what we assert on).
+function fakeRuleClient() {
+  const queries = [];
+  return {
+    queries,
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      return {
+        rows: /FROM automation_rules/.test(sql)
+          ? [{ id: 7, name: 'Deposit Paid', recipient: 'client',
+               subject: 'Hi {{client_first_name}}', body_html: '<p>hi</p>' }]
+          : []
+      };
+    }
+  };
+}
+
+const BOOKING = { id: 42, client_email: 'client@example.com', client_name: 'Ada Lovelace' };
+const logRow = (client) => client.queries.find(q => /INSERT INTO email_log/.test(q.sql));
+
+// Fix round 1: a suppressed send never left the building. Logging it as 'sent'
+// makes automations.js's `status='sent'` de-dupe skip that client forever once
+// the allowlist is lifted — silent mail loss.
+test('a suppressed send is logged as "suppressed", not "sent"', async () => {
+  process.env.RESEND_API_KEY = 'test-key';
+  process.env.EMAIL_ALLOWLIST = 'joe.coover@gmail.com';
+  const calls = stubFetch({ ok: true });
+  const { fireStatusAutomations } = loadEmail();
+  const client = fakeRuleClient();
+
+  await fireStatusAutomations(client, BOOKING, 'confirmed');
+
+  assert.strictEqual(calls.length, 0, 'the allowlist must have blocked the send');
+  const row = logRow(client);
+  assert.ok(row, 'a suppressed send must still be recorded');
+  assert.strictEqual(row.params[6], 'suppressed');
+  assert.notStrictEqual(row.params[6], 'sent', 'this is what would cause silent mail loss');
+});
+
+test('a real send is still logged as "sent"', async () => {
+  process.env.RESEND_API_KEY = 'test-key';
+  delete process.env.EMAIL_ALLOWLIST;
+  const calls = stubFetch({ ok: true, json: { id: 'resend-abc-123' } });
+  const { fireStatusAutomations } = loadEmail();
+  const client = fakeRuleClient();
+
+  await fireStatusAutomations(client, BOOKING, 'confirmed');
+
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(logRow(client).params[6], 'sent');
+});
+
+test('logStatus maps only a suppressed result, leaving logEmail to default', () => {
+  const { logStatus } = loadEmail();
+
+  assert.strictEqual(logStatus({ suppressed: true }), 'suppressed');
+  assert.strictEqual(logStatus({ id: 'resend-abc-123' }), undefined);
+  assert.strictEqual(logStatus(undefined), undefined);
+});
+
 function fakeClient() {
   const calls = [];
   return { calls, query: async (sql, params) => { calls.push({ sql, params }); return { rows: [] }; } };

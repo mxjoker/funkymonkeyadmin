@@ -1,6 +1,6 @@
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { wrap, render, esc, sendEmail, logEmail, ensureEmailLog } = require('./_email');
+const { wrap, render, esc, sendEmail, logStatus, logEmail, ensureEmailLog } = require('./_email');
 
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 
@@ -106,8 +106,8 @@ async function sendAutomationEmail(client, rule, booking, stripeLink) {
   // triggerStatusChange and all three scheduled loops, so one bad recipient
   // can never abort the rest of the batch.
   try {
-    await sendEmail(toEmail, subject, html);
-    await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient);
+    const res = await sendEmail(toEmail, subject, html);
+    await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient, logStatus(res));
     return true;
   } catch (e) {
     console.error('automation email failed:', toEmail, '| rule:', rule.name, '|', e.message);
@@ -298,8 +298,8 @@ exports.handler = async (event) => {
           // A manual send is admin-initiated: report the failure rather than
           // claiming success, but still record it in email_log.
           try {
-            await sendEmail(booking.client_email, subject, wrap(html));
-            await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client');
+            const res = await sendEmail(booking.client_email, subject, wrap(html));
+            await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client', logStatus(res));
           } catch (e) {
             console.error('manual email failed:', booking.client_email, '|', e.message);
             await logEmail(client, booking.id, null, 'Manual', subject, booking.client_email, 'client', 'failed', e.message);

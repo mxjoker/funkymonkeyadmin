@@ -3,7 +3,7 @@
 
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { sendEmail, wrap, esc, logEmail } = require('./_email');
+const { sendEmail, logStatus, wrap, esc, logEmail } = require('./_email');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -162,7 +162,7 @@ exports.handler = async (event, context) => {
         // request into a 500 — report it instead.
         let emailSent = true;
         try {
-          await sendEmail(
+          const res = await sendEmail(
             notifyEmail,
             emailSubject,
             wrap(emailBody)
@@ -174,7 +174,8 @@ exports.handler = async (event, context) => {
             'coi_request',
             emailSubject,
             notifyEmail,
-            'Admin'
+            'Admin',
+            logStatus(res)
           );
         } catch (e) {
           emailSent = false;

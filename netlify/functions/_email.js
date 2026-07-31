@@ -130,6 +130,15 @@ async function sendEmail(to, subject, html) {
   return data;
 }
 
+// ── email_log status for a successful sendEmail() result ──────────────────────
+// A suppressed send never left the building, so it must NOT be logged as 'sent'.
+// automations.js de-dupes its scheduled batches with `status='sent'`; logging
+// suppressed mail as sent would permanently skip those clients once the
+// allowlist is lifted. Returns undefined for a real send so logEmail defaults.
+function logStatus(sendResult) {
+  return sendResult && sendResult.suppressed ? 'suppressed' : undefined;
+}
+
 // ── Log to email_log table ────────────────────────────────────────────────────
 async function logEmail(client, bookingId, ruleId, triggerLabel, subject, recipientEmail, recipientLabel, status, errorDetail) {
   try {
@@ -165,8 +174,8 @@ async function fireStatusAutomations(client, booking, newStatus, stripeLink) {
       // change. One bad address must not abort the status update or the
       // remaining rules.
       try {
-        await sendEmail(toEmail, subject, html);
-        await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient);
+        const res = await sendEmail(toEmail, subject, html);
+        await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient, logStatus(res));
       } catch (e) {
         console.error('fireStatusAutomations email failed:', toEmail, '|', e.message);
         await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient, 'failed', e.message);
@@ -213,4 +222,4 @@ async function logChange(client, bookingId, action, detail) {
   }
 }
 
-module.exports = { wrap, render, esc, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange };
+module.exports = { wrap, render, esc, sendEmail, logStatus, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange };
