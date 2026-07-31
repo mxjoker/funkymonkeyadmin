@@ -147,6 +147,7 @@ exports.handler = async (event) => {
             await logEmail(c, b.id, null, 'Deposit Paid', "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events", b.client_email, 'client');
           } catch(emailErr) {
             console.error("Webhook: client email failed:", emailErr.message);
+            await logEmail(c, b.id, null, 'Deposit Paid', "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events", b.client_email, 'client', 'failed', emailErr.message);
           }
 
           // Admin notification email
@@ -170,6 +171,7 @@ exports.handler = async (event) => {
             await logEmail(c, b.id, null, 'Deposit Paid', `💰 Deposit In: ${b.client_name} — $${amountPaid.toFixed(2)}`, NOTIFY, 'admin');
           } catch(emailErr) {
             console.error("Webhook: admin email failed:", emailErr.message);
+            await logEmail(c, b.id, null, 'Deposit Paid', `💰 Deposit In: ${b.client_name} — $${amountPaid.toFixed(2)}`, NOTIFY, 'admin', 'failed', emailErr.message);
           }
 
           console.log(`Webhook: confirmed booking ${b.reference} (id:${b.id}) — deposit $${amountPaid} balance_due $${balanceDue}`);

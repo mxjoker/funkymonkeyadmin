@@ -100,3 +100,37 @@ test('returns the Resend id on success', async () => {
 
   assert.strictEqual(result.id, 'resend-abc-123');
 });
+
+function fakeClient() {
+  const calls = [];
+  return { calls, query: async (sql, params) => { calls.push({ sql, params }); return { rows: [] }; } };
+}
+
+test('logEmail defaults to status "sent" with no error detail', async () => {
+  const { logEmail } = loadEmail();
+  const client = fakeClient();
+
+  await logEmail(client, 1, 2, 'Deposit Paid', 'Subject', 'a@example.com', 'client');
+
+  assert.strictEqual(client.calls.length, 1);
+  assert.match(client.calls[0].sql, /INSERT INTO email_log/);
+  assert.match(client.calls[0].sql, /status/);
+  assert.match(client.calls[0].sql, /error_detail/);
+  assert.deepStrictEqual(
+    client.calls[0].params,
+    [1, 2, 'Deposit Paid', 'Subject', 'a@example.com', 'client', 'sent', '']
+  );
+});
+
+test('logEmail records a failure status and error message', async () => {
+  const { logEmail } = loadEmail();
+  const client = fakeClient();
+
+  await logEmail(client, 1, null, 'Deposit Paid', 'Subject', 'a@example.com', 'admin', 'failed', 'Resend send failed: Domain not verified');
+
+  assert.strictEqual(client.calls.length, 1);
+  assert.deepStrictEqual(
+    client.calls[0].params,
+    [1, null, 'Deposit Paid', 'Subject', 'a@example.com', 'admin', 'failed', 'Resend send failed: Domain not verified']
+  );
+});

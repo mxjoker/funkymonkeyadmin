@@ -131,12 +131,13 @@ async function sendEmail(to, subject, html) {
 }
 
 // ── Log to email_log table ────────────────────────────────────────────────────
-async function logEmail(client, bookingId, ruleId, triggerLabel, subject, recipientEmail, recipientLabel) {
+async function logEmail(client, bookingId, ruleId, triggerLabel, subject, recipientEmail, recipientLabel, status, errorDetail) {
   try {
     await client.query(
-      `INSERT INTO email_log (booking_id, rule_id, trigger_label, subject, recipient_email, recipient_label)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
-      [bookingId, ruleId||null, triggerLabel, subject, recipientEmail, recipientLabel||'client']
+      `INSERT INTO email_log (booking_id, rule_id, trigger_label, subject, recipient_email, recipient_label, status, error_detail)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [bookingId, ruleId||null, triggerLabel, subject, recipientEmail, recipientLabel||'client',
+       status||'sent', errorDetail||'']
     );
   } catch(e) {
     console.error('logEmail error:', e.message);
@@ -186,6 +187,9 @@ async function ensureEmailLog(client) {
       status VARCHAR(32) DEFAULT 'sent'
     )
   `);
+  await client.query(
+    "ALTER TABLE email_log ADD COLUMN IF NOT EXISTS error_detail TEXT DEFAULT ''"
+  );
 }
 
 
