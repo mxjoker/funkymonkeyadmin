@@ -23,3 +23,7 @@ admin.html.backup-*
 .claude/admin.html.b1-partial
 .claude/night-plan.md
 .claude/wave-b1-prompt.md
+
+# Secrets that must never be committed even by accident
+FME Passcodes/
+*Passcode*

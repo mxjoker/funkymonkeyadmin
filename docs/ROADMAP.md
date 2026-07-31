@@ -31,11 +31,9 @@ Design notes agreed so far:
   unpaid instant booking per email; expire unpaid instant bookings after
   24h (the Stripe link already expires in 24h).
 
-## SMS (built, not wired)
+## SMS (removed)
 
-`netlify/functions/_sms.js` is a complete Twilio sender that nothing calls.
-To activate: Twilio account + number + A2P 10DLC registration, set
-`TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_PHONE_NUMBER` in
-Netlify, then wire into: staff gig-assignment notifications (staff
-`comms_preference = 'sms'` already exists in the portal) and client deposit
-link delivery.
+`netlify/functions/_sms.js` was a complete Twilio sender that nothing ever
+called. It was deleted on 2026-07-31 rather than left as dead code. To revive
+it, recover the file from git history (`git log --diff-filter=D -- netlify/functions/_sms.js`)
+and see `docs/archive/SMS_IMPLEMENTATION_GUIDE.md` for the wiring notes.
