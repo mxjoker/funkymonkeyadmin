@@ -510,14 +510,24 @@ blocks, which previously skipped logging entirely on throw."
 
 ---
 
-## Task 5: Audit and guard every `sendEmail` call site
+## Task 5: Audit and guard every send path
 
 Task 3 made `sendEmail` throw. This task proves that every one of the 16 call sites handles it. Two were already verified during planning: `bookings.js:398` and `bookings.js:428` both use `.catch()`, and `stripe-webhook.js` wraps all three of its calls in `try`/`catch`.
+
+**AMENDED 2026-07-31, mid-execution.** The Task 2 review disproved this plan's stated premise that every send routes through `_email.js`. Three functions define their own Resend senders and bypass the shared one entirely:
+
+- `auth.js:61` — inside the `test_email` action
+- `client.js:12` — a local `const sendEmail` that **shadows** the shared one; the file imports only `esc` from `_email`, so `client.js:215` never touches the guarded path. This one mails real clients.
+- `test-email.js:22`
+
+None are covered by `EMAIL_ALLOWLIST`, and none get Task 3's corrected error detection. Consolidating them into the shared `sendEmail` is now part of this task — it is what the plan's own one-function thesis always required.
 
 **Files:**
 - Modify: `netlify/functions/automations.js:105,291`
 - Modify: `netlify/functions/coi-request.js:161`
-- Modify: `netlify/functions/client.js:215`
+- Modify: `netlify/functions/client.js:12-26,215` — **delete the local sender, import the shared one**
+- Modify: `netlify/functions/auth.js:61` — route through the shared sender
+- Modify: `netlify/functions/test-email.js:22` — route through the shared sender
 - Modify: `netlify/functions/refund.js:205`
 - Modify: `netlify/functions/staff-assignments.js:483,575,705,839`
 - Modify: `netlify/functions/_email.js:139`
@@ -943,16 +953,24 @@ Likely findings and their owner-side fixes, all in the Netlify dashboard except 
 
 - [ ] **Step 4: Prove email works, end to end, to a real inbox**
 
-With `EMAIL_ALLOWLIST` still set to the owner's address:
+**AMENDED 2026-07-31.** This step originally used `POST /api/auth {"action":"test_email"}`. That is invalid as a proof: `auth.js:61` has its own hand-rolled Resend sender, so it exercises a different code path and would prove nothing about the `_email.js` fix. Task 5 consolidates those senders; this step now verifies the shared path.
+
+With `EMAIL_ALLOWLIST` still set to the owner's address, trigger a send that goes through `_email.js`. Changing a booking's status in the admin UI fires `fireStatusAutomations` (`_email.js:139`), which is the shared path:
+
+1. Open any booking in the admin UI whose client email is the owner's own address (or temporarily set it to that).
+2. Change its status to `confirmed`.
+3. Confirm the email arrives.
+
+Then confirm the send was recorded truthfully:
 
 ```bash
-curl -s -X POST -H "Authorization: Bearer <TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"test_email"}' \
-  https://funkymonkeyadmin.netlify.app/api/auth
+curl -s -H "Authorization: Bearer <TOKEN>" \
+  https://funkymonkeyadmin.netlify.app/api/health | python3 -m json.tool
 ```
 
-Expected: a JSON response containing a `resend_id`, **and** an email that actually arrives. A 200 with no `resend_id` is the exact June symptom of a silently rejected send — if that recurs, the domain is still unverified.
+`last_successful_email` must show a timestamp from the last few minutes. A send that appears to succeed while `last_successful_email` stays stale means the log is still lying — stop and investigate.
+
+Once Task 5 has consolidated the senders, `POST /api/auth {"action":"test_email"}` becomes a valid secondary check, because it will then route through the same function. Running it as well is a cheap confirmation that the consolidation held.
 
 - [ ] **Step 5: Confirm the log now records truth**
 
