@@ -252,7 +252,7 @@ async function main() {
     const res = await post({ status: 'draft', client_name: 'Phone Caller' }, TOKEN);
     assert.strictEqual(res.statusCode, 201, `draft POST returned ${res.statusCode}: ${res.body}`);
     const body = JSON.parse(res.body);
-    created.push(body.reference);
+    if (body.reference) created.push(body.reference);
     const row = body.booking;
     assert.ok(row, 'POST must return the created row under `booking`');
     assert.strictEqual(row.status, 'draft', `expected status draft, got ${row.status}`);
@@ -261,13 +261,24 @@ async function main() {
     console.log('  ok  admin draft with only a name is accepted');
 
     // 2. The identical POST without a token is rejected.
+    // Capture any row it managed to create BEFORE asserting — if this
+    // assertion is the one that fails, the row exists and must still be
+    // cleaned up. Asserting first would leak it into a table of real records.
     const noAuth = await post({ status: 'draft', client_name: 'Phone Caller' }, null);
+    if (noAuth.statusCode === 201) {
+      const r = JSON.parse(noAuth.body).reference;
+      if (r) created.push(r);
+    }
     assert.strictEqual(noAuth.statusCode, 401,
       `unauthenticated draft returned ${noAuth.statusCode}, expected 401`);
     console.log('  ok  unauthenticated draft is rejected');
 
     // 3. The public path still enforces its required fields.
     const publicPost = await post({ client_name: 'Web Visitor' }, null);
+    if (publicPost.statusCode === 201) {
+      const r = JSON.parse(publicPost.body).reference;
+      if (r) created.push(r);
+    }
     assert.strictEqual(publicPost.statusCode, 400,
       `public POST without email returned ${publicPost.statusCode}, expected 400`);
     console.log('  ok  public POST still requires email/date/service');
@@ -284,7 +295,10 @@ async function main() {
         }
       } finally { c.release(); }
     }
-    process.exit(0);
+    // NOT process.exit(0) — that would terminate the process inside the
+    // finally, before a thrown assertion could reach the catch below, and the
+    // script would report success on every failure.
+    process.exitCode = 0;
   }
 }
 
