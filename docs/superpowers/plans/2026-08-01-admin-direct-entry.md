@@ -1159,7 +1159,7 @@ async function openClient(email) {
     </div>
     <div style="display:flex;align-items:center;gap:10px;margin:12px 0 18px">
       <button class="btn btn-primary btn-sm" onclick="saveClient('${e}')">Save Client</button>
-      <span class="text-muted" id="cl-flash" style="font-size:.8rem"></span>
+      <span class="save-flash" id="cl-flash">✓ Saved</span>
     </div>
     <div style="margin-bottom:18px">
       <span class="section-label">Bookings (${c.bookings.length})</span>
