@@ -3,7 +3,7 @@
 
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { esc, sendEmail, wrap, logChange } = require('./_email');
+const { esc, sendEmail, wrap, fmtEventDate, logChange } = require('./_email');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -35,17 +35,26 @@ async function ensureRefundsTable(client) {
  * @param {number} amount - Amount to refund in cents
  * @param {string} reason - Refund reason
  */
+// The only values Stripe's refund API accepts for `reason`.
+const STRIPE_REFUND_REASONS = ['duplicate', 'fraudulent', 'requested_by_customer'];
+
 async function processStripeRefund(paymentIntentId, amount, reason) {
   const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
   if (!STRIPE_KEY) {
     throw new Error('Stripe not configured');
   }
 
+  // Stripe's refund `reason` is an ENUM — only 'duplicate', 'fraudulent', and
+  // 'requested_by_customer' are accepted. This used to pass our own description
+  // ('Deposit refund', 'Partial refund', …), which Stripe rejected every time,
+  // so no refund through this endpoint ever succeeded. Keep the human note as
+  // metadata, where free text is allowed.
   const params = new URLSearchParams({
     payment_intent: paymentIntentId,
     amount: String(Math.round(amount)), // Amount in cents
-    reason: reason || 'requested_by_customer'
+    reason: STRIPE_REFUND_REASONS.includes(reason) ? reason : 'requested_by_customer'
   });
+  if (reason) params.set('metadata[note]', String(reason).slice(0, 500));
 
   const res = await fetch('https://api.stripe.com/v1/refunds', {
     method: 'POST',
@@ -59,8 +68,12 @@ async function processStripeRefund(paymentIntentId, amount, reason) {
   const data = await res.json();
 
   if (!res.ok) {
-    console.error('Stripe refund error:', data.error);
-    throw new Error(data.error?.message || 'Stripe refund failed');
+    console.error('Stripe refund error:', JSON.stringify(data.error || data));
+    // Surface Stripe's own words. The old bare 'Stripe refund failed' fallback
+    // told the admin nothing and hid the invalid-reason bug above for months.
+    const e = data.error || {};
+    const detail = e.message || e.code || e.type || `HTTP ${res.status}`;
+    throw new Error(`Stripe refund failed: ${detail}`);
   }
 
   return data;
@@ -194,7 +207,7 @@ exports.handler = async (event) => {
             <p>Your refund has been processed:</p>
             <ul>
               <li><strong>Amount:</strong> $${Number(amount).toFixed(2)}</li>
-              <li><strong>Booking:</strong> ${esc(booking.service_name)} on ${booking.event_date}</li>
+              <li><strong>Booking:</strong> ${esc(booking.service_name)} on ${esc(fmtEventDate(booking.event_date))}</li>
               <li><strong>Reference:</strong> ${esc(booking.reference)}</li>
             </ul>
             <p>The refund should appear in your account within 5-10 business days.</p>
@@ -240,3 +253,6 @@ exports.handler = async (event) => {
     }
   });
 };
+
+module.exports.processStripeRefund = processStripeRefund;
+module.exports.STRIPE_REFUND_REASONS = STRIPE_REFUND_REASONS;
