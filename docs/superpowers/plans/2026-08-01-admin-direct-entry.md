@@ -1021,7 +1021,10 @@ The spec flags this as an assumption — the table has never been exercised thro
     assert.ok(Array.isArray(cRec.bookings), 'client GET must return a bookings array');
     assert.ok(Array.isArray(cRec.interactions), 'client GET must return an interactions array');
 
-    const patchedClient = await callClient('PATCH', { notes: 'selfcheck note', tags: 'vip' });
+    // client.js takes the email from the JSON body on PATCH/POST/DELETE — the
+    // query param is read for GET only (client.js:84-100). `email` is not in
+    // the PATCH allowlist, so it routes the request without being written.
+    const patchedClient = await callClient('PATCH', { email: TEST_EMAIL, notes: 'selfcheck note', tags: 'vip' });
     assert.strictEqual(patchedClient.statusCode, 200, `client PATCH returned ${patchedClient.statusCode}: ${patchedClient.body}`);
     assert.strictEqual(JSON.parse(patchedClient.body).notes, 'selfcheck note');
     console.log('  ok  client.js GET and PATCH round-trip');
@@ -1164,8 +1167,14 @@ async function openClient(email) {
 async function saveClient(encodedEmail) {
   const payload = {};
   document.querySelectorAll('#modal-body .bk-edit').forEach(el => {
-    payload[el.dataset.f] = el.value;
+    if (el.value !== (el.dataset.orig || '')) payload[el.dataset.f] = el.value;
   });
+  if (!Object.keys(payload).length) { flash('cl-flash'); return; }
+  // client.js routes PATCH by the body's email field, not the query string
+  // (client.js:90-99 — the query param is GET-only, and its path fallback
+  // yields the literal "client"). `email` is not in the PATCH allowlist, so it
+  // routes the request without being written to the row.
+  payload.email = decodeURIComponent(encodedEmail);
   const res = await apiFetch('/api/client?email=' + encodedEmail, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
