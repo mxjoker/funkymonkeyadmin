@@ -119,7 +119,20 @@ async function ensureTable(client) {
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS venue VARCHAR(255) DEFAULT ''",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS confirmation_deadline DATE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_ref VARCHAR(255) DEFAULT ''",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS brand VARCHAR(8) DEFAULT 'fme'"
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS brand VARCHAR(8) DEFAULT 'fme'",
+    // ── Admin direct entry (spec 2026-08-01) ──
+    // Surface type drives foam party setup and liability; organisation_name
+    // gives corporate and library bookings somewhere to record the org;
+    // occasion frees event_type from doing double duty.
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS surface_type VARCHAR(64) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS organisation_name VARCHAR(255) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS occasion VARCHAR(64) DEFAULT ''",
+    // The deposit becomes its own payment record. payment_method/amount/ref
+    // stay as the final-balance record — accounting-export.js:57 already
+    // treats them that way.
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_paid_at TIMESTAMPTZ",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_method VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_ref VARCHAR(255) DEFAULT ''"
   ];
   for (const sql of cols) {
     try { await client.query(sql); } catch (_) {}
@@ -234,24 +247,43 @@ exports.handler = async (event) => {
       return json(400, { error: 'Invalid JSON' });
     }
 
+    // ── Admin draft path (spec 2026-08-01) ────────────────────────────────────
+    // A booking taken over the phone rarely has an email to hand. An
+    // authenticated admin may post status:'draft' and skip the four required
+    // fields. Everything below — length caps, numeric clamping, NaN rejection —
+    // still applies, so a draft cannot write a malformed row. The relaxation is
+    // gated on the token, not on the 'draft' string, so the public form cannot
+    // post itself a draft to bypass validation.
+    const isDraft = b.status === 'draft';
+    if (isDraft) {
+      const auth = await requireAuth(event, ['admin']);
+      if (!auth) return unauthorized();
+    }
+
     // ── Validation (contract §POST /api/bookings) ────────────────────────────
     const clientName = String(b.client_name || '').trim();
-    if (!clientName) return json(400, { error: 'client_name is required' });
+    if (!isDraft && !clientName) return json(400, { error: 'client_name is required' });
     if (clientName.length > 120) return json(400, { error: 'client_name too long (max 120)' });
 
     const clientEmail = String(b.client_email || '').trim();
-    if (!clientEmail) return json(400, { error: 'client_email is required' });
+    if (!isDraft && !clientEmail) return json(400, { error: 'client_email is required' });
     if (clientEmail.length > 200) return json(400, { error: 'client_email too long (max 200)' });
-    // Plausible email check
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) {
+    // Plausible email check — applies whenever one is supplied, draft or not
+    if (clientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) {
       return json(400, { error: 'client_email is not valid' });
     }
 
-    if (!b.event_date || isNaN(Date.parse(String(b.event_date)))) {
+    // A date is required unless this is a draft, but a supplied date must
+    // always parse. Empty string becomes NULL — Postgres rejects '' for DATE.
+    if (!isDraft && (!b.event_date || isNaN(Date.parse(String(b.event_date))))) {
       return json(400, { error: 'event_date must be a parseable date' });
     }
+    if (b.event_date && isNaN(Date.parse(String(b.event_date)))) {
+      return json(400, { error: 'event_date must be a parseable date' });
+    }
+    const eventDate = b.event_date || null;
 
-    if (!b.service_id && !b.service_name) {
+    if (!isDraft && !b.service_id && !b.service_name) {
       return json(400, { error: 'service_id or service_name is required' });
     }
 
@@ -310,6 +342,10 @@ exports.handler = async (event) => {
       }
       if (!reference) return json(500, { error: 'Could not generate unique reference' });
 
+      // A cleared <date> input posts '' — Postgres rejects that for
+      // TIMESTAMPTZ. Same treatment event_date already gets above.
+      const depositPaidAt = b.deposit_paid_at ? b.deposit_paid_at : null;
+
       const { rows } = await client.query(`
         INSERT INTO bookings (
           reference, status,
@@ -320,9 +356,11 @@ exports.handler = async (event) => {
           event_type, event_type_id, guest_count, notes,
           is_custom_quote, extra_hours, extra_hours_cost,
           client_name, client_phone, client_email, referral_source,
-          child_name, brand
+          child_name, brand,
+          organisation_name, occasion, surface_type, venue, customer_type,
+          guests_of_honour, deposit_paid_at, deposit_method, deposit_ref
         ) VALUES (
-          $1, 'review',
+          $1, $29,
           $2, $3, $4,
           $5, $6, $7, $8,
           $9, $10, $11,
@@ -330,7 +368,9 @@ exports.handler = async (event) => {
           $16, $17, $18, $19,
           $20, $21, $22,
           $23, $24, $25, $26,
-          $27, $28
+          $27, $28,
+          $30, $31, $32, $33, $34,
+          $35, $36, $37, $38
         ) RETURNING *
       `, [
         reference,
@@ -344,7 +384,7 @@ exports.handler = async (event) => {
         totalPrice,
         depositAmount,
         balanceDue,
-        b.event_date,
+        eventDate,
         cap255(b.event_time),
         cap255(b.event_zip),
         cap5k(b.event_location),
@@ -361,16 +401,32 @@ exports.handler = async (event) => {
         cap255(b.referral_source),
         cap255(b.child_name),
         b.brand === 'jcm' ? 'jcm' : 'fme',
+        isDraft ? 'draft' : 'review',
+        cap255(b.organisation_name),
+        cap255(b.occasion),
+        cap255(b.surface_type),
+        cap255(b.venue),
+        cap255(b.customer_type),
+        cap255(b.guests_of_honour),
+        depositPaidAt,
+        cap255(b.deposit_method),
+        cap255(b.deposit_ref),
       ]);
 
       const booking = rows[0];
 
       // Await both — in a serverless function the container may terminate as soon
       // as the handler returns, dropping any unawaited fetch calls to Resend.
-      await sendBookingEmails(booking);
-      await notifyMatchingStaff(booking).catch(e => console.error('Staff notify error:', e.message));
+      // Drafts send nothing: the record is half-finished, the client may have no
+      // email address yet, and the owner is on the phone with them right now.
+      if (!isDraft) {
+        await sendBookingEmails(booking);
+        await notifyMatchingStaff(booking).catch(e => console.error('Staff notify error:', e.message));
+      }
 
-      return json(201, { success: true, reference: booking.reference, id: booking.id });
+      // `booking` is additive — booking-form.html reads `reference` and is
+      // unaffected. The admin UI needs the full row for its local state.
+      return json(201, { success: true, reference: booking.reference, id: booking.id, booking });
     });
   }
 

@@ -87,6 +87,18 @@ exports.handler = async (event) => {
       if (event.httpMethod === "PATCH") {
         const u = JSON.parse(event.body || "{}");
 
+        // A cleared <input> posts '' — Postgres rejects that for non-text
+        // columns. Only touch keys actually present, so no null is invented.
+        for (const f of ['event_date', 'confirmation_deadline', 'deposit_paid_at']) {
+          if (f in u && u[f] === '') u[f] = null;
+        }
+        for (const f of ['guest_count', 'service_price', 'total_price',
+                         'mileage_miles', 'mileage_cost', 'deposit_amount',
+                         'balance_due', 'extra_hours', 'extra_hours_cost',
+                         'payment_amount']) {
+          if (f in u && u[f] === '') u[f] = null;
+        }
+
         const colMap = {
           status:            "status",
           admin_notes:       "admin_notes",
@@ -111,14 +123,38 @@ exports.handler = async (event) => {
           guests_of_honour:  "guests_of_honour",
           customer_type:     "customer_type",
           venue:             "venue",
+          // ── Admin direct entry (spec 2026-08-01) ──
+          event_date:        "event_date",
+          event_time:        "event_time",
+          event_location:    "event_location",
+          event_zip:         "event_zip",
+          event_type:        "event_type",
+          guest_count:       "guest_count",
+          client_name:       "client_name",
+          client_phone:      "client_phone",
+          client_email:      "client_email",
+          referral_source:   "referral_source",
+          service_id:        "service_id",
+          service_name:      "service_name",
+          service_price:     "service_price",
+          total_price:       "total_price",
+          mileage_miles:     "mileage_miles",
+          mileage_cost:      "mileage_cost",
+          surface_type:      "surface_type",
+          organisation_name: "organisation_name",
+          occasion:          "occasion",
+          deposit_paid_at:   "deposit_paid_at",
+          deposit_method:    "deposit_method",
+          deposit_ref:       "deposit_ref",
         };
 
-        // Fetch old status for change log (only when a status change is incoming)
-        let prevStatus = null;
-        if (u.status) {
-          const prev = await c.query('SELECT status FROM bookings WHERE id=$1', [parseInt(id)]);
-          prevStatus = prev.rows[0]?.status || '?';
-        }
+        // The whole previous row — field-level change logging below diffs
+        // against it. One extra SELECT per PATCH, which is negligible next to
+        // the traceability the spec asks for.
+        const prevRes = await c.query('SELECT * FROM bookings WHERE id=$1', [parseInt(id)]);
+        if (!prevRes.rows.length) return json(404, { error: "Not found" });
+        const prev = prevRes.rows[0];
+        const prevStatus = prev.status || '?';
 
         const sets = [], vals = [];
         let idx = 1;
@@ -148,6 +184,26 @@ exports.handler = async (event) => {
 
         let updated = r.rows[0];
         let stripeLink = null;
+
+        // total_price / mileage_cost / deposit_amount feed balance_due
+        // (same formula as bookings.js:329 on create). If one of those
+        // changed and the caller didn't send balance_due itself, recompute
+        // it here — otherwise invoices and automation emails keep quoting
+        // a stale balance. Do this before the field-level logging loop so
+        // the recompute is logged like any other change.
+        const BALANCE_INPUTS = ['total_price', 'mileage_cost', 'deposit_amount'];
+        if (BALANCE_INPUTS.some(f => u[f] !== undefined) && u.balance_due === undefined) {
+          const newBalance = Math.max(0,
+            Number(updated.total_price || 0) + Number(updated.mileage_cost || 0) - Number(updated.deposit_amount || 0));
+          const r3 = await c.query(
+            `UPDATE bookings SET balance_due=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
+            [newBalance, parseInt(id)]
+          );
+          updated = r3.rows[0];
+          // Mark balance_due as "sent" so the field-level logging loop below
+          // (which only inspects keys present in `u`) picks up the change.
+          u.balance_due = newBalance;
+        }
 
         // Auto-generate Stripe link when confirmed
         if (u.status === "confirmed") {
@@ -195,6 +251,36 @@ exports.handler = async (event) => {
         }
         if (u.admin_notes !== undefined) {
           await logChange(c, parseInt(id), 'Admin notes updated', '');
+        }
+
+        // Field-level logging for everything the allowlist now accepts.
+        // These five already have bespoke log lines above — skip them so a
+        // single edit does not produce two rows. payment_ref is NOT here:
+        // the bespoke "Payment recorded" block only fires when amount AND
+        // method are both present, so a payment_ref-only edit needs this
+        // loop to leave any trail at all. When all three are sent together
+        // this produces a bespoke summary row plus a payment_ref-changed
+        // row — acceptable redundancy against a silent gap.
+        const LOGGED_ELSEWHERE = new Set([
+          'status', 'admin_notes', 'contract_signed',
+          'payment_method', 'payment_amount',
+        ]);
+        // pg returns DATE/TIMESTAMPTZ as JS Date objects (no type parsers
+        // registered in _db.js), so String(Date) is a full GMT string —
+        // fine for the equality check below (left untouched), unreadable
+        // in the logged detail. Render Dates as their ISO date part for
+        // display only; comparison still runs on the full String() value.
+        const display = (s, v) => v instanceof Date ? v.toISOString().slice(0, 10) : s;
+        for (const [k, col] of Object.entries(colMap)) {
+          if (u[k] === undefined || LOGGED_ELSEWHERE.has(col)) continue;
+          const before = prev[col], after = updated[col];
+          const bs = before === null || before === undefined ? '' : String(before);
+          const as = after  === null || after  === undefined ? '' : String(after);
+          if (bs !== as) {
+            const bd = before == null ? '' : display(bs, before);
+            const ad = after  == null ? '' : display(as, after);
+            await logChange(c, parseInt(id), `${col} changed`, `${bd || '—'} → ${ad || '—'}`);
+          }
         }
 
         return json(200, updated);

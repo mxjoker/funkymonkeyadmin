@@ -86,12 +86,13 @@ tr:hover td{background:#fafaf8}
 
 /* ── Badges ── */
 .badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:.72rem;font-weight:700;white-space:nowrap}
-.badge-review{background:#fef9c3;color:#854d0e}
-.badge-pending{background:#dbeafe;color:#1d4ed8}
-.badge-confirmed{background:#d1fae5;color:#065f46}
-.badge-completed{background:#f3f4f6;color:#374151}
-.badge-cancelled{background:#fee2e2;color:#991b1b}
 .badge-custom{background:#fef3c7;color:#d97706}
+/* Legacy status — deliberately absent from STATUSES (see admin.html ~892) so
+   injectStatusCss() doesn't generate it. create-bookings.js and
+   import-bookings.js still allow/produce 'pending' and nine live bookings
+   hold it; keep this rule by hand until those two stop producing it and the
+   rows are migrated off it. */
+.badge-pending{background:#dbeafe;color:#1d4ed8}
 
 /* ── Modal ── */
 .modal-overlay{position:fixed;inset:0;background:rgba(15,10,30,.5);z-index:200;display:none;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto;backdrop-filter:blur(2px)}
@@ -107,16 +108,13 @@ tr:hover td{background:#fafaf8}
 .status-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px}
 .status-pill{padding:5px 14px;border-radius:20px;border:1.5px solid #e5e7eb;background:#fff;font-size:.78rem;font-weight:700;cursor:pointer;transition:all .15s;color:#6b7280;text-transform:capitalize}
 .status-pill:hover{border-color:#a855f7;color:#7c3aed}
-.status-pill.active-review{background:#fef9c3;border-color:#fbbf24;color:#854d0e}
-.status-pill.active-pending{background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}
-.status-pill.active-confirmed{background:#d1fae5;border-color:#6ee7b7;color:#065f46}
-.status-pill.active-completed{background:#f3f4f6;border-color:#d1d5db;color:#374151}
-.status-pill.active-cancelled{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
 .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px}
 .detail-field label{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:3px}
 .detail-field .dval{font-size:.9rem;color:#1e1b4b;font-weight:600}
 .detail-field .dval a{color:#7c3aed;text-decoration:none}
 .detail-field .dval a:hover{text-decoration:underline}
+.bk-edit{width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:.875rem;font-family:inherit;background:#fff}
+.bk-edit:focus{outline:none;border-color:#a855f7}
 .section-label{font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;font-weight:700;margin-bottom:10px;display:block}
 .quote-block{background:#f5f3ff;border-radius:10px;padding:16px;margin-bottom:18px}
 .q-row{display:flex;justify-content:space-between;padding:5px 0;font-size:.855rem;color:#374151;border-bottom:1px solid #e9d5ff}
@@ -393,15 +391,11 @@ input,select,textarea{font-family:inherit}
         <div class="card-body" style="padding:16px">
           <!-- Row 1: Primary Filters -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <button class="btn btn-primary" onclick="openBooking(null)" style="white-space:nowrap">+ Booking</button>
             <input type="text" id="filter-search" placeholder="🔍 Search name, ref, service..." oninput="renderBookingsTable()" style="flex:1;min-width:200px;max-width:300px"/>
             
             <select id="filter-status" onchange="renderBookingsTable()" style="min-width:140px">
               <option value="">All Statuses</option>
-              <option value="review">Review</option>
-              <option value="pending">Pending</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
             </select>
             
             <select id="filter-date-range" onchange="renderBookingsTable()" style="min-width:140px">
@@ -495,8 +489,12 @@ input,select,textarea{font-family:inherit}
     <div class="page" id="page-clients">
       <div class="page-hdr"><h1>Clients</h1></div>
       <div class="card">
+        <div class="card-body" style="padding:16px">
+          <input type="text" id="client-search" placeholder="🔍 Search name, email, phone, organisation..."
+                 oninput="renderClients()" style="width:100%;max-width:360px">
+        </div>
         <table>
-          <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Bookings</th><th>Total Spent</th><th>Last Event</th></tr></thead>
+          <thead><tr><th>Name</th><th>Organisation</th><th>Email</th><th>Phone</th><th>Bookings</th><th>Total Spent</th><th>Last Event</th></tr></thead>
           <tbody id="clients-tbody"></tbody>
         </table>
       </div>
@@ -886,6 +884,37 @@ const EVENT_TYPE_DEFS = [
   { id:'library',     icon:'📚', label:'Library Program' },
 ];
 
+// ── Booking statuses ──
+// Single source of truth. Referenced by the filter dropdown, the modal pill
+// row, the dashboard counters, and the injected pill CSS below.
+// draft    — phone-call shell record, may be missing name/email/date/service
+// quoted   — quote sent, awaiting the client's yes
+// accepted — client said yes, deposit not yet paid
+const STATUSES = [
+  { id:'draft',     label:'Draft',     bg:'#f5f3ff', border:'#c4b5fd', fg:'#5b21b6' },
+  { id:'review',    label:'Review',    bg:'#fef9c3', border:'#fbbf24', fg:'#854d0e' },
+  { id:'quoted',    label:'Quoted',    bg:'#ffedd5', border:'#fdba74', fg:'#9a3412' },
+  { id:'accepted',  label:'Accepted',  bg:'#fef3c7', border:'#fcd34d', fg:'#92400e' },
+  { id:'confirmed', label:'Confirmed', bg:'#d1fae5', border:'#6ee7b7', fg:'#065f46' },
+  { id:'completed', label:'Completed', bg:'#f3f4f6', border:'#d1d5db', fg:'#374151' },
+  { id:'cancelled', label:'Cancelled', bg:'#fee2e2', border:'#fca5a5', fg:'#991b1b' },
+];
+
+// The .active-<id> and .badge-<id> rules used to be hand-written CSS blocks.
+// Generated from STATUSES so a new status needs no CSS edit.
+function injectStatusCss() {
+  const css = STATUSES.map(s =>
+    `.status-pill.active-${s.id}{background:${s.bg};border-color:${s.border};color:${s.fg}}` +
+    `.badge-${s.id}{background:${s.bg};color:${s.fg}}`
+  ).join('');
+  const el = document.createElement('style');
+  el.textContent = css;
+  document.head.appendChild(el);
+}
+injectStatusCss();
+document.getElementById('filter-status').insertAdjacentHTML('beforeend',
+  STATUSES.map(s => `<option value="${s.id}">${s.label}</option>`).join(''));
+
 // ══════════════════════════════════════════════════
 // AUTH
 // ══════════════════════════════════════════════════
@@ -1075,7 +1104,7 @@ function renderActionNeeded() {
   const reviewList = allBookings.filter(b => b.status === 'review')
     .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
 
-  const depositList = allBookings.filter(b => b.status === 'pending' && !b.stripe_payment_link)
+  const depositList = allBookings.filter(b => b.status === 'accepted' && !b.stripe_payment_link)
     .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
 
   const slotsRequired = {};
@@ -1240,7 +1269,7 @@ function renderDashboard() {
   document.getElementById('st-confirmed-sub').textContent = pctChange(confirmedThisMonth, confirmedPriorMonth);
 
   const recent = [...allBookings]
-    .filter(b => ['review','pending'].includes(b.status))
+    .filter(b => ['review','pending','quoted','accepted'].includes(b.status))
     .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))
     .slice(0, 8);
   document.getElementById('dash-tbody').innerHTML = recent.length
@@ -1415,11 +1444,37 @@ function upcomingGigRow(b) {
 // ══════════════════════════════════════════════════
 // BOOKING MODAL
 // ══════════════════════════════════════════════════
+// Renders one editable cell in the booking detail grid. `name` must be a key
+// the PATCH allowlist accepts (booking.js colMap) — anything else is silently
+// dropped by the API.
+function bookingField(label, name, value, type = 'text', opts = null) {
+  const v = value === null || value === undefined ? '' : String(value);
+  // A stored value that matches none of the presets (e.g. legacy lowercase
+  // data) must not be silently blanked by the browser defaulting to the
+  // empty option — surface it as an extra selected option instead.
+  const unmatched = opts && v && !opts.includes(v);
+  const input = opts
+    ? `<select class="bk-edit" data-f="${name}" data-orig="${esc(v)}">
+         <option value=""></option>
+         ${unmatched ? `<option value="${esc(v)}" selected>${esc(v)}</option>` : ''}
+         ${opts.map(o => `<option value="${esc(o)}" ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}
+       </select>`
+    : `<input class="bk-edit" data-f="${name}" data-orig="${esc(v)}" type="${type}" value="${esc(v)}">`;
+  return `<div class="detail-field"><label>${label}</label>${input}</div>`;
+}
+
+// id === null opens an empty modal for a new booking taken over the phone.
+// Saving it POSTs a draft; every other path is identical to editing.
 function openBooking(id) {
-  const b = allBookings.find(x => String(x.id) === String(id));
+  const isNew = id === null || id === undefined;
+  const b = isNew
+    ? { id: 'new', status: 'draft', addons: [] }
+    : allBookings.find(x => String(x.id) === String(id));
   if (!b) return;
 
-  document.getElementById('modal-title').textContent = `${b.reference||'Booking'} — ${b.client_name}`;
+  document.getElementById('modal-title').textContent = isNew
+    ? 'New Booking'
+    : `${b.reference||'Booking'} — ${b.client_name}`;
 
   const addons = parseAddons(b.addons);
   const addonRows = addons.map(a =>
@@ -1433,25 +1488,36 @@ function openBooking(id) {
   document.getElementById('modal-body').innerHTML = `
     <!-- Status pills -->
     <div class="status-pills">
-      ${['review','pending','confirmed','completed','cancelled'].map(s =>
-        `<button class="status-pill ${b.status===s?'active-'+s:''}" onclick="setStatus('${b.id}','${s}')">${s}</button>`
+      ${STATUSES.map(s =>
+        `<button class="status-pill ${b.status===s.id?'active-'+s.id:''}" ${isNew ? 'disabled' : `onclick="setStatus('${b.id}','${s.id}')"`}>${s.label}</button>`
       ).join('')}
     </div>
 
     <!-- Detail grid -->
     <div class="detail-grid">
-      <div class="detail-field"><label>Client</label><div class="dval">${esc(b.client_name||'—')}</div></div>
-      <div class="detail-field"><label>Phone</label><div class="dval"><a href="tel:${b.client_phone||''}">${esc(b.client_phone||'—')}</a></div></div>
-      <div class="detail-field"><label>Email</label><div class="dval"><a href="mailto:${b.client_email||''}">${esc(b.client_email||'—')}</a></div></div>
-      <div class="detail-field"><label>Referral</label><div class="dval">${esc(b.referral_source||'—')}</div></div>
-      <div class="detail-field"><label>Customer Type</label><div class="dval">${esc(b.customer_type||'—')}</div></div>
-      <div class="detail-field"><label>Event Date</label><div class="dval">${fmtDate(b.event_date)}${b.event_time?' at '+fmtTime(b.event_time):''}</div></div>
-      <div class="detail-field"><label>Event Type</label><div class="dval">${esc(b.event_type||'—')}</div></div>
-      <div class="detail-field"><label>Guests</label><div class="dval">${b.guest_count||'—'}</div></div>
-      <div class="detail-field"><label>ZIP / Location</label><div class="dval">${esc(b.event_zip||'—')}${b.event_location?' — '+esc(b.event_location):''}</div></div>
-      ${b.venue?`<div class="detail-field"><label>Venue</label><div class="dval">${esc(b.venue)}</div></div>`:''}
-      ${b.child_name?`<div class="detail-field"><label>🎂 Birthday Person</label><div class="dval">${esc(b.child_name)}</div></div>`:''}
-      ${b.guests_of_honour?`<div class="detail-field"><label>⭐ Guests of Honour</label><div class="dval">${esc(b.guests_of_honour)}</div></div>`:''}
+      ${bookingField('Client', 'client_name', b.client_name)}
+      ${bookingField('Organisation', 'organisation_name', b.organisation_name)}
+      ${bookingField('Phone', 'client_phone', b.client_phone, 'tel')}
+      ${bookingField('Email', 'client_email', b.client_email, 'email')}
+      ${bookingField('Referral', 'referral_source', b.referral_source)}
+      ${bookingField('Customer Type', 'customer_type', b.customer_type)}
+      ${bookingField('Event Date', 'event_date', (b.event_date || '').slice(0, 10), 'date')}
+      ${bookingField('Event Time', 'event_time', b.event_time, 'time')}
+      ${bookingField('Occasion', 'occasion', b.occasion, 'text',
+        ['Birthday','Fun day / Carnival','Wedding','Corporate','Community','School','Library','Other'])}
+      ${bookingField('Event Type', 'event_type', b.event_type)}
+      ${bookingField('Guests', 'guest_count', b.guest_count, 'number')}
+      ${bookingField('ZIP', 'event_zip', b.event_zip)}
+      ${bookingField('Location', 'event_location', b.event_location)}
+      ${bookingField('Venue', 'venue', b.venue)}
+      ${bookingField('Surface', 'surface_type', b.surface_type, 'text',
+        ['Grass','Concrete','Asphalt','Indoor — hard floor','Indoor — carpet','Turf','Other'])}
+      ${bookingField('🎂 Birthday Person', 'child_name', b.child_name)}
+      ${bookingField('⭐ Guests of Honour', 'guests_of_honour', b.guests_of_honour)}
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin:-8px 0 18px">
+      <button class="btn btn-primary btn-sm" onclick="saveBookingEdits('${b.id}')">Save Details</button>
+      <span class="save-flash" id="bk-flash-${b.id}">✓ Saved</span>
     </div>
 
     ${b.notes?`<div style="margin-bottom:18px"><span class="section-label">Client Notes</span><p style="font-size:.875rem;color:#374151;line-height:1.6">${esc(b.notes)}</p></div>`:''}
@@ -1459,13 +1525,32 @@ function openBooking(id) {
     <!-- Quote -->
     <div class="quote-block">
       <span class="section-label">Quote Breakdown</span>
-      <div class="q-row"><span>${esc(b.service_name||'Service')}</span><span>${Number(b.service_price||0)>0?'$'+Number(b.service_price).toFixed(2):'Custom quote'}</span></div>
+      <div class="q-row">
+        <input class="bk-edit" data-f="service_name" data-orig="${esc(b.service_name || '')}" value="${esc(b.service_name || '')}" placeholder="Service" style="max-width:60%">
+        <input class="bk-edit" data-f="service_price" data-orig="${esc(b.service_price ?? '')}" type="number" step="0.01" value="${b.service_price ?? ''}" style="max-width:110px">
+      </div>
       ${extraRow}${addonRows}${mileageRow}
-      <div class="q-row"><span>Total</span><span>${Number(b.total_price||0)>0?'$'+Number(b.total_price).toFixed(2):'Custom'}</span></div>
+      <div class="q-row">
+        <span>Total</span>
+        <input class="bk-edit" data-f="total_price" data-orig="${esc(b.total_price ?? '')}" type="number" step="0.01" value="${b.total_price ?? ''}" style="max-width:110px">
+      </div>
       <div class="q-row deposit-row"><span>Deposit ${b.deposit_paid?'✅ Paid':'⏳ Unpaid'}</span><span>$${Number(b.deposit_amount||100).toFixed(2)}</span></div>
+      <div class="q-row sub">
+        <span>Deposit received</span>
+        <input class="bk-edit" data-f="deposit_paid_at" data-orig="${esc((b.deposit_paid_at || '').slice(0, 10))}" type="date"
+               value="${(b.deposit_paid_at || '').slice(0, 10)}" style="max-width:150px">
+      </div>
+      <div class="q-row sub">
+        <span>Deposit method / ref</span>
+        <span style="display:flex;gap:6px">
+          <input class="bk-edit" data-f="deposit_method" data-orig="${esc(b.deposit_method || '')}" value="${esc(b.deposit_method || '')}" placeholder="Stripe / cash / Venmo" style="max-width:150px">
+          <input class="bk-edit" data-f="deposit_ref" data-orig="${esc(b.deposit_ref || '')}" value="${esc(b.deposit_ref || '')}" placeholder="ref" style="max-width:110px">
+        </span>
+      </div>
       <div class="q-row"><span>Balance Due at Event</span><span>${Number(b.balance_due||0)>0?'$'+Number(b.balance_due).toFixed(2):'TBD'}</span></div>
     </div>
 
+    ${isNew ? '' : `
     <!-- Stripe link -->
     <div class="stripe-block">
       <div style="display:flex;align-items:center;justify-content:space-between">
@@ -1474,32 +1559,35 @@ function openBooking(id) {
       </div>
       ${b.stripe_payment_link?`<div class="stripe-result">Last link: <a href="${b.stripe_payment_link}" target="_blank" style="color:#7c3aed">Open →</a></div>`:''}
       <div class="stripe-result" id="stripe-msg-${b.id}"></div>
-    </div>
+    </div>`}
 
+    ${isNew ? '' : `
     <!-- Download Invoice -->
     <div style="background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <strong style="font-size:.875rem">🧾 Invoice</strong>
         <button class="btn btn-outline btn-sm" onclick="downloadInvoice('${b.reference}')">Download PDF</button>
       </div>
-    </div>
+    </div>`}
 
+    ${isNew ? '' : `
     <!-- COI Requests -->
     <div style="background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
         <strong style="font-size:.875rem">🛡️ Certificate of Insurance</strong>
       </div>
       <div id="coi-requests-${b.id}" style="font-size:.85rem;color:#6b7280">Loading...</div>
-    </div>
+    </div>`}
 
     <!-- Admin notes -->
     <div class="notes-block">
       <span class="section-label">Admin Notes <span class="text-muted">(internal only)</span></span>
       <textarea class="notes-area" id="admin-notes-${b.id}" placeholder="Internal notes not visible to the client…">${esc(b.admin_notes||'')}</textarea>
+      ${isNew ? '' : `
       <div class="notes-actions">
         <button class="btn btn-outline btn-sm" onclick="saveAdminNotes('${b.id}')">Save Notes</button>
         <span class="save-flash" id="notes-flash-${b.id}">✓ Saved</span>
-      </div>
+      </div>`}
     </div>
 
     <!-- Record payment -->
@@ -1532,17 +1620,18 @@ function openBooking(id) {
         <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordClientPayment('${b.id}')">Save Payment</button>
         <span class="save-flash" id="pay-flash-${b.id}">✓ Saved</span>
       </div>
+      ${isNew ? '' : `
       <div class="pay-row" style="margin-top:8px;align-items:center;gap:12px">
         <label style="font-size:.78rem;font-weight:600;color:#6b7280;white-space:nowrap">⏰ Deposit deadline:</label>
         <input type="date" id="pay-deadline-${b.id}" value="${b.confirmation_deadline?String(b.confirmation_deadline).split('T')[0]:''}"
           style="padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:.82rem"
           onchange="patch('${b.id}',{confirmation_deadline:this.value||null})"/>
         <span style="font-size:.75rem;color:#9ca3af">Client must pay deposit by this date or booking may be released</span>
-      </div>
+      </div>`}
     </div>
 
-    <!-- Staff Assignment (admin only) -->
-    ${currentUser?.role === 'admin' ? `
+    <!-- Staff Assignment (admin only, needs a saved booking) -->
+    ${!isNew && currentUser?.role === 'admin' ? `
     <div class="notes-block" id="staff-assign-block-${b.id}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <span class="section-label" style="margin-bottom:0">👥 Staff Assignment</span>
@@ -1572,18 +1661,20 @@ function openBooking(id) {
 
     <!-- Action strip -->
     <div class="action-strip">
+      ${isNew ? '' : `
       <button class="btn btn-outline btn-sm" onclick="toggleContract('${b.id}')">
         ${b.contract_signed?'📝 Contract Signed ✓':'📝 Mark Contract Signed'}
-      </button>
+      </button>`}
       ${b.deposit_paid || b.stripe_payment_intent_id ? `
       <button class="btn btn-outline btn-sm" onclick="processRefund('${b.id}')" style="color:#dc2626;border-color:#dc2626">
         💸 Process Refund
       </button>
       ` : ''}
-      <button class="btn btn-danger btn-sm" onclick="confirmDelete('${b.id}')">🗑 Delete</button>
+      ${isNew ? '' : `
+      <button class="btn btn-danger btn-sm" onclick="confirmDelete('${b.id}')">🗑 Delete</button>`}
     </div>
 
-    ${currentUser?.role === 'admin' ? `
+    ${!isNew && currentUser?.role === 'admin' ? `
     <div style="margin-top:20px;border-top:1px solid #e5e7eb;padding-top:18px">
       <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:#9ca3af;margin-bottom:10px">✅ Admin Checklist</div>
       <div id="tasks-container-${b.id}"><div style="color:#9ca3af;font-size:.8rem">Loading…</div></div>
@@ -1608,8 +1699,8 @@ function openBooking(id) {
 
   document.getElementById('booking-modal').classList.add('open');
 
-  // Load staff assignments after modal renders (admin only)
-  if (currentUser?.role === 'admin') {
+  // Load staff assignments after modal renders (admin only, needs a saved booking)
+  if (!isNew && currentUser?.role === 'admin') {
     loadStaffAssignments(b.id);
     loadCOIRequests(b.id);
     loadGoogleReviews(b.id);
@@ -2206,6 +2297,53 @@ async function saveAdminNotes(id) {
   } catch(e) { alert('Failed to save notes: ' + e.message); }
 }
 
+// ── Booking detail — collect only [data-f] inputs that changed from the
+// value they were rendered with (data-orig), and PATCH in one call. Sending
+// unchanged fields would overwrite real data with a lossy re-render of it —
+// e.g. deposit_paid_at is a TIMESTAMPTZ shown in a date input, so an
+// unfiltered resend would zero out its time on every unrelated save.
+async function saveBookingEdits(id) {
+  const payload = {};
+  document.querySelectorAll('#modal-body .bk-edit').forEach(el => {
+    if (el.value !== (el.dataset.orig || '')) payload[el.dataset.f] = el.value;
+  });
+  // An empty payload means nothing changed. For an existing booking that is a
+  // no-op worth confirming; for a new one there is nothing to create.
+  if (!Object.keys(payload).length) {
+    if (id === 'new') { alert('Nothing to save yet — enter at least a name.'); return; }
+    flash('bk-flash-' + id);
+    return;
+  }
+  try {
+    if (id === 'new') {
+      payload.status = 'draft';
+      const res = await apiFetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Request failed');
+      }
+      const data = await res.json();
+      allBookings.unshift(data.booking);
+      closeModal();
+      renderBookingsTable();
+      openBooking(data.booking.id);
+      return;
+    }
+    const updated = await patch(id, payload);
+    // Keep local state in sync so re-opening the modal shows the new values
+    const i = allBookings.findIndex(x => String(x.id) === String(id));
+    if (i > -1) allBookings[i] = updated;
+    flash('bk-flash-' + id);
+    renderBookingsTable();
+  } catch (e) {
+    alert('Failed to save: ' + e.message);
+  }
+}
+
 // ── Stripe link — pulls all required fields from booking object ──
 async function sendStripeLink(id) {
   const b = allBookings.find(x => String(x.id) === String(id));
@@ -2389,7 +2527,12 @@ async function processRefund(bookingId) {
 
 async function confirmDelete(id) {
   if (!confirm('Delete this booking? This cannot be undone.')) return;
-  await apiFetch('/api/booking/' + id, { method: 'DELETE' });
+  const res = await apiFetch('/api/booking/' + id, { method: 'DELETE' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert('Failed to delete booking: ' + (err.error || res.status));
+    return;
+  }
   closeModal();
   await loadBookings();
 }
@@ -2439,8 +2582,8 @@ function renderOneMonth(year, month, gridId, labelId) {
       const staffBadges = (calStaffMap[b.id] || []).map(s =>
         `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:${s.color};color:#fff;font-size:9px;font-weight:800;border:1.5px solid #fff;margin-left:2px">${s.initials}</span>`
       ).join('');
-      return `<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${b.client_name} — ${b.service_name}">
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.service_name||b.client_name}</span>
+      return `<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${esc(b.client_name)} — ${esc(b.service_name)}">
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.service_name||b.client_name)}</span>
         ${staffBadges}
       </div>`;
     }).join('');
@@ -2462,26 +2605,113 @@ function renderCalendar() {
 // CLIENTS
 // ══════════════════════════════════════════════════
 function renderClients() {
+  const q = (document.getElementById('client-search')?.value || '').toLowerCase().trim();
   const map = {};
   allBookings.forEach(b => {
     const k = b.client_email || b.client_name;
-    if (!map[k]) map[k] = { name:b.client_name, email:b.client_email, phone:b.client_phone, count:0, total:0, last:null };
+    if (!k) return;
+    if (!map[k]) map[k] = {
+      name: b.client_name, email: b.client_email, phone: b.client_phone,
+      org: b.organisation_name || '', count: 0, total: 0, last: null,
+    };
     map[k].count++;
-    map[k].total += Number(b.total_price||0);
+    map[k].total += Number(b.total_price || 0);
+    if (b.organisation_name && !map[k].org) map[k].org = b.organisation_name;
     if (!map[k].last || b.event_date > map[k].last) map[k].last = b.event_date;
   });
-  const clients = Object.values(map).sort((a,b) => b.total - a.total);
+  const clients = Object.values(map)
+    .filter(c => !q || [c.name, c.email, c.phone, c.org]
+      .some(v => (v || '').toLowerCase().includes(q)))
+    .sort((a, b) => b.total - a.total);
+
   document.getElementById('clients-tbody').innerHTML = clients.length
     ? clients.map(c => `
-      <tr>
+      <tr ${c.email ? `onclick="openClient('${encUriAttr(c.email)}')" style="cursor:pointer"` : ''}>
         <td style="font-weight:600">${esc(c.name)}</td>
-        <td><a href="mailto:${c.email||''}" style="color:#7c3aed">${esc(c.email||'—')}</a></td>
-        <td><a href="tel:${c.phone||''}" style="color:#374151">${esc(c.phone||'—')}</a></td>
+        <td>${esc(c.org || '—')}</td>
+        <td>${esc(c.email || '—')}</td>
+        <td>${esc(c.phone || '—')}</td>
         <td>${c.count}</td>
         <td>$${c.total.toFixed(0)}</td>
         <td>${fmtDate(c.last)}</td>
       </tr>`).join('')
-    : `<tr><td colspan="6" class="table-empty">No clients yet</td></tr>`;
+    : `<tr><td colspan="7" class="table-empty">${q ? 'No matches' : 'No clients yet'}</td></tr>`;
+}
+
+// ── Client sheet — the clients table and client.js have existed since the
+// beginning; this is the first thing that calls them. ──
+async function openClient(email) {
+  // Row onclick passes the address through encUriAttr, not raw — decode
+  // first so everything below (fetch URL, the `e` handed to saveClient,
+  // the title) works on the real address, same as before this fix.
+  email = decodeURIComponent(email);
+  document.getElementById('modal-title').textContent = email;
+  document.getElementById('modal-body').innerHTML = '<div class="text-muted">Loading…</div>';
+  document.getElementById('booking-modal').classList.add('open');
+
+  const res = await apiFetch('/api/client?email=' + encodeURIComponent(email));
+  if (!res.ok) {
+    document.getElementById('modal-body').innerHTML = '<div class="text-muted">Could not load this client.</div>';
+    return;
+  }
+  const c = await res.json();
+  // Same JS-string-literal-in-onclick-attribute context as the row above
+  // (saveClient('${e}') below) — needs the apostrophe-safe encoder too.
+  const e = encUriAttr(email);
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="detail-grid">
+      ${bookingField('Name', 'name', c.name)}
+      ${bookingField('Birthday', 'birthday', (c.birthday || '').slice(0, 10), 'date')}
+      ${bookingField('Follow up on', 'follow_up_date', (c.follow_up_date || '').slice(0, 10), 'date')}
+      ${bookingField('Tags', 'tags', Array.isArray(c.tags) ? c.tags.join(', ') : '')}
+      ${bookingField('Annual event month', 'annual_event_month', c.annual_event_month, 'number')}
+      ${bookingField('Annual event note', 'annual_event_note', c.annual_event_note)}
+    </div>
+    <div class="notes-block">
+      <span class="section-label">Notes</span>
+      <textarea class="bk-edit" data-f="notes" data-orig="${esc(c.notes || '')}" rows="4">${esc(c.notes || '')}</textarea>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin:12px 0 18px">
+      <button class="btn btn-primary btn-sm" onclick="saveClient('${e}')">Save Client</button>
+      <span class="save-flash" id="cl-flash">✓ Saved</span>
+    </div>
+    <div style="margin-bottom:18px">
+      <span class="section-label">Bookings (${c.bookings.length})</span>
+      ${c.bookings.map(b => `<div class="q-row"><span>${esc(b.reference || '')} — ${esc(b.service_name || '')}</span><span>${fmtDate(b.event_date)}</span></div>`).join('') || '<div class="text-muted">None</div>'}
+    </div>
+    <div>
+      <span class="section-label">Interactions (${c.interactions.length})</span>
+      ${c.interactions.map(i => `<div class="q-row sub"><span>${esc(i.note || '')}</span><span>${fmtDate(i.created_at)}</span></div>`).join('') || '<div class="text-muted">None logged</div>'}
+    </div>`;
+}
+
+async function saveClient(encodedEmail) {
+  const payload = {};
+  document.querySelectorAll('#modal-body .bk-edit').forEach(el => {
+    if (el.value !== (el.dataset.orig || '')) payload[el.dataset.f] = el.value;
+  });
+  if (!Object.keys(payload).length) { flash('cl-flash'); return; }
+  // clients.tags is JSONB and client.js binds the value straight into the
+  // column with no encoding, so a bare string throws "invalid input syntax for
+  // type json". The field is a comma-separated list; store a real array.
+  if ('tags' in payload) {
+    payload.tags = JSON.stringify(
+      payload.tags.split(',').map(t => t.trim()).filter(Boolean)
+    );
+  }
+  // client.js routes PATCH by the body's email field, not the query string
+  // (client.js:90-99 — the query param is GET-only, and its path fallback
+  // yields the literal "client"). `email` is not in the PATCH allowlist, so it
+  // routes the request without being written to the row.
+  payload.email = decodeURIComponent(encodedEmail);
+  const res = await apiFetch('/api/client?email=' + encodedEmail, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (res.ok) flash('cl-flash');
+  else alert('Failed to save client');
 }
 
 // ══════════════════════════════════════════════════
@@ -4422,6 +4652,16 @@ function fmtTime(t) {
 
 function esc(str) {
   return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// For interpolating untrusted data into a single-quoted JS string literal
+// inside an onclick="..." attribute (e.g. openClient('${...}')). encodeURIComponent
+// alone is NOT enough here: per spec it leaves `'  (  )  *  !  ~` unescaped,
+// so a raw apostrophe in the input (a client email can contain one — the
+// booking email regex allows it) survives and breaks out of the JS string,
+// same as it would with plain HTML-escaping. Close that one gap explicitly.
+function encUriAttr(str) {
+  return encodeURIComponent(str).replace(/'/g, '%27');
 }
 
 function parseAddons(raw) {

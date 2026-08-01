@@ -90,6 +90,12 @@ exports.handler = async (event) => {
   if (!email || !email.includes('@')) {
     return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'Valid email required' }) };
   }
+  // clients.email is TEXT UNIQUE and case-sensitive. The public booking form
+  // does not lowercase addresses, and this GET upserts whatever case a
+  // booking holds — normalise here so every path (this upsert, the PATCH
+  // upsert/update below) agrees on one row per address instead of minting a
+  // second row on the first mixed-case Save Client.
+  email = email.toLowerCase();
 
   return withClient(async (c) => {
     try {

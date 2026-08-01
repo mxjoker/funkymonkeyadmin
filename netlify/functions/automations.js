@@ -150,7 +150,7 @@ async function runScheduledAutomations(client) {
 
     const { rows: bookings } = await client.query(
       `SELECT * FROM bookings
-       WHERE status IN ('confirmed','pending')
+       WHERE status IN ('confirmed','pending','quoted','accepted')
          AND event_date::date = $1::date
          AND id NOT IN (
            SELECT booking_id FROM email_log WHERE rule_id=$2 AND status='sent'
