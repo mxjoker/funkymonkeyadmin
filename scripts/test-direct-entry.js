@@ -108,8 +108,45 @@ async function main() {
       `expected an event_date change log, got: ${JSON.stringify(logged)}`);
     console.log('  ok  event_date is editable and logged');
 
+    // 5. client.js round-trips against the live clients table.
+    const clientFn = require('../netlify/functions/client');
+    const TEST_EMAIL = 'direct-entry-selfcheck@example.invalid';
+    const callClient = (method, body) => clientFn.handler({
+      httpMethod: method,
+      headers: { authorization: 'Bearer ' + TOKEN, 'content-type': 'application/json' },
+      queryStringParameters: { email: TEST_EMAIL },
+      body: body ? JSON.stringify(body) : null,
+      path: '/api/client',
+    });
+
+    const gotClient = await callClient('GET');
+    assert.strictEqual(gotClient.statusCode, 200, `client GET returned ${gotClient.statusCode}: ${gotClient.body}`);
+    const cRec = JSON.parse(gotClient.body);
+    assert.ok(Array.isArray(cRec.bookings), 'client GET must return a bookings array');
+    assert.ok(Array.isArray(cRec.interactions), 'client GET must return an interactions array');
+
+    // client.js takes the email from the JSON body on PATCH/POST/DELETE — the
+    // query param is read for GET only (client.js:84-100). `email` is not in
+    // the PATCH allowlist, so it routes the request without being written.
+    // clients.tags is JSONB and client.js binds it straight through with no
+    // encoding, so a bare string like 'vip' makes Postgres throw
+    // "invalid input syntax for type json". Send a JSON array.
+    const patchedClient = await callClient('PATCH', {
+      email: TEST_EMAIL, notes: 'selfcheck note', tags: JSON.stringify(['vip']),
+    });
+    assert.strictEqual(patchedClient.statusCode, 200, `client PATCH returned ${patchedClient.statusCode}: ${patchedClient.body}`);
+    assert.strictEqual(JSON.parse(patchedClient.body).notes, 'selfcheck note');
+    assert.deepStrictEqual(JSON.parse(patchedClient.body).tags, ['vip'],
+      'tags must round-trip as a JSON array');
+    console.log('  ok  client.js GET and PATCH round-trip');
+
     console.log('\nAll direct-entry checks passed.');
   } finally {
+    const p2 = getPool();
+    const c2 = await p2.connect();
+    try {
+      await c2.query('DELETE FROM clients WHERE email=$1', ['direct-entry-selfcheck@example.invalid']);
+    } finally { c2.release(); }
     if (created.length) {
       const pool = getPool();
       const c = await pool.connect();
