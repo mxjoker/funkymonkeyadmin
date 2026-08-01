@@ -1024,9 +1024,16 @@ The spec flags this as an assumption — the table has never been exercised thro
     // client.js takes the email from the JSON body on PATCH/POST/DELETE — the
     // query param is read for GET only (client.js:84-100). `email` is not in
     // the PATCH allowlist, so it routes the request without being written.
-    const patchedClient = await callClient('PATCH', { email: TEST_EMAIL, notes: 'selfcheck note', tags: 'vip' });
+    // clients.tags is JSONB and client.js binds it straight through with no
+    // encoding, so a bare string like 'vip' makes Postgres throw
+    // "invalid input syntax for type json". Send a JSON array.
+    const patchedClient = await callClient('PATCH', {
+      email: TEST_EMAIL, notes: 'selfcheck note', tags: JSON.stringify(['vip']),
+    });
     assert.strictEqual(patchedClient.statusCode, 200, `client PATCH returned ${patchedClient.statusCode}: ${patchedClient.body}`);
     assert.strictEqual(JSON.parse(patchedClient.body).notes, 'selfcheck note');
+    assert.deepStrictEqual(JSON.parse(patchedClient.body).tags, ['vip'],
+      'tags must round-trip as a JSON array');
     console.log('  ok  client.js GET and PATCH round-trip');
 ```
 
@@ -1142,7 +1149,7 @@ async function openClient(email) {
       ${bookingField('Name', 'name', c.name)}
       ${bookingField('Birthday', 'birthday', (c.birthday || '').slice(0, 10), 'date')}
       ${bookingField('Follow up on', 'follow_up_date', (c.follow_up_date || '').slice(0, 10), 'date')}
-      ${bookingField('Tags', 'tags', c.tags)}
+      ${bookingField('Tags', 'tags', Array.isArray(c.tags) ? c.tags.join(', ') : '')}
       ${bookingField('Annual event month', 'annual_event_month', c.annual_event_month, 'number')}
       ${bookingField('Annual event note', 'annual_event_note', c.annual_event_note)}
     </div>
@@ -1170,6 +1177,14 @@ async function saveClient(encodedEmail) {
     if (el.value !== (el.dataset.orig || '')) payload[el.dataset.f] = el.value;
   });
   if (!Object.keys(payload).length) { flash('cl-flash'); return; }
+  // clients.tags is JSONB and client.js binds the value straight into the
+  // column with no encoding, so a bare string throws "invalid input syntax for
+  // type json". The field is a comma-separated list; store a real array.
+  if ('tags' in payload) {
+    payload.tags = JSON.stringify(
+      payload.tags.split(',').map(t => t.trim()).filter(Boolean)
+    );
+  }
   // client.js routes PATCH by the body's email field, not the query string
   // (client.js:90-99 — the query param is GET-only, and its path fallback
   // yields the literal "client"). `email` is not in the PATCH allowlist, so it
