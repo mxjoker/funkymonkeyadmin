@@ -32,7 +32,7 @@ Status strings are currently hardcoded in eight places in `admin.html`. Adding t
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: a module-level `const STATUSES` — an array of `{ id, label, bg, border, fg }` objects — and a `statusPillCss()` function returning a CSS string. Tasks 5 and 6 read `STATUSES`.
+- Produces: a module-level `const STATUSES` — an array of `{ id, label, bg, border, fg }` objects — and `injectStatusCss()`, a void function that appends a generated `<style>` element to `<head>`. Tasks 5, 6, and 7 read `STATUSES`.
 
 - [ ] **Step 1: Add the `STATUSES` constant**
 
@@ -1146,7 +1146,31 @@ async function saveClient(encodedEmail) {
 
 `#booking-modal` and its `open` class are the same mechanism `openBooking` uses at `admin.html:1609`; the client sheet reuses the one modal shell rather than adding a second.
 
-- [ ] **Step 7: Keep drafts out of the daily counters**
+- [ ] **Step 7: Give the three new statuses a table badge**
+
+The bookings table renders each row's status as `class="badge-${b.status||'review'}"` (`admin.html:1416`), styled by five hand-written `.badge-*` rules at `admin.html:89-93`. `draft`, `quoted`, and `accepted` have no matching rule, so their badges render unstyled. `injectStatusCss()` from Task 1 already generates the pill rules from `STATUSES`; extend it to emit the badge rules from the same source.
+
+Replace the body of `injectStatusCss()`:
+
+```javascript
+function injectStatusCss() {
+  const css = STATUSES.map(s =>
+    `.status-pill.active-${s.id}{background:${s.bg};border-color:${s.border};color:${s.fg}}` +
+    `.badge-${s.id}{background:${s.bg};color:${s.fg}}`
+  ).join('');
+  const el = document.createElement('style');
+  el.textContent = css;
+  document.head.appendChild(el);
+}
+```
+
+Then delete the five now-redundant `.badge-review`, `.badge-pending`, `.badge-confirmed`, `.badge-completed`, `.badge-cancelled` rules at `admin.html:89-93`.
+
+Before deleting, read those five rules and check they carry only `background` and `color`. If any also sets padding, radius, or font — properties `STATUSES` does not model — keep the shared properties in a `.badge` base rule (or leave the five rules in place and have the generator emit only the three new ids) rather than silently dropping styling. Say which you did in your report.
+
+`badge-pending` disappears with this change. That is correct: the nine bookings that held `pending` are migrated to `accepted` by `scripts/migrate-pending-to-accepted.js`, and `b.status||'review'` catches any straggler.
+
+- [ ] **Step 8: Keep drafts out of the daily counters**
 
 Drafts are half-records and must not inflate the work queues. At `admin.html:1243`, change:
 
@@ -1162,17 +1186,17 @@ to:
 
 Leave `:1075` (`status === 'review'`) and `:1078` (`status === 'pending'` without a Stripe link) alone — both are already narrow enough that drafts cannot reach them.
 
-- [ ] **Step 8: Verify in the browser**
+- [ ] **Step 9: Verify in the browser**
 
 Run: open the Clients tab, type part of a client's name in the search box, click their row.
 Expected: the modal loads their record, lists their bookings and interactions, and typing a note then clicking Save Client flashes success. Reopening the row shows the saved note.
 
-- [ ] **Step 9: Run the full test script one final time**
+- [ ] **Step 10: Run the full test script one final time**
 
 Run: `node scripts/test-direct-entry.js`
 Expected: five `ok` lines, `All direct-entry checks passed.`, and every cleanup line.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add admin.html
