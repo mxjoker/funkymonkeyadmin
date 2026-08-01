@@ -1442,12 +1442,17 @@ function upcomingGigRow(b) {
 // dropped by the API.
 function bookingField(label, name, value, type = 'text', opts = null) {
   const v = value === null || value === undefined ? '' : String(value);
+  // A stored value that matches none of the presets (e.g. legacy lowercase
+  // data) must not be silently blanked by the browser defaulting to the
+  // empty option — surface it as an extra selected option instead.
+  const unmatched = opts && v && !opts.includes(v);
   const input = opts
-    ? `<select class="bk-edit" data-f="${name}">
+    ? `<select class="bk-edit" data-f="${name}" data-orig="${esc(v)}">
          <option value=""></option>
+         ${unmatched ? `<option value="${esc(v)}" selected>${esc(v)}</option>` : ''}
          ${opts.map(o => `<option value="${esc(o)}" ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}
        </select>`
-    : `<input class="bk-edit" data-f="${name}" type="${type}" value="${esc(v)}">`;
+    : `<input class="bk-edit" data-f="${name}" data-orig="${esc(v)}" type="${type}" value="${esc(v)}">`;
   return `<div class="detail-field"><label>${label}</label>${input}</div>`;
 }
 
@@ -1498,7 +1503,7 @@ function openBooking(id) {
     </div>
     <div style="display:flex;align-items:center;gap:10px;margin:-8px 0 18px">
       <button class="btn btn-primary btn-sm" onclick="saveBookingEdits('${b.id}')">Save Details</button>
-      <span class="text-muted" id="bk-flash-${b.id}" style="font-size:.8rem"></span>
+      <span class="save-flash" id="bk-flash-${b.id}">✓ Saved</span>
     </div>
 
     ${b.notes?`<div style="margin-bottom:18px"><span class="section-label">Client Notes</span><p style="font-size:.875rem;color:#374151;line-height:1.6">${esc(b.notes)}</p></div>`:''}
@@ -1507,25 +1512,25 @@ function openBooking(id) {
     <div class="quote-block">
       <span class="section-label">Quote Breakdown</span>
       <div class="q-row">
-        <input class="bk-edit" data-f="service_name" value="${esc(b.service_name || '')}" placeholder="Service" style="max-width:60%">
-        <input class="bk-edit" data-f="service_price" type="number" step="0.01" value="${b.service_price ?? ''}" style="max-width:110px">
+        <input class="bk-edit" data-f="service_name" data-orig="${esc(b.service_name || '')}" value="${esc(b.service_name || '')}" placeholder="Service" style="max-width:60%">
+        <input class="bk-edit" data-f="service_price" data-orig="${esc(b.service_price ?? '')}" type="number" step="0.01" value="${b.service_price ?? ''}" style="max-width:110px">
       </div>
       ${extraRow}${addonRows}${mileageRow}
       <div class="q-row">
         <span>Total</span>
-        <input class="bk-edit" data-f="total_price" type="number" step="0.01" value="${b.total_price ?? ''}" style="max-width:110px">
+        <input class="bk-edit" data-f="total_price" data-orig="${esc(b.total_price ?? '')}" type="number" step="0.01" value="${b.total_price ?? ''}" style="max-width:110px">
       </div>
       <div class="q-row deposit-row"><span>Deposit ${b.deposit_paid?'✅ Paid':'⏳ Unpaid'}</span><span>$${Number(b.deposit_amount||100).toFixed(2)}</span></div>
       <div class="q-row sub">
         <span>Deposit received</span>
-        <input class="bk-edit" data-f="deposit_paid_at" type="date"
+        <input class="bk-edit" data-f="deposit_paid_at" data-orig="${esc((b.deposit_paid_at || '').slice(0, 10))}" type="date"
                value="${(b.deposit_paid_at || '').slice(0, 10)}" style="max-width:150px">
       </div>
       <div class="q-row sub">
         <span>Deposit method / ref</span>
         <span style="display:flex;gap:6px">
-          <input class="bk-edit" data-f="deposit_method" value="${esc(b.deposit_method || '')}" placeholder="Stripe / cash / Venmo" style="max-width:150px">
-          <input class="bk-edit" data-f="deposit_ref" value="${esc(b.deposit_ref || '')}" placeholder="ref" style="max-width:110px">
+          <input class="bk-edit" data-f="deposit_method" data-orig="${esc(b.deposit_method || '')}" value="${esc(b.deposit_method || '')}" placeholder="Stripe / cash / Venmo" style="max-width:150px">
+          <input class="bk-edit" data-f="deposit_ref" data-orig="${esc(b.deposit_ref || '')}" value="${esc(b.deposit_ref || '')}" placeholder="ref" style="max-width:110px">
         </span>
       </div>
       <div class="q-row"><span>Balance Due at Event</span><span>${Number(b.balance_due||0)>0?'$'+Number(b.balance_due).toFixed(2):'TBD'}</span></div>
@@ -2271,12 +2276,17 @@ async function saveAdminNotes(id) {
   } catch(e) { alert('Failed to save notes: ' + e.message); }
 }
 
-// ── Booking detail — collect every [data-f] input and PATCH in one call ──
+// ── Booking detail — collect only [data-f] inputs that changed from the
+// value they were rendered with (data-orig), and PATCH in one call. Sending
+// unchanged fields would overwrite real data with a lossy re-render of it —
+// e.g. deposit_paid_at is a TIMESTAMPTZ shown in a date input, so an
+// unfiltered resend would zero out its time on every unrelated save.
 async function saveBookingEdits(id) {
   const payload = {};
   document.querySelectorAll('#modal-body .bk-edit').forEach(el => {
-    payload[el.dataset.f] = el.value;
+    if (el.value !== (el.dataset.orig || '')) payload[el.dataset.f] = el.value;
   });
+  if (!Object.keys(payload).length) { flash('bk-flash-' + id); return; }
   try {
     const updated = await patch(id, payload);
     // Keep local state in sync so re-opening the modal shows the new values
