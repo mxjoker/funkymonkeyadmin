@@ -367,3 +367,21 @@ test('no deposit button is rendered when there is no link', () => {
 
   assert.doesNotMatch(html, /Pay Deposit/, 'no link means no button and no fallback');
 });
+
+// Repo-wide guard. Gmail strips linear-gradient() from inline styles, and four
+// of these buttons used color:#0F0A1E on the wrapper's #0F0A1E background —
+// so a stripped gradient rendered them black-on-black, completely invisible.
+// That included client.js's "Book Your Next Event" rebooking CTA and the brand
+// header. Solid background-color only, in every function that sends mail.
+test('no function builds email chrome from a CSS gradient', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, '..', 'netlify', 'functions');
+
+  const offenders = fs.readdirSync(dir)
+    .filter(f => f.endsWith('.js'))
+    .filter(f => /style="[^"]*linear-gradient/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+
+  assert.deepStrictEqual(offenders, [],
+    'use background-color — Gmail drops gradients and these buttons go invisible');
+});

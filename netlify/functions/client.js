@@ -13,7 +13,7 @@ let tablesReady = false;
 // on failure. Do not reintroduce a local sender here.
 
 const wrap = (body) => `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0F0A1E;color:#F3E8FF;border-radius:16px;overflow:hidden">
-  <div style="background:linear-gradient(135deg,#FF6B00,#FFD600);padding:20px 24px"><div style="font-size:22px;font-weight:900;color:#0F0A1E">🐒 Funky Monkey Events</div></div>
+  <div style="background-color:#FF6B00;padding:20px 24px"><div style="font-size:22px;font-weight:900;color:#0F0A1E">🐒 Funky Monkey Events</div></div>
   <div style="padding:24px">${body}</div>
   <div style="padding:14px 24px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:#6b5a8e;text-align:center">
     Funky Monkey Events · OKC · (405) 431-6625
@@ -184,7 +184,7 @@ exports.handler = async (event) => {
             '<p style="font-size:16px;margin-bottom:16px">Hi <strong>' + name + '</strong>! 🎉</p>' +
             '<p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">We had such an amazing time at <strong>' + svc + '</strong>' + (dateStr ? ' back in <strong>' + esc(dateStr) + '</strong>' : '') + ' and wanted to reach out!</p>' +
             '<p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Planning another event? <strong style="color:#FFD600">Returning clients get 10% off</strong> their next booking — just mention this email when you book!</p>' +
-            '<div style="text-align:center;margin-bottom:24px"><a href="https://funkymonkeyevents.com/booking-form.html" style="background:linear-gradient(135deg,#FF6B00,#FFD600);color:#0F0A1E;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px">Book Your Next Event →</a></div>' +
+            '<div style="text-align:center;margin-bottom:24px"><a href="https://funkymonkeyevents.com/booking-form.html" style="background-color:#FF6B00;color:#0F0A1E;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px">Book Your Next Event →</a></div>' +
             '<p style="font-size:13px;color:#A78BCA;text-align:center">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>'
           );
         } else if (type === 'custom') {

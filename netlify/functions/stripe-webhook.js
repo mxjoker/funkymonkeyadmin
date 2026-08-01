@@ -163,7 +163,7 @@ exports.handler = async (event) => {
                   <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Balance Due</td><td style="padding:7px 0;color:#FFD600;font-weight:700">$${balanceDue.toFixed(2)}</td></tr>
                 </table>
                 <div style="margin-top:20px;text-align:center">
-                  <a href="https://funkymonkeyadmin.netlify.app/admin.html" style="background:linear-gradient(135deg,#FF6B00,#FFD600);color:#0F0A1E;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:900;font-size:14px">View in Dashboard →</a>
+                  <a href="https://funkymonkeyadmin.netlify.app/admin.html" style="background-color:#FF6B00;color:#0F0A1E;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:900;font-size:14px">View in Dashboard →</a>
                 </div>`)
             );
             await logEmail(c, b.id, null, 'Deposit Paid', `💰 Deposit In: ${b.client_name} — $${amountPaid.toFixed(2)}`, NOTIFY, 'admin', logStatus(res));

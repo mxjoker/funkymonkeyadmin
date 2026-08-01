@@ -503,7 +503,7 @@ exports.handler = async (event) => {
                   ${log.issues?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700;vertical-align:top">Issues</td><td style="padding:6px 0;color:#FCA5A5">${log.issues}</td></tr>`:''}
                 </table>
                 <div style="margin-top:20px;text-align:center">
-                  <a href="${SITE}/admin.html" style="background:linear-gradient(135deg,#FF6B00,#FFD600);color:#0F0A1E;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:900;font-size:14px">View in Dashboard →</a>
+                  <a href="${SITE}/admin.html" style="background-color:#FF6B00;color:#0F0A1E;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:900;font-size:14px">View in Dashboard →</a>
                 </div>
               `)
             });
@@ -592,7 +592,7 @@ exports.handler = async (event) => {
                   <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Your Matching Skills</span><br><span style="color:#FFD600;font-weight:700">${matchedTags.join(', ')}</span></div>
                 </div>
                 <div style="text-align:center;margin-bottom:20px">
-                  <a href="${SITE}/admin.html" style="background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">Log In to Express Interest →</a>
+                  <a href="${SITE}/admin.html" style="background-color:#7c3aed;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">Log In to Express Interest →</a>
                 </div>
                 <p style="font-size:12px;color:#A78BCA;text-align:center">Log in with your access code · ${SITE}/admin.html</p>
               `)
@@ -723,7 +723,7 @@ exports.handler = async (event) => {
                 </div>
                 ${scheduleHtml}
                 <div style="text-align:center;margin-top:20px;margin-bottom:20px">
-                  <a href="${SITE}/admin.html" style="background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">View Full Gig Details →</a>
+                  <a href="${SITE}/admin.html" style="background-color:#10B981;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">View Full Gig Details →</a>
                 </div>
                 <p style="font-size:12px;color:#A78BCA;text-align:center">Questions? Contact Joe at <a href="tel:4054316625" style="color:#06B6D4">(405) 431-6625</a></p>
               `)
@@ -856,7 +856,7 @@ exports.notifyMatchingStaff = async function notifyMatchingStaff(booking) {
             <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Your Matching Skills</span><br><span style="color:#FFD600;font-weight:700">${matchedTags.join(', ')}</span></div>
           </div>
           <div style="text-align:center;margin-bottom:20px">
-            <a href="${SITE}/admin.html" style="background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">Log In to Express Interest →</a>
+            <a href="${SITE}/admin.html" style="background-color:#7c3aed;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">Log In to Express Interest →</a>
           </div>
           <p style="font-size:12px;color:#A78BCA;text-align:center">Log in with your access code · ${SITE}/admin.html</p>
         `)
