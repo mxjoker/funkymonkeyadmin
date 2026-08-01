@@ -107,11 +107,6 @@ tr:hover td{background:#fafaf8}
 .status-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px}
 .status-pill{padding:5px 14px;border-radius:20px;border:1.5px solid #e5e7eb;background:#fff;font-size:.78rem;font-weight:700;cursor:pointer;transition:all .15s;color:#6b7280;text-transform:capitalize}
 .status-pill:hover{border-color:#a855f7;color:#7c3aed}
-.status-pill.active-review{background:#fef9c3;border-color:#fbbf24;color:#854d0e}
-.status-pill.active-pending{background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}
-.status-pill.active-confirmed{background:#d1fae5;border-color:#6ee7b7;color:#065f46}
-.status-pill.active-completed{background:#f3f4f6;border-color:#d1d5db;color:#374151}
-.status-pill.active-cancelled{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
 .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px}
 .detail-field label{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;font-weight:700;display:block;margin-bottom:3px}
 .detail-field .dval{font-size:.9rem;color:#1e1b4b;font-weight:600}
@@ -397,11 +392,6 @@ input,select,textarea{font-family:inherit}
             
             <select id="filter-status" onchange="renderBookingsTable()" style="min-width:140px">
               <option value="">All Statuses</option>
-              <option value="review">Review</option>
-              <option value="pending">Pending</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
             </select>
             
             <select id="filter-date-range" onchange="renderBookingsTable()" style="min-width:140px">
@@ -885,6 +875,36 @@ const EVENT_TYPE_DEFS = [
   { id:'wedding',     icon:'💍', label:'Wedding' },
   { id:'library',     icon:'📚', label:'Library Program' },
 ];
+
+// ── Booking statuses ──
+// Single source of truth. Referenced by the filter dropdown, the modal pill
+// row, the dashboard counters, and the injected pill CSS below.
+// draft    — phone-call shell record, may be missing name/email/date/service
+// quoted   — quote sent, awaiting the client's yes
+// accepted — client said yes, deposit not yet paid
+const STATUSES = [
+  { id:'draft',     label:'Draft',     bg:'#f5f3ff', border:'#c4b5fd', fg:'#5b21b6' },
+  { id:'review',    label:'Review',    bg:'#fef9c3', border:'#fbbf24', fg:'#854d0e' },
+  { id:'quoted',    label:'Quoted',    bg:'#ffedd5', border:'#fdba74', fg:'#9a3412' },
+  { id:'accepted',  label:'Accepted',  bg:'#fef3c7', border:'#fcd34d', fg:'#92400e' },
+  { id:'confirmed', label:'Confirmed', bg:'#d1fae5', border:'#6ee7b7', fg:'#065f46' },
+  { id:'completed', label:'Completed', bg:'#f3f4f6', border:'#d1d5db', fg:'#374151' },
+  { id:'cancelled', label:'Cancelled', bg:'#fee2e2', border:'#fca5a5', fg:'#991b1b' },
+];
+
+// The .active-<id> rules used to be five hand-written CSS blocks. Generated
+// from STATUSES so a new status needs no CSS edit.
+function injectStatusCss() {
+  const css = STATUSES.map(s =>
+    `.status-pill.active-${s.id}{background:${s.bg};border-color:${s.border};color:${s.fg}}`
+  ).join('');
+  const el = document.createElement('style');
+  el.textContent = css;
+  document.head.appendChild(el);
+}
+injectStatusCss();
+document.getElementById('filter-status').insertAdjacentHTML('beforeend',
+  STATUSES.map(s => `<option value="${s.id}">${s.label}</option>`).join(''));
 
 // ══════════════════════════════════════════════════
 // AUTH
@@ -1433,8 +1453,8 @@ function openBooking(id) {
   document.getElementById('modal-body').innerHTML = `
     <!-- Status pills -->
     <div class="status-pills">
-      ${['review','pending','confirmed','completed','cancelled'].map(s =>
-        `<button class="status-pill ${b.status===s?'active-'+s:''}" onclick="setStatus('${b.id}','${s}')">${s}</button>`
+      ${STATUSES.map(s =>
+        `<button class="status-pill ${b.status===s.id?'active-'+s.id:''}" onclick="setStatus('${b.id}','${s.id}')">${s.label}</button>`
       ).join('')}
     </div>
 
