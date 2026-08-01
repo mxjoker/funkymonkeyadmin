@@ -286,3 +286,47 @@ test('logEmail records a failure status and error message', async () => {
     [1, null, 'Deposit Paid', 'Subject', 'a@example.com', 'admin', 'failed', 'Resend send failed: Domain not verified']
   );
 });
+
+// pg hands DATE columns back as JS Date objects. String(aDate) is
+// "Mon Aug 03 2026 17:00:00 GMT-0700 (...)" whose FIRST "T" is inside "GMT",
+// so the old String(v).split('T')[0] + 'T00:00:00' trick produced
+// "Invalid Date" in every email built from a database row — which was all four
+// active client-facing automation rules.
+test('fmtEventDate handles a pg Date object (the Invalid Date bug)', () => {
+  const { fmtEventDate } = loadEmail();
+  const fromPg = new Date(2026, 7, 4); // pg builds DATE as local midnight
+
+  const out = fmtEventDate(fromPg);
+
+  assert.doesNotMatch(out, /Invalid/, 'a Date object must not render as "Invalid Date"');
+  assert.strictEqual(out, 'Tuesday, August 4, 2026');
+});
+
+test('fmtEventDate handles a plain YYYY-MM-DD string', () => {
+  const { fmtEventDate } = loadEmail();
+
+  assert.strictEqual(fmtEventDate('2026-08-04'), 'Tuesday, August 4, 2026');
+});
+
+test('fmtEventDate handles a full ISO timestamp string', () => {
+  const { fmtEventDate } = loadEmail();
+
+  assert.strictEqual(fmtEventDate('2026-08-04T00:00:00.000Z'), 'Tuesday, August 4, 2026');
+});
+
+test('fmtEventDate returns empty for missing or unparseable input', () => {
+  const { fmtEventDate } = loadEmail();
+
+  assert.strictEqual(fmtEventDate(null), '');
+  assert.strictEqual(fmtEventDate(undefined), '');
+  assert.strictEqual(fmtEventDate(''), '');
+  assert.strictEqual(fmtEventDate('not a date'), '');
+});
+
+test('fmtEventDate does not slide a day in a west-of-UTC runtime', () => {
+  const { fmtEventDate } = loadEmail();
+  // A date-only value formatted in local time could render as Aug 3 west of
+  // UTC. Formatting in UTC pins it to the calendar date actually stored.
+  assert.strictEqual(fmtEventDate('2026-08-04'), 'Tuesday, August 4, 2026');
+  assert.strictEqual(fmtEventDate(new Date(2026, 7, 4)), 'Tuesday, August 4, 2026');
+});

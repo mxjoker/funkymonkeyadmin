@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const { withClient } = require('./_db');
-const { esc, sendEmail, logStatus, wrap, logEmail, logChange, ensureEmailLog, ensureBookingChanges } = require('./_email');
+const { esc, sendEmail, logStatus, wrap, fmtEventDate, logEmail, logChange, ensureEmailLog, ensureBookingChanges } = require('./_email');
 
 const NOTIFY = process.env.NOTIFY_EMAIL || "Joe.Coover@gmail.com";
 
@@ -120,9 +120,7 @@ exports.handler = async (event) => {
           const b = updated.rows[0];
           await logChange(c, b.id, 'Deposit paid via Stripe', `$${amountPaid.toFixed(2)}`);
 
-          const dateStr  = b.event_date
-            ? new Date(String(b.event_date).split('T')[0] + "T00:00:00").toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric", year:"numeric" })
-            : "";
+          const dateStr  = fmtEventDate(b.event_date);
           const timeStr  = b.event_time     || "";
           const locStr   = b.event_location || b.event_zip || "OKC";
 

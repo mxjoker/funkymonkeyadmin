@@ -1,5 +1,6 @@
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth } = require('./_auth');
+const { fmtEventDate } = require('./_email');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
 // PDF responses need different Content-Type but still need CORS headers
@@ -103,8 +104,9 @@ exports.handler = async (event, context) => {
       y -= 15;
       page.drawText(`Date: ${new Date(booking.created_at).toLocaleDateString('en-US')}`, { x: 380, y, size: 10, font, color: gray });
       y -= 15;
-      // Anchor to T00:00:00 to avoid timezone-driven date shift
-      page.drawText(`Event Date: ${new Date(String(booking.event_date).split('T')[0] + 'T00:00:00').toLocaleDateString('en-US')}`, { x: 380, y, size: 10, font, color: gray });
+      // fmtEventDate normalises pg's Date objects and formats in UTC, so the
+      // printed date can't shift a day. Numeric style to match the old invoice.
+      page.drawText(`Event Date: ${fmtEventDate(booking.event_date, { weekday: undefined, month: 'numeric', day: 'numeric' })}`, { x: 380, y, size: 10, font, color: gray });
 
       // Horizontal line
       y = height - 155;

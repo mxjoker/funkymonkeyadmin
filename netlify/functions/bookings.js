@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
-const { esc, wrap, sendEmail } = require('./_email');
+const { esc, wrap, sendEmail, fmtEventDate } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
@@ -383,11 +383,7 @@ exports.handler = async (event) => {
 async function sendBookingEmails(booking) {
   const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
 
-  const dateStr = booking.event_date
-    ? new Date(String(booking.event_date).split('T')[0] + 'T00:00:00').toLocaleDateString('en-US', {
-        weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
-      })
-    : 'TBD';
+  const dateStr = fmtEventDate(booking.event_date) || 'TBD';
 
   const addons = Array.isArray(booking.addons) ? booking.addons : [];
   const addonList = addons.map(a =>

@@ -3,7 +3,7 @@
 
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { sendEmail, logStatus, wrap, esc, logEmail, ensureEmailLog } = require('./_email');
+const { sendEmail, logStatus, wrap, esc, fmtEventDate, logEmail, ensureEmailLog } = require('./_email');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -82,14 +82,7 @@ exports.handler = async (event, context) => {
         // ──────────────────────────────────────────────────────────
         const notifyEmail = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
 
-        const eventDateStr = booking.event_date
-          ? new Date(String(booking.event_date).split('T')[0] + 'T00:00:00').toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            })
-          : 'Not scheduled';
+        const eventDateStr = fmtEventDate(booking.event_date) || 'Not scheduled';
 
         const emailSubject = `COI Request — ${booking.reference} (${booking.client_name})`;
 

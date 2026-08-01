@@ -51,12 +51,31 @@ function wrap(body) {
 }
 
 // ── Template renderer ─────────────────────────────────────────────────────────
+// ── Format an event_date for display ──────────────────────────────────────────
+// pg hands DATE columns back as JS Date objects, and String(aDate) is
+// "Mon Aug 03 2026 17:00:00 GMT-0700 (Pacific Daylight Time)" — whose FIRST "T"
+// sits inside "GMT". The old `String(v).split('T')[0] + 'T00:00:00'` trick
+// therefore truncated it to "Mon Aug 03 2026 17:00:00 GM" and produced
+// "Invalid Date" in every email built from a database row. Emails built from a
+// request body worked, because those carry a plain "YYYY-MM-DD" string — which
+// is why this hid for so long.
+//
+// Normalise to YYYY-MM-DD first, then format in UTC so a date-only value can
+// never slide to the previous day in a west-of-UTC runtime.
+function fmtEventDate(value, opts) {
+  if (!value) return '';
+  const ymd = value instanceof Date
+    ? `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
+    : String(value).slice(0, 10);
+  const d = new Date(ymd + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US',
+    Object.assign({ timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }, opts));
+}
+
 function render(template, booking, stripeLink) {
   const firstName = (booking.client_name || '').split(' ')[0] || 'there';
-  const dateStr = booking.event_date
-    ? new Date(String(booking.event_date).split('T')[0] + 'T00:00:00')
-        .toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
-    : 'TBD';
+  const dateStr = fmtEventDate(booking.event_date) || 'TBD';
   const depositBtn = stripeLink
     ? `<div style="text-align:center;margin:20px 0">
         <a href="${stripeLink}" style="background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px">
@@ -225,4 +244,4 @@ async function logChange(client, bookingId, action, detail) {
   }
 }
 
-module.exports = { wrap, render, esc, sendEmail, logStatus, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange };
+module.exports = { wrap, render, esc, fmtEventDate, sendEmail, logStatus, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange };
