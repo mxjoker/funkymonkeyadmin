@@ -342,6 +342,10 @@ exports.handler = async (event) => {
       }
       if (!reference) return json(500, { error: 'Could not generate unique reference' });
 
+      // A cleared <date> input posts '' — Postgres rejects that for
+      // TIMESTAMPTZ. Same treatment event_date already gets above.
+      const depositPaidAt = b.deposit_paid_at ? b.deposit_paid_at : null;
+
       const { rows } = await client.query(`
         INSERT INTO bookings (
           reference, status,
@@ -352,7 +356,9 @@ exports.handler = async (event) => {
           event_type, event_type_id, guest_count, notes,
           is_custom_quote, extra_hours, extra_hours_cost,
           client_name, client_phone, client_email, referral_source,
-          child_name, brand
+          child_name, brand,
+          organisation_name, occasion, surface_type, venue, customer_type,
+          guests_of_honour, deposit_paid_at, deposit_method, deposit_ref
         ) VALUES (
           $1, $29,
           $2, $3, $4,
@@ -362,7 +368,9 @@ exports.handler = async (event) => {
           $16, $17, $18, $19,
           $20, $21, $22,
           $23, $24, $25, $26,
-          $27, $28
+          $27, $28,
+          $30, $31, $32, $33, $34,
+          $35, $36, $37, $38
         ) RETURNING *
       `, [
         reference,
@@ -394,6 +402,15 @@ exports.handler = async (event) => {
         cap255(b.child_name),
         b.brand === 'jcm' ? 'jcm' : 'fme',
         isDraft ? 'draft' : 'review',
+        cap255(b.organisation_name),
+        cap255(b.occasion),
+        cap255(b.surface_type),
+        cap255(b.venue),
+        cap255(b.customer_type),
+        cap255(b.guests_of_honour),
+        depositPaidAt,
+        cap255(b.deposit_method),
+        cap255(b.deposit_ref),
       ]);
 
       const booking = rows[0];

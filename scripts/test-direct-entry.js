@@ -62,6 +62,28 @@ async function main() {
     assert.strictEqual(row.event_date, null, 'a draft with no date must store NULL');
     console.log('  ok  admin draft with only a name is accepted');
 
+    // 1b. The nine columns added for this feature (organisation_name,
+    // occasion, surface_type, venue, customer_type, guests_of_honour,
+    // deposit_paid_at, deposit_method, deposit_ref) must round-trip on
+    // create — bookings.js's INSERT previously omitted all nine, so the
+    // modal accepted them but they were silently discarded.
+    const fullRes = await post({
+      status: 'draft',
+      client_name: 'Phone Caller Two',
+      organisation_name: 'Acme Library',
+      surface_type: 'grass',
+    }, TOKEN);
+    assert.strictEqual(fullRes.statusCode, 201, `draft POST returned ${fullRes.statusCode}: ${fullRes.body}`);
+    const fullBody = JSON.parse(fullRes.body);
+    if (fullBody.reference) created.push(fullBody.reference);
+    const fullRow = fullBody.booking;
+    assert.ok(fullRow, 'POST must return the created row under `booking`');
+    assert.strictEqual(fullRow.organisation_name, 'Acme Library',
+      `organisation_name did not round-trip, got ${JSON.stringify(fullRow.organisation_name)}`);
+    assert.strictEqual(fullRow.surface_type, 'grass',
+      `surface_type did not round-trip, got ${JSON.stringify(fullRow.surface_type)}`);
+    console.log('  ok  organisation_name and surface_type round-trip on create');
+
     // 2. The identical POST without a token is rejected.
     const noAuth = await post({ status: 'draft', client_name: 'Phone Caller' }, null);
     if (noAuth.statusCode === 201) {

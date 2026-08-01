@@ -55,7 +55,7 @@ async function main() {
 
   const { rows } = await pool.query(
     `SELECT reference, client_name, event_date::text AS event_date, total_price,
-            deposit_paid, (stripe_payment_link IS NOT NULL) AS has_link
+            deposit_paid, (COALESCE(stripe_payment_link,'') <> '') AS has_link
      FROM bookings WHERE status='pending' ORDER BY event_date`
   );
 

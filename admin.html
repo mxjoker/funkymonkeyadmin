@@ -1104,7 +1104,7 @@ function renderActionNeeded() {
   const reviewList = allBookings.filter(b => b.status === 'review')
     .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
 
-  const depositList = allBookings.filter(b => b.status === 'pending' && !b.stripe_payment_link)
+  const depositList = allBookings.filter(b => b.status === 'accepted' && !b.stripe_payment_link)
     .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
 
   const slotsRequired = {};
@@ -1583,10 +1583,11 @@ function openBooking(id) {
     <div class="notes-block">
       <span class="section-label">Admin Notes <span class="text-muted">(internal only)</span></span>
       <textarea class="notes-area" id="admin-notes-${b.id}" placeholder="Internal notes not visible to the client…">${esc(b.admin_notes||'')}</textarea>
+      ${isNew ? '' : `
       <div class="notes-actions">
         <button class="btn btn-outline btn-sm" onclick="saveAdminNotes('${b.id}')">Save Notes</button>
         <span class="save-flash" id="notes-flash-${b.id}">✓ Saved</span>
-      </div>
+      </div>`}
     </div>
 
     <!-- Record payment -->
@@ -1619,13 +1620,14 @@ function openBooking(id) {
         <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordClientPayment('${b.id}')">Save Payment</button>
         <span class="save-flash" id="pay-flash-${b.id}">✓ Saved</span>
       </div>
+      ${isNew ? '' : `
       <div class="pay-row" style="margin-top:8px;align-items:center;gap:12px">
         <label style="font-size:.78rem;font-weight:600;color:#6b7280;white-space:nowrap">⏰ Deposit deadline:</label>
         <input type="date" id="pay-deadline-${b.id}" value="${b.confirmation_deadline?String(b.confirmation_deadline).split('T')[0]:''}"
           style="padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:.82rem"
           onchange="patch('${b.id}',{confirmation_deadline:this.value||null})"/>
         <span style="font-size:.75rem;color:#9ca3af">Client must pay deposit by this date or booking may be released</span>
-      </div>
+      </div>`}
     </div>
 
     <!-- Staff Assignment (admin only, needs a saved booking) -->
@@ -1659,15 +1661,17 @@ function openBooking(id) {
 
     <!-- Action strip -->
     <div class="action-strip">
+      ${isNew ? '' : `
       <button class="btn btn-outline btn-sm" onclick="toggleContract('${b.id}')">
         ${b.contract_signed?'📝 Contract Signed ✓':'📝 Mark Contract Signed'}
-      </button>
+      </button>`}
       ${b.deposit_paid || b.stripe_payment_intent_id ? `
       <button class="btn btn-outline btn-sm" onclick="processRefund('${b.id}')" style="color:#dc2626;border-color:#dc2626">
         💸 Process Refund
       </button>
       ` : ''}
-      <button class="btn btn-danger btn-sm" onclick="confirmDelete('${b.id}')">🗑 Delete</button>
+      ${isNew ? '' : `
+      <button class="btn btn-danger btn-sm" onclick="confirmDelete('${b.id}')">🗑 Delete</button>`}
     </div>
 
     ${!isNew && currentUser?.role === 'admin' ? `
@@ -2523,7 +2527,12 @@ async function processRefund(bookingId) {
 
 async function confirmDelete(id) {
   if (!confirm('Delete this booking? This cannot be undone.')) return;
-  await apiFetch('/api/booking/' + id, { method: 'DELETE' });
+  const res = await apiFetch('/api/booking/' + id, { method: 'DELETE' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert('Failed to delete booking: ' + (err.error || res.status));
+    return;
+  }
   closeModal();
   await loadBookings();
 }
@@ -2573,8 +2582,8 @@ function renderOneMonth(year, month, gridId, labelId) {
       const staffBadges = (calStaffMap[b.id] || []).map(s =>
         `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:${s.color};color:#fff;font-size:9px;font-weight:800;border:1.5px solid #fff;margin-left:2px">${s.initials}</span>`
       ).join('');
-      return `<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${b.client_name} — ${b.service_name}">
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.service_name||b.client_name}</span>
+      return `<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${esc(b.client_name)} — ${esc(b.service_name)}">
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.service_name||b.client_name)}</span>
         ${staffBadges}
       </div>`;
     }).join('');

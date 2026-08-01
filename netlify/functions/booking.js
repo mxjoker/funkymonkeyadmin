@@ -185,6 +185,26 @@ exports.handler = async (event) => {
         let updated = r.rows[0];
         let stripeLink = null;
 
+        // total_price / mileage_cost / deposit_amount feed balance_due
+        // (same formula as bookings.js:329 on create). If one of those
+        // changed and the caller didn't send balance_due itself, recompute
+        // it here — otherwise invoices and automation emails keep quoting
+        // a stale balance. Do this before the field-level logging loop so
+        // the recompute is logged like any other change.
+        const BALANCE_INPUTS = ['total_price', 'mileage_cost', 'deposit_amount'];
+        if (BALANCE_INPUTS.some(f => u[f] !== undefined) && u.balance_due === undefined) {
+          const newBalance = Math.max(0,
+            Number(updated.total_price || 0) + Number(updated.mileage_cost || 0) - Number(updated.deposit_amount || 0));
+          const r3 = await c.query(
+            `UPDATE bookings SET balance_due=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
+            [newBalance, parseInt(id)]
+          );
+          updated = r3.rows[0];
+          // Mark balance_due as "sent" so the field-level logging loop below
+          // (which only inspects keys present in `u`) picks up the change.
+          u.balance_due = newBalance;
+        }
+
         // Auto-generate Stripe link when confirmed
         if (u.status === "confirmed") {
           const depositAmount = Number(updated.deposit_amount || 0);

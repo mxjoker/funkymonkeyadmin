@@ -20,7 +20,7 @@ const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body, null, 2) });
 
-const ALLOWED_STATUS = new Set(['confirmed', 'completed', 'pending', 'review', 'cancelled']);
+const ALLOWED_STATUS = new Set(['draft', 'review', 'quoted', 'accepted', 'confirmed', 'completed', 'cancelled']);
 const BRANDS = new Set(['jcm', 'fme']);
 
 // Clamp a numeric to [0, 100000]; blank/invalid -> 0.
