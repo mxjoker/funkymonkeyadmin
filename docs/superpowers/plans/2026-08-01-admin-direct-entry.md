@@ -598,17 +598,31 @@ In `booking.js`, after the `admin_notes` log block at `:196-198` and before `ret
 
 ```javascript
         // Field-level logging for everything the allowlist now accepts.
-        // These six already have bespoke log lines above — skip them so a
+        // These five already have bespoke log lines above — skip them so a
         // single edit does not produce two rows.
+        //
+        // payment_ref is deliberately NOT in this set. The bespoke "Payment
+        // recorded" line only fires when payment_amount AND payment_method are
+        // both present, so a payment_ref-only edit — correcting a check number —
+        // would otherwise change the column and log nothing at all. The cost is
+        // one redundant row when all three are sent together, which beats a
+        // silent gap on the endpoint that exists for traceability.
         const LOGGED_ELSEWHERE = new Set([
           'status', 'admin_notes', 'contract_signed',
-          'payment_method', 'payment_amount', 'payment_ref',
+          'payment_method', 'payment_amount',
         ]);
+        // pg returns DATE and TIMESTAMPTZ as JS Date objects, and String(Date)
+        // renders "Fri Dec 25 2026 00:00:00 GMT-0600 (…)". Log the ISO date
+        // instead. Comparison is unaffected: both sides parse identically, so
+        // equal values always match and real changes are always caught.
+        const fmt = (v) => {
+          if (v === null || v === undefined) return '';
+          return v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
+        };
         for (const [k, col] of Object.entries(colMap)) {
           if (u[k] === undefined || LOGGED_ELSEWHERE.has(col)) continue;
-          const before = prev[col], after = updated[col];
-          const bs = before === null || before === undefined ? '' : String(before);
-          const as = after  === null || after  === undefined ? '' : String(after);
+          const bs = fmt(prev[col]);
+          const as = fmt(updated[col]);
           if (bs !== as) {
             await logChange(c, parseInt(id), `${col} changed`, `${bs || '—'} → ${as || '—'}`);
           }
