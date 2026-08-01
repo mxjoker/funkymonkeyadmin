@@ -234,19 +234,32 @@ exports.handler = async (event) => {
         }
 
         // Field-level logging for everything the allowlist now accepts.
-        // These six already have bespoke log lines above — skip them so a
-        // single edit does not produce two rows.
+        // These five already have bespoke log lines above — skip them so a
+        // single edit does not produce two rows. payment_ref is NOT here:
+        // the bespoke "Payment recorded" block only fires when amount AND
+        // method are both present, so a payment_ref-only edit needs this
+        // loop to leave any trail at all. When all three are sent together
+        // this produces a bespoke summary row plus a payment_ref-changed
+        // row — acceptable redundancy against a silent gap.
         const LOGGED_ELSEWHERE = new Set([
           'status', 'admin_notes', 'contract_signed',
-          'payment_method', 'payment_amount', 'payment_ref',
+          'payment_method', 'payment_amount',
         ]);
+        // pg returns DATE/TIMESTAMPTZ as JS Date objects (no type parsers
+        // registered in _db.js), so String(Date) is a full GMT string —
+        // fine for the equality check below (left untouched), unreadable
+        // in the logged detail. Render Dates as their ISO date part for
+        // display only; comparison still runs on the full String() value.
+        const display = (s, v) => v instanceof Date ? v.toISOString().slice(0, 10) : s;
         for (const [k, col] of Object.entries(colMap)) {
           if (u[k] === undefined || LOGGED_ELSEWHERE.has(col)) continue;
           const before = prev[col], after = updated[col];
           const bs = before === null || before === undefined ? '' : String(before);
           const as = after  === null || after  === undefined ? '' : String(after);
           if (bs !== as) {
-            await logChange(c, parseInt(id), `${col} changed`, `${bs || '—'} → ${as || '—'}`);
+            const bd = before == null ? '' : display(bs, before);
+            const ad = after  == null ? '' : display(as, after);
+            await logChange(c, parseInt(id), `${col} changed`, `${bd || '—'} → ${ad || '—'}`);
           }
         }
 
