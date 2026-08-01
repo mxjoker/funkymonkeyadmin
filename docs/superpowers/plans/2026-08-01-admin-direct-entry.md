@@ -889,16 +889,20 @@ Also make the status pill row read-only for a new booking — `setStatus` PATCHe
 
 - [ ] **Step 3: Teach `saveBookingEdits` to create**
 
-Replace the `saveBookingEdits` written in Task 5 with:
+**Extend the existing `saveBookingEdits`, do not replace it.** Task 5's review found that resending unchanged fields overwrites real data — `deposit_paid_at` is a `TIMESTAMPTZ` rendered through a date input, so an unfiltered resend zeroed its time on every unrelated save. The function now sends only fields whose value differs from the `data-orig` attribute they were rendered with, and short-circuits when nothing changed. Both behaviours must survive this task.
+
+Change detection works correctly for a new booking with no extra effort: every `data-orig` on an empty record is `''`, so exactly the fields the owner typed get sent, and nothing else.
+
+Keep the collection loop and the `data-orig` comparison exactly as they are. Add the create branch inside the `try`, and adjust the empty-payload short-circuit so it does not claim to have saved a booking that was never created:
 
 ```javascript
-// ── Booking detail — collect every [data-f] input and save in one call ──
-// id === 'new' creates a draft; anything else patches.
-async function saveBookingEdits(id) {
-  const payload = {};
-  document.querySelectorAll('#modal-body .bk-edit').forEach(el => {
-    payload[el.dataset.f] = el.value;
-  });
+  // An empty payload means nothing changed. For an existing booking that is a
+  // no-op worth confirming; for a new one there is nothing to create.
+  if (!Object.keys(payload).length) {
+    if (id === 'new') { alert('Nothing to save yet — enter at least a name.'); return; }
+    flash('bk-flash-' + id);
+    return;
+  }
   try {
     if (id === 'new') {
       payload.status = 'draft';
