@@ -386,3 +386,8 @@ exports.handler = async (event) => {
 };
 
 module.exports.handler = exports.handler;
+// Exported so automations-scheduled.js can run the same batch on a cron.
+// Until that function existed, these rules only ever fired when someone
+// clicked "run scheduled" in the admin UI.
+module.exports.runScheduledAutomations = runScheduledAutomations;
+module.exports.ensureTables = ensureTables;

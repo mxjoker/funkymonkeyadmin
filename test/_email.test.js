@@ -330,3 +330,40 @@ test('fmtEventDate does not slide a day in a west-of-UTC runtime', () => {
   assert.strictEqual(fmtEventDate('2026-08-04'), 'Tuesday, August 4, 2026');
   assert.strictEqual(fmtEventDate(new Date(2026, 7, 4)), 'Tuesday, August 4, 2026');
 });
+
+// Gmail strips linear-gradient() from inline styles. The deposit button relied
+// on one for its background, so it lost its fill and rendered as plain white
+// text on the wrapper's near-black shell — a button nobody could see. And there
+// was no raw URL anywhere in the email, so a client whose renderer mangled the
+// anchor had NO way to reach checkout.
+test('no email chrome depends on a CSS gradient', () => {
+  const { wrap, render } = loadEmail();
+  const booking = { client_name: 'Ada Lovelace', event_date: '2026-08-04', deposit_amount: 100 };
+
+  const html = wrap(render('{{deposit_link}}', booking, 'https://checkout.stripe.com/c/pay/cs_test_123'));
+
+  assert.doesNotMatch(html, /linear-gradient/,
+    'gradients are stripped by Gmail; use background-color so the fill survives');
+});
+
+test('the deposit email carries the raw URL as a fallback', () => {
+  const { render } = loadEmail();
+  const link = 'https://checkout.stripe.com/c/pay/cs_test_abc123';
+  const booking = { client_name: 'Ada Lovelace', event_date: '2026-08-04', deposit_amount: 100 };
+
+  const html = render('{{deposit_link}}', booking, link);
+
+  // The URL must appear as visible text, not only inside an href.
+  const visible = html.replace(/<a [^>]*href="[^"]*"[^>]*>/g, '').replace(/<[^>]+>/g, ' ');
+  assert.ok(visible.includes(link),
+    'a client whose renderer breaks the button must still be able to copy the link');
+});
+
+test('no deposit button is rendered when there is no link', () => {
+  const { render } = loadEmail();
+  const booking = { client_name: 'Ada Lovelace', event_date: '2026-08-04', deposit_amount: 100 };
+
+  const html = render('{{deposit_link}}', booking, null);
+
+  assert.doesNotMatch(html, /Pay Deposit/, 'no link means no button and no fallback');
+});

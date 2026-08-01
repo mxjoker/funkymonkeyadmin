@@ -154,3 +154,10 @@
 
 [functions."payroll-scheduled"]
   schedule = "0 0 * * 6"  # Every Saturday at midnight (UTC)
+
+# Date-driven automation rules (pre-event reminders, post-event follow-ups).
+# 14:00 UTC = 9am Central, so a reminder lands in the morning rather than
+# overnight. Before this existed the rules only fired when someone clicked
+# "run scheduled" in the admin UI.
+[functions."automations-scheduled"]
+  schedule = "0 14 * * *"  # Every day at 14:00 UTC (9am Central)

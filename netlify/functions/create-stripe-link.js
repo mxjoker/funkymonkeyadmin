@@ -95,7 +95,11 @@ exports.handler = async (event) => {
             <div style="font-size:12px;color:#A78BCA;margin-top:4px">Secure your date — balance due day of event</div>
           </div>
           <div style="text-align:center;margin-bottom:24px">
-            <a href="${url}" style="background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;padding:16px 40px;border-radius:12px;text-decoration:none;font-weight:900;font-size:16px;display:inline-block">Pay Deposit Now →</a>
+            <a href="${url}" style="background-color:#10B981;color:#ffffff;padding:16px 40px;border-radius:12px;text-decoration:none;font-weight:900;font-size:16px;display:inline-block">Pay Deposit Now →</a>
+            <div style="font-size:11px;color:#A78BCA;margin-top:14px;line-height:1.5">
+              Button not working? Copy this link into your browser:<br>
+              <a href="${url}" style="color:#06B6D4;word-break:break-all">${url}</a>
+            </div>
           </div>
           <div style="background:#FFFFFF08;border-radius:10px;padding:12px;font-size:11px;color:#A78BCA;line-height:1.6;text-align:center">
             🔒 Secure payment powered by Stripe · Accepts all major cards, Apple Pay &amp; Google Pay<br>
