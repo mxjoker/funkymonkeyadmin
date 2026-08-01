@@ -119,7 +119,20 @@ async function ensureTable(client) {
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS venue VARCHAR(255) DEFAULT ''",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS confirmation_deadline DATE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_ref VARCHAR(255) DEFAULT ''",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS brand VARCHAR(8) DEFAULT 'fme'"
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS brand VARCHAR(8) DEFAULT 'fme'",
+    // ── Admin direct entry (spec 2026-08-01) ──
+    // Surface type drives foam party setup and liability; organisation_name
+    // gives corporate and library bookings somewhere to record the org;
+    // occasion frees event_type from doing double duty.
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS surface_type VARCHAR(64) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS organisation_name VARCHAR(255) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS occasion VARCHAR(64) DEFAULT ''",
+    // The deposit becomes its own payment record. payment_method/amount/ref
+    // stay as the final-balance record — accounting-export.js:57 already
+    // treats them that way.
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_paid_at TIMESTAMPTZ",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_method VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_ref VARCHAR(255) DEFAULT ''"
   ];
   for (const sql of cols) {
     try { await client.query(sql); } catch (_) {}
