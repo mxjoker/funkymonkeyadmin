@@ -35,6 +35,13 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejec
 
 const APPLY = process.argv.includes('--apply');
 const ROLLBACK = process.argv.includes('--rollback');
+// The guard below refuses any booking with no deposit link sent, because
+// 'accepted' asserts the client said yes and an unsent link is no evidence of
+// that. On 2026-08-01 the owner reviewed all nine rows and confirmed from
+// memory that these clients did verbally agree — the link simply never went
+// out. This flag records that ruling explicitly rather than deleting the
+// guard, so a future run of this script still refuses by default.
+const ACCEPT_WITHOUT_LINK = process.argv.includes('--accept-without-link');
 const SNAPSHOT = path.join(__dirname, '..', '.superpowers', 'sdd',
   '2026-08-01-admin-direct-entry', 'pending-rollback.json');
 
@@ -69,14 +76,38 @@ async function main() {
   // Safety: the mapping to `accepted` is only honest for bookings that were
   // actually sent a deposit request and have not paid. Anything else needs a
   // human decision, so refuse the whole batch rather than guess per row.
-  const unpaidWithLink = rows.filter(r => r.has_link && !r.deposit_paid);
-  if (unpaidWithLink.length !== rows.length) {
+  // An already-paid booking is never 'accepted' — that is a fact in the data,
+  // not a judgement call, so no flag overrides it.
+  const paid = rows.filter(r => r.deposit_paid);
+  if (paid.length) {
     console.error(
-      `\nRefusing to migrate: ${rows.length - unpaidWithLink.length} of ${rows.length} ` +
-      `bookings lack a sent deposit link or are already paid, so 'accepted' would ` +
-      `misdescribe them. Resolve those by hand first.`
+      `\nRefusing to migrate: ${paid.length} of ${rows.length} bookings already have ` +
+      `a paid deposit, so 'accepted' would misdescribe them. Resolve those by hand ` +
+      `(${paid.map(r => r.reference).join(', ')}).`
     );
     process.exit(1);
+  }
+
+  // A missing deposit link is weaker evidence — it means no payment request was
+  // ever sent, which does not prove the client declined. Refuse by default, but
+  // let the owner override with an explicit flag after reviewing the rows above.
+  const noLink = rows.filter(r => !r.has_link);
+  if (noLink.length && !ACCEPT_WITHOUT_LINK) {
+    console.error(
+      `\nRefusing to migrate: ${noLink.length} of ${rows.length} bookings have no ` +
+      `deposit link sent, so 'accepted' asserts something the data does not show.\n` +
+      `If you know these clients did verbally agree, re-run with ` +
+      `--accept-without-link to record that ruling explicitly:\n` +
+      `  node scripts/migrate-pending-to-accepted.js --apply --accept-without-link`
+    );
+    process.exit(1);
+  }
+  if (noLink.length) {
+    console.log(
+      `\nNote: ${noLink.length} booking(s) have no deposit link sent. Proceeding on ` +
+      `the owner's explicit --accept-without-link ruling. They will surface in the ` +
+      `dashboard's Deposit queue, which lists accepted bookings with no link.`
+    );
   }
 
   if (!APPLY) {
