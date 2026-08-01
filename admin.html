@@ -87,6 +87,12 @@ tr:hover td{background:#fafaf8}
 /* ── Badges ── */
 .badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:.72rem;font-weight:700;white-space:nowrap}
 .badge-custom{background:#fef3c7;color:#d97706}
+/* Legacy status — deliberately absent from STATUSES (see admin.html ~892) so
+   injectStatusCss() doesn't generate it. create-bookings.js and
+   import-bookings.js still allow/produce 'pending' and nine live bookings
+   hold it; keep this rule by hand until those two stop producing it and the
+   rows are migrated off it. */
+.badge-pending{background:#dbeafe;color:#1d4ed8}
 
 /* ── Modal ── */
 .modal-overlay{position:fixed;inset:0;background:rgba(15,10,30,.5);z-index:200;display:none;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto;backdrop-filter:blur(2px)}
@@ -2611,7 +2617,7 @@ function renderClients() {
 
   document.getElementById('clients-tbody').innerHTML = clients.length
     ? clients.map(c => `
-      <tr ${c.email ? `onclick="openClient('${esc(c.email)}')" style="cursor:pointer"` : ''}>
+      <tr ${c.email ? `onclick="openClient('${encUriAttr(c.email)}')" style="cursor:pointer"` : ''}>
         <td style="font-weight:600">${esc(c.name)}</td>
         <td>${esc(c.org || '—')}</td>
         <td>${esc(c.email || '—')}</td>
@@ -2626,6 +2632,10 @@ function renderClients() {
 // ── Client sheet — the clients table and client.js have existed since the
 // beginning; this is the first thing that calls them. ──
 async function openClient(email) {
+  // Row onclick passes the address through encUriAttr, not raw — decode
+  // first so everything below (fetch URL, the `e` handed to saveClient,
+  // the title) works on the real address, same as before this fix.
+  email = decodeURIComponent(email);
   document.getElementById('modal-title').textContent = email;
   document.getElementById('modal-body').innerHTML = '<div class="text-muted">Loading…</div>';
   document.getElementById('booking-modal').classList.add('open');
@@ -2636,7 +2646,9 @@ async function openClient(email) {
     return;
   }
   const c = await res.json();
-  const e = encodeURIComponent(email);
+  // Same JS-string-literal-in-onclick-attribute context as the row above
+  // (saveClient('${e}') below) — needs the apostrophe-safe encoder too.
+  const e = encUriAttr(email);
 
   document.getElementById('modal-body').innerHTML = `
     <div class="detail-grid">
@@ -4631,6 +4643,16 @@ function fmtTime(t) {
 
 function esc(str) {
   return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// For interpolating untrusted data into a single-quoted JS string literal
+// inside an onclick="..." attribute (e.g. openClient('${...}')). encodeURIComponent
+// alone is NOT enough here: per spec it leaves `'  (  )  *  !  ~` unescaped,
+// so a raw apostrophe in the input (a client email can contain one — the
+// booking email regex allows it) survives and breaks out of the JS string,
+// same as it would with plain HTML-escaping. Close that one gap explicitly.
+function encUriAttr(str) {
+  return encodeURIComponent(str).replace(/'/g, '%27');
 }
 
 function parseAddons(raw) {
