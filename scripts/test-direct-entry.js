@@ -28,6 +28,7 @@ const TOKEN = 'test-direct-entry-token-0123456789abcdef';
 process.env.AGENT_API_TOKEN = TOKEN;
 
 const bookings = require('../netlify/functions/bookings');
+const booking = require('../netlify/functions/booking');
 const { getPool } = require('../netlify/functions/_db');
 
 const post = (body, token) => bookings.handler({
@@ -36,6 +37,14 @@ const post = (body, token) => bookings.handler({
   body: JSON.stringify(body),
   queryStringParameters: {},
   path: '/api/bookings',
+});
+
+const patch = (id, body) => booking.handler({
+  httpMethod: 'PATCH',
+  headers: { authorization: 'Bearer ' + TOKEN },
+  body: JSON.stringify(body),
+  queryStringParameters: { id: String(id) },
+  path: '/api/booking/' + id,
 });
 
 async function main() {
@@ -73,6 +82,32 @@ async function main() {
       `public POST without email returned ${publicPost.statusCode}, expected 400`);
     console.log('  ok  public POST still requires email/date/service');
 
+    // 4. Editing a previously un-editable field works and is logged.
+    const target = row; // the draft created in check 1
+    const patched = await patch(target.id, {
+      event_date: '2026-12-25',
+      client_phone: '405-555-0100',
+      surface_type: 'grass',
+    });
+    assert.strictEqual(patched.statusCode, 200, `PATCH returned ${patched.statusCode}: ${patched.body}`);
+    const after = JSON.parse(patched.body);
+    assert.strictEqual(after.client_phone, '405-555-0100');
+    assert.strictEqual(after.surface_type, 'grass');
+    assert.ok(after.event_date, 'event_date should now be set');
+
+    const pool0 = getPool();
+    const c0 = await pool0.connect();
+    let logged;
+    try {
+      const { rows } = await c0.query(
+        'SELECT action FROM booking_changes WHERE booking_id=$1', [target.id]
+      );
+      logged = rows.map(r => r.action);
+    } finally { c0.release(); }
+    assert.ok(logged.some(a => a.includes('event_date')),
+      `expected an event_date change log, got: ${JSON.stringify(logged)}`);
+    console.log('  ok  event_date is editable and logged');
+
     console.log('\nAll direct-entry checks passed.');
   } finally {
     if (created.length) {
@@ -80,6 +115,10 @@ async function main() {
       const c = await pool.connect();
       try {
         for (const ref of created) {
+          await c.query(
+            'DELETE FROM booking_changes WHERE booking_id IN (SELECT id FROM bookings WHERE reference=$1)',
+            [ref]
+          );
           await c.query('DELETE FROM bookings WHERE reference=$1', [ref]);
           console.log(`  cleaned up ${ref}`);
         }
