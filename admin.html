@@ -86,11 +86,6 @@ tr:hover td{background:#fafaf8}
 
 /* ── Badges ── */
 .badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:.72rem;font-weight:700;white-space:nowrap}
-.badge-review{background:#fef9c3;color:#854d0e}
-.badge-pending{background:#dbeafe;color:#1d4ed8}
-.badge-confirmed{background:#d1fae5;color:#065f46}
-.badge-completed{background:#f3f4f6;color:#374151}
-.badge-cancelled{background:#fee2e2;color:#991b1b}
 .badge-custom{background:#fef3c7;color:#d97706}
 
 /* ── Modal ── */
@@ -488,8 +483,12 @@ input,select,textarea{font-family:inherit}
     <div class="page" id="page-clients">
       <div class="page-hdr"><h1>Clients</h1></div>
       <div class="card">
+        <div class="card-body" style="padding:16px">
+          <input type="text" id="client-search" placeholder="🔍 Search name, email, phone, organisation..."
+                 oninput="renderClients()" style="width:100%;max-width:360px">
+        </div>
         <table>
-          <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Bookings</th><th>Total Spent</th><th>Last Event</th></tr></thead>
+          <thead><tr><th>Name</th><th>Organisation</th><th>Email</th><th>Phone</th><th>Bookings</th><th>Total Spent</th><th>Last Event</th></tr></thead>
           <tbody id="clients-tbody"></tbody>
         </table>
       </div>
@@ -895,11 +894,12 @@ const STATUSES = [
   { id:'cancelled', label:'Cancelled', bg:'#fee2e2', border:'#fca5a5', fg:'#991b1b' },
 ];
 
-// The .active-<id> rules used to be five hand-written CSS blocks. Generated
-// from STATUSES so a new status needs no CSS edit.
+// The .active-<id> and .badge-<id> rules used to be hand-written CSS blocks.
+// Generated from STATUSES so a new status needs no CSS edit.
 function injectStatusCss() {
   const css = STATUSES.map(s =>
-    `.status-pill.active-${s.id}{background:${s.bg};border-color:${s.border};color:${s.fg}}`
+    `.status-pill.active-${s.id}{background:${s.bg};border-color:${s.border};color:${s.fg}}` +
+    `.badge-${s.id}{background:${s.bg};color:${s.fg}}`
   ).join('');
   const el = document.createElement('style');
   el.textContent = css;
@@ -1263,7 +1263,7 @@ function renderDashboard() {
   document.getElementById('st-confirmed-sub').textContent = pctChange(confirmedThisMonth, confirmedPriorMonth);
 
   const recent = [...allBookings]
-    .filter(b => ['review','pending'].includes(b.status))
+    .filter(b => ['review','pending','quoted','accepted'].includes(b.status))
     .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))
     .slice(0, 8);
   document.getElementById('dash-tbody').innerHTML = recent.length
@@ -2590,26 +2590,107 @@ function renderCalendar() {
 // CLIENTS
 // ══════════════════════════════════════════════════
 function renderClients() {
+  const q = (document.getElementById('client-search')?.value || '').toLowerCase().trim();
   const map = {};
   allBookings.forEach(b => {
     const k = b.client_email || b.client_name;
-    if (!map[k]) map[k] = { name:b.client_name, email:b.client_email, phone:b.client_phone, count:0, total:0, last:null };
+    if (!k) return;
+    if (!map[k]) map[k] = {
+      name: b.client_name, email: b.client_email, phone: b.client_phone,
+      org: b.organisation_name || '', count: 0, total: 0, last: null,
+    };
     map[k].count++;
-    map[k].total += Number(b.total_price||0);
+    map[k].total += Number(b.total_price || 0);
+    if (b.organisation_name && !map[k].org) map[k].org = b.organisation_name;
     if (!map[k].last || b.event_date > map[k].last) map[k].last = b.event_date;
   });
-  const clients = Object.values(map).sort((a,b) => b.total - a.total);
+  const clients = Object.values(map)
+    .filter(c => !q || [c.name, c.email, c.phone, c.org]
+      .some(v => (v || '').toLowerCase().includes(q)))
+    .sort((a, b) => b.total - a.total);
+
   document.getElementById('clients-tbody').innerHTML = clients.length
     ? clients.map(c => `
-      <tr>
+      <tr ${c.email ? `onclick="openClient('${esc(c.email)}')" style="cursor:pointer"` : ''}>
         <td style="font-weight:600">${esc(c.name)}</td>
-        <td><a href="mailto:${c.email||''}" style="color:#7c3aed">${esc(c.email||'—')}</a></td>
-        <td><a href="tel:${c.phone||''}" style="color:#374151">${esc(c.phone||'—')}</a></td>
+        <td>${esc(c.org || '—')}</td>
+        <td>${esc(c.email || '—')}</td>
+        <td>${esc(c.phone || '—')}</td>
         <td>${c.count}</td>
         <td>$${c.total.toFixed(0)}</td>
         <td>${fmtDate(c.last)}</td>
       </tr>`).join('')
-    : `<tr><td colspan="6" class="table-empty">No clients yet</td></tr>`;
+    : `<tr><td colspan="7" class="table-empty">${q ? 'No matches' : 'No clients yet'}</td></tr>`;
+}
+
+// ── Client sheet — the clients table and client.js have existed since the
+// beginning; this is the first thing that calls them. ──
+async function openClient(email) {
+  document.getElementById('modal-title').textContent = email;
+  document.getElementById('modal-body').innerHTML = '<div class="text-muted">Loading…</div>';
+  document.getElementById('booking-modal').classList.add('open');
+
+  const res = await apiFetch('/api/client?email=' + encodeURIComponent(email));
+  if (!res.ok) {
+    document.getElementById('modal-body').innerHTML = '<div class="text-muted">Could not load this client.</div>';
+    return;
+  }
+  const c = await res.json();
+  const e = encodeURIComponent(email);
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="detail-grid">
+      ${bookingField('Name', 'name', c.name)}
+      ${bookingField('Birthday', 'birthday', (c.birthday || '').slice(0, 10), 'date')}
+      ${bookingField('Follow up on', 'follow_up_date', (c.follow_up_date || '').slice(0, 10), 'date')}
+      ${bookingField('Tags', 'tags', Array.isArray(c.tags) ? c.tags.join(', ') : '')}
+      ${bookingField('Annual event month', 'annual_event_month', c.annual_event_month, 'number')}
+      ${bookingField('Annual event note', 'annual_event_note', c.annual_event_note)}
+    </div>
+    <div class="notes-block">
+      <span class="section-label">Notes</span>
+      <textarea class="bk-edit" data-f="notes" data-orig="${esc(c.notes || '')}" rows="4">${esc(c.notes || '')}</textarea>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin:12px 0 18px">
+      <button class="btn btn-primary btn-sm" onclick="saveClient('${e}')">Save Client</button>
+      <span class="save-flash" id="cl-flash">✓ Saved</span>
+    </div>
+    <div style="margin-bottom:18px">
+      <span class="section-label">Bookings (${c.bookings.length})</span>
+      ${c.bookings.map(b => `<div class="q-row"><span>${esc(b.reference || '')} — ${esc(b.service_name || '')}</span><span>${fmtDate(b.event_date)}</span></div>`).join('') || '<div class="text-muted">None</div>'}
+    </div>
+    <div>
+      <span class="section-label">Interactions (${c.interactions.length})</span>
+      ${c.interactions.map(i => `<div class="q-row sub"><span>${esc(i.note || '')}</span><span>${fmtDate(i.created_at)}</span></div>`).join('') || '<div class="text-muted">None logged</div>'}
+    </div>`;
+}
+
+async function saveClient(encodedEmail) {
+  const payload = {};
+  document.querySelectorAll('#modal-body .bk-edit').forEach(el => {
+    if (el.value !== (el.dataset.orig || '')) payload[el.dataset.f] = el.value;
+  });
+  if (!Object.keys(payload).length) { flash('cl-flash'); return; }
+  // clients.tags is JSONB and client.js binds the value straight into the
+  // column with no encoding, so a bare string throws "invalid input syntax for
+  // type json". The field is a comma-separated list; store a real array.
+  if ('tags' in payload) {
+    payload.tags = JSON.stringify(
+      payload.tags.split(',').map(t => t.trim()).filter(Boolean)
+    );
+  }
+  // client.js routes PATCH by the body's email field, not the query string
+  // (client.js:90-99 — the query param is GET-only, and its path fallback
+  // yields the literal "client"). `email` is not in the PATCH allowlist, so it
+  // routes the request without being written to the row.
+  payload.email = decodeURIComponent(encodedEmail);
+  const res = await apiFetch('/api/client?email=' + encodedEmail, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (res.ok) flash('cl-flash');
+  else alert('Failed to save client');
 }
 
 // ══════════════════════════════════════════════════
