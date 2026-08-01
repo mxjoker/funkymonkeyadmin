@@ -390,6 +390,7 @@ input,select,textarea{font-family:inherit}
         <div class="card-body" style="padding:16px">
           <!-- Row 1: Primary Filters -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <button class="btn btn-primary" onclick="openBooking(null)" style="white-space:nowrap">+ Booking</button>
             <input type="text" id="filter-search" placeholder="🔍 Search name, ref, service..." oninput="renderBookingsTable()" style="flex:1;min-width:200px;max-width:300px"/>
             
             <select id="filter-status" onchange="renderBookingsTable()" style="min-width:140px">
@@ -1456,11 +1457,18 @@ function bookingField(label, name, value, type = 'text', opts = null) {
   return `<div class="detail-field"><label>${label}</label>${input}</div>`;
 }
 
+// id === null opens an empty modal for a new booking taken over the phone.
+// Saving it POSTs a draft; every other path is identical to editing.
 function openBooking(id) {
-  const b = allBookings.find(x => String(x.id) === String(id));
+  const isNew = id === null || id === undefined;
+  const b = isNew
+    ? { id: 'new', status: 'draft', addons: [] }
+    : allBookings.find(x => String(x.id) === String(id));
   if (!b) return;
 
-  document.getElementById('modal-title').textContent = `${b.reference||'Booking'} — ${b.client_name}`;
+  document.getElementById('modal-title').textContent = isNew
+    ? 'New Booking'
+    : `${b.reference||'Booking'} — ${b.client_name}`;
 
   const addons = parseAddons(b.addons);
   const addonRows = addons.map(a =>
@@ -1475,7 +1483,7 @@ function openBooking(id) {
     <!-- Status pills -->
     <div class="status-pills">
       ${STATUSES.map(s =>
-        `<button class="status-pill ${b.status===s.id?'active-'+s.id:''}" onclick="setStatus('${b.id}','${s.id}')">${s.label}</button>`
+        `<button class="status-pill ${b.status===s.id?'active-'+s.id:''}" ${isNew ? 'disabled' : `onclick="setStatus('${b.id}','${s.id}')"`}>${s.label}</button>`
       ).join('')}
     </div>
 
@@ -1536,6 +1544,7 @@ function openBooking(id) {
       <div class="q-row"><span>Balance Due at Event</span><span>${Number(b.balance_due||0)>0?'$'+Number(b.balance_due).toFixed(2):'TBD'}</span></div>
     </div>
 
+    ${isNew ? '' : `
     <!-- Stripe link -->
     <div class="stripe-block">
       <div style="display:flex;align-items:center;justify-content:space-between">
@@ -1544,23 +1553,25 @@ function openBooking(id) {
       </div>
       ${b.stripe_payment_link?`<div class="stripe-result">Last link: <a href="${b.stripe_payment_link}" target="_blank" style="color:#7c3aed">Open →</a></div>`:''}
       <div class="stripe-result" id="stripe-msg-${b.id}"></div>
-    </div>
+    </div>`}
 
+    ${isNew ? '' : `
     <!-- Download Invoice -->
     <div style="background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <strong style="font-size:.875rem">🧾 Invoice</strong>
         <button class="btn btn-outline btn-sm" onclick="downloadInvoice('${b.reference}')">Download PDF</button>
       </div>
-    </div>
+    </div>`}
 
+    ${isNew ? '' : `
     <!-- COI Requests -->
     <div style="background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
         <strong style="font-size:.875rem">🛡️ Certificate of Insurance</strong>
       </div>
       <div id="coi-requests-${b.id}" style="font-size:.85rem;color:#6b7280">Loading...</div>
-    </div>
+    </div>`}
 
     <!-- Admin notes -->
     <div class="notes-block">
@@ -1611,8 +1622,8 @@ function openBooking(id) {
       </div>
     </div>
 
-    <!-- Staff Assignment (admin only) -->
-    ${currentUser?.role === 'admin' ? `
+    <!-- Staff Assignment (admin only, needs a saved booking) -->
+    ${!isNew && currentUser?.role === 'admin' ? `
     <div class="notes-block" id="staff-assign-block-${b.id}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <span class="section-label" style="margin-bottom:0">👥 Staff Assignment</span>
@@ -1653,7 +1664,7 @@ function openBooking(id) {
       <button class="btn btn-danger btn-sm" onclick="confirmDelete('${b.id}')">🗑 Delete</button>
     </div>
 
-    ${currentUser?.role === 'admin' ? `
+    ${!isNew && currentUser?.role === 'admin' ? `
     <div style="margin-top:20px;border-top:1px solid #e5e7eb;padding-top:18px">
       <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:#9ca3af;margin-bottom:10px">✅ Admin Checklist</div>
       <div id="tasks-container-${b.id}"><div style="color:#9ca3af;font-size:.8rem">Loading…</div></div>
@@ -1678,8 +1689,8 @@ function openBooking(id) {
 
   document.getElementById('booking-modal').classList.add('open');
 
-  // Load staff assignments after modal renders (admin only)
-  if (currentUser?.role === 'admin') {
+  // Load staff assignments after modal renders (admin only, needs a saved booking)
+  if (!isNew && currentUser?.role === 'admin') {
     loadStaffAssignments(b.id);
     loadCOIRequests(b.id);
     loadGoogleReviews(b.id);
@@ -2286,8 +2297,32 @@ async function saveBookingEdits(id) {
   document.querySelectorAll('#modal-body .bk-edit').forEach(el => {
     if (el.value !== (el.dataset.orig || '')) payload[el.dataset.f] = el.value;
   });
-  if (!Object.keys(payload).length) { flash('bk-flash-' + id); return; }
+  // An empty payload means nothing changed. For an existing booking that is a
+  // no-op worth confirming; for a new one there is nothing to create.
+  if (!Object.keys(payload).length) {
+    if (id === 'new') { alert('Nothing to save yet — enter at least a name.'); return; }
+    flash('bk-flash-' + id);
+    return;
+  }
   try {
+    if (id === 'new') {
+      payload.status = 'draft';
+      const res = await apiFetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Request failed');
+      }
+      const data = await res.json();
+      allBookings.unshift(data.booking);
+      closeModal();
+      renderBookingsTable();
+      openBooking(data.booking.id);
+      return;
+    }
     const updated = await patch(id, payload);
     // Keep local state in sync so re-opening the modal shows the new values
     const i = allBookings.findIndex(x => String(x.id) === String(id));
