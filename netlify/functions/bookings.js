@@ -247,24 +247,43 @@ exports.handler = async (event) => {
       return json(400, { error: 'Invalid JSON' });
     }
 
+    // ── Admin draft path (spec 2026-08-01) ────────────────────────────────────
+    // A booking taken over the phone rarely has an email to hand. An
+    // authenticated admin may post status:'draft' and skip the four required
+    // fields. Everything below — length caps, numeric clamping, NaN rejection —
+    // still applies, so a draft cannot write a malformed row. The relaxation is
+    // gated on the token, not on the 'draft' string, so the public form cannot
+    // post itself a draft to bypass validation.
+    const isDraft = b.status === 'draft';
+    if (isDraft) {
+      const auth = await requireAuth(event, ['admin']);
+      if (!auth) return unauthorized();
+    }
+
     // ── Validation (contract §POST /api/bookings) ────────────────────────────
     const clientName = String(b.client_name || '').trim();
-    if (!clientName) return json(400, { error: 'client_name is required' });
+    if (!isDraft && !clientName) return json(400, { error: 'client_name is required' });
     if (clientName.length > 120) return json(400, { error: 'client_name too long (max 120)' });
 
     const clientEmail = String(b.client_email || '').trim();
-    if (!clientEmail) return json(400, { error: 'client_email is required' });
+    if (!isDraft && !clientEmail) return json(400, { error: 'client_email is required' });
     if (clientEmail.length > 200) return json(400, { error: 'client_email too long (max 200)' });
-    // Plausible email check
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) {
+    // Plausible email check — applies whenever one is supplied, draft or not
+    if (clientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) {
       return json(400, { error: 'client_email is not valid' });
     }
 
-    if (!b.event_date || isNaN(Date.parse(String(b.event_date)))) {
+    // A date is required unless this is a draft, but a supplied date must
+    // always parse. Empty string becomes NULL — Postgres rejects '' for DATE.
+    if (!isDraft && (!b.event_date || isNaN(Date.parse(String(b.event_date))))) {
       return json(400, { error: 'event_date must be a parseable date' });
     }
+    if (b.event_date && isNaN(Date.parse(String(b.event_date)))) {
+      return json(400, { error: 'event_date must be a parseable date' });
+    }
+    const eventDate = b.event_date || null;
 
-    if (!b.service_id && !b.service_name) {
+    if (!isDraft && !b.service_id && !b.service_name) {
       return json(400, { error: 'service_id or service_name is required' });
     }
 
@@ -335,7 +354,7 @@ exports.handler = async (event) => {
           client_name, client_phone, client_email, referral_source,
           child_name, brand
         ) VALUES (
-          $1, 'review',
+          $1, $29,
           $2, $3, $4,
           $5, $6, $7, $8,
           $9, $10, $11,
@@ -357,7 +376,7 @@ exports.handler = async (event) => {
         totalPrice,
         depositAmount,
         balanceDue,
-        b.event_date,
+        eventDate,
         cap255(b.event_time),
         cap255(b.event_zip),
         cap5k(b.event_location),
@@ -374,16 +393,23 @@ exports.handler = async (event) => {
         cap255(b.referral_source),
         cap255(b.child_name),
         b.brand === 'jcm' ? 'jcm' : 'fme',
+        isDraft ? 'draft' : 'review',
       ]);
 
       const booking = rows[0];
 
       // Await both — in a serverless function the container may terminate as soon
       // as the handler returns, dropping any unawaited fetch calls to Resend.
-      await sendBookingEmails(booking);
-      await notifyMatchingStaff(booking).catch(e => console.error('Staff notify error:', e.message));
+      // Drafts send nothing: the record is half-finished, the client may have no
+      // email address yet, and the owner is on the phone with them right now.
+      if (!isDraft) {
+        await sendBookingEmails(booking);
+        await notifyMatchingStaff(booking).catch(e => console.error('Staff notify error:', e.message));
+      }
 
-      return json(201, { success: true, reference: booking.reference, id: booking.id });
+      // `booking` is additive — booking-form.html reads `reference` and is
+      // unaffected. The admin UI needs the full row for its local state.
+      return json(201, { success: true, reference: booking.reference, id: booking.id, booking });
     });
   }
 
