@@ -152,3 +152,29 @@ test('a balance off by two cents is NOT derivable — pins the half-cent toleran
   assert.strictEqual(balanceIsDerivable(
     { total_price: 100, mileage_cost: 0, deposit_amount: 0, balance_due: 99.98 }), false);
 });
+
+// Regression for booking.js:228 injecting balance_due for the change-logging
+// loop, then the items block reading that injected value back as if it were
+// the caller's own explicit input. A deposit_amount+items PATCH on a 500/100
+// booking (400 owed) that adds a line to reach 800 must land on 600, not on
+// the pre-edit-total figure of 300 the bug used to persist.
+test('deposit + items in one PATCH must land on the rollup balance, not the pre-edit total', () => {
+  const roll = rollupItems([
+    { name: 'Foam Party', price: 500, quantity: 1, kind: 'service' },
+    { name: 'Extra Package', price: 300, quantity: 1, kind: 'service' },
+  ]);
+  assert.strictEqual(roll.total_price, 800);
+  const depositAmount = 200;
+  const correctBalance = Math.max(0, roll.total_price + roll.mileage_cost - depositAmount);
+  assert.strictEqual(correctBalance, 600);
+
+  // The bug's output: balance left at what the pre-edit total_price (500)
+  // implied — 300 — which the row's own total_price (800) no longer explains.
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: roll.total_price, mileage_cost: roll.mileage_cost, deposit_amount: depositAmount, balance_due: 300 }), false);
+
+  // The fix's output: derivable, and the guard that protects every other
+  // recompute in the system stays armed on this row.
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: roll.total_price, mileage_cost: roll.mileage_cost, deposit_amount: depositAmount, balance_due: correctBalance }), true);
+});

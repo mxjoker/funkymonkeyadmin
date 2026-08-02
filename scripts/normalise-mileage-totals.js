@@ -48,8 +48,12 @@
  * Apply, only after a human has reviewed the dry-run numbers:
  *   node scripts/normalise-mileage-totals.js --apply
  *
- * Rollback — restores exactly the rows this script's own snapshot covers:
- *   node scripts/normalise-mileage-totals.js --rollback
+ * Rollback — restores exactly the rows this script's own snapshot covers.
+ * Past its shelf life now that replaceItems() (Task 3) has shipped: it would
+ * restore a mileage-inclusive total_price and re-insert a duplicate balancing
+ * line onto any of the 78 corrected bookings whose quote has since been
+ * edited. Refuses by default; requires an explicit override:
+ *   node scripts/normalise-mileage-totals.js --rollback --accept-clobber-risk
  */
 const fs = require('fs');
 const path = require('path');
@@ -69,6 +73,13 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejec
 
 const APPLY = process.argv.includes('--apply');
 const ROLLBACK = process.argv.includes('--rollback');
+// replaceItems() (Task 3) has shipped, so any of the 78 corrected bookings
+// may have had its quote edited since --apply — restoring the snapshot would
+// resurrect a mileage-inclusive total_price and re-insert a now-duplicate
+// balancing line on top of that edit. Refuses by default; the flag is the
+// operator asserting, having checked, that no edits happened. Same shape as
+// migrate-pending-to-accepted.js's --accept-without-link.
+const ACCEPT_CLOBBER_RISK = process.argv.includes('--accept-clobber-risk');
 const SNAPSHOT = path.join(__dirname, '..', '.superpowers', 'sdd',
   '2026-08-01-crm-takeover-phase-3', 'mileage-normalise-rollback.json');
 
@@ -312,11 +323,37 @@ async function rollback(client) {
   }
   // Restores by the ids captured in the snapshot, not by any provenance mark
   // on the rows — same limitation scripts/backfill-booking-items.js accepts
-  // for the same reason. Safe as long as nothing else has touched these
+  // for the same reason. Safe only as long as nothing else has touched these
   // bookings' total_price or this specific balancing line since --apply. If
   // the line was deleted, it is re-inserted with a new id (SERIAL — the old
   // id cannot be reused) but identical booking_id/name/price/kind/sort_order,
   // which is all any caller keys off.
+  //
+  // Task 3's replaceItems() has shipped, so that "nothing else has touched
+  // these bookings" assumption can no longer be trusted by default: an admin
+  // may have edited one of these 78 bookings' quotes since --apply. Restoring
+  // would resurrect its old mileage-inclusive total_price and re-insert a now-
+  // duplicate balancing line on top of the edit. Refuse unless the operator
+  // explicitly overrides, having checked.
+  if (!ACCEPT_CLOBBER_RISK) {
+    console.error(
+      'Refusing to roll back: Task 3\'s quote-edit endpoint has shipped, so any of ' +
+      'these bookings\' quotes may have been edited since --apply. Restoring the ' +
+      'snapshot would put back a mileage-inclusive total_price and re-insert a ' +
+      'now-duplicate balancing line on top of that edit.\n' +
+      'If you have checked that none of these bookings have been edited since ' +
+      '--apply, re-run with --accept-clobber-risk to proceed:\n' +
+      '  node scripts/normalise-mileage-totals.js --rollback --accept-clobber-risk'
+    );
+    process.exitCode = 1;
+    return;
+  }
+  console.log(
+    'Proceeding on the operator\'s explicit --accept-clobber-risk ruling: this ' +
+    'restores total_price and the balancing line by booking_id/snapshot only — ' +
+    'it cannot tell a since-edited quote from an untouched one, and will clobber ' +
+    'any quote edited on one of these bookings since --apply.'
+  );
   const snap = JSON.parse(fs.readFileSync(SNAPSHOT, 'utf8'));
   await client.query('BEGIN');
   let restoredTotals = 0, restoredLines = 0, reinsertedLines = 0;

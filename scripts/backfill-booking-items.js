@@ -22,8 +22,12 @@
  * Apply, after reading the dry run:
  *   node scripts/backfill-booking-items.js --apply
  *
- * Rollback — deletes only the rows this script created:
- *   node scripts/backfill-booking-items.js --rollback
+ * Rollback — deletes only the rows this script created. Past its shelf life
+ * now that replaceItems() (Task 3) has shipped: it deletes by booking_id
+ * membership in the snapshot, with no way to tell a backfilled row from one
+ * a since-edited quote replaced. Refuses by default; requires an explicit
+ * override once a quote edit could have happened:
+ *   node scripts/backfill-booking-items.js --rollback --accept-clobber-risk
  */
 const fs = require('fs');
 const path = require('path');
@@ -43,6 +47,14 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejec
 
 const APPLY = process.argv.includes('--apply');
 const ROLLBACK = process.argv.includes('--rollback');
+// replaceItems() (Task 3) has shipped, so booking_items rows can now be
+// legitimate quote edits made since --apply, not just this script's own
+// output. The rollback below can't tell those apart — it deletes by
+// booking_id membership in the snapshot only — so it refuses by default
+// and requires the operator to assert, explicitly, that they accept the
+// risk of deleting a since-edited quote. Same shape as
+// migrate-pending-to-accepted.js's --accept-without-link.
+const ACCEPT_CLOBBER_RISK = process.argv.includes('--accept-clobber-risk');
 const SNAPSHOT = path.join(__dirname, '..', '.superpowers', 'sdd',
   '2026-08-01-crm-takeover-phase-3', 'booking-items-rollback.json');
 
@@ -109,22 +121,32 @@ async function main() {
       }
       // This deletes by booking_id membership in the snapshot, not by any mark
       // on the rows themselves — there is no provenance column distinguishing
-      // "this script wrote it" from "something else wrote it since". That is
-      // safe only as long as nothing else touches these bookings' items between
-      // --apply and --rollback. _items.js's replaceItems() is delete-all-then-
-      // reinsert per booking, and Task 3's quote-edit endpoint will call it. Once
-      // that ships, running --rollback after a human has edited one of these
-      // bookings' items would delete their replacement items too — the snapshot
-      // has no way to tell a hand-edited row from a backfilled one. replaceItems
-      // has zero call sites today, so this is not yet reachable; it becomes live
-      // the day Task 3 wires it up. No guard is added here — provenance tracking
-      // on every row would exist only to serve a one-off script, which is not
-      // worth a schema column. Roll back before Task 3 ships, not after.
+      // "this script wrote it" from "something else wrote it since". _items.js's
+      // replaceItems() is delete-all-then-reinsert per booking, and Task 3's
+      // quote-edit endpoint (booking.js) now calls it. Provenance tracking on
+      // every row would exist only to serve a one-off script, which is not
+      // worth a schema column — so the guard below is a flag, not a fix.
+      // Task 3 shipped — replaceItems() has real call sites now, so any of
+      // these booking_id's items could be a since-edited quote, not the
+      // backfill's own output. Refuse by default; the flag is the operator
+      // asserting, having checked, that nothing here has been hand-edited.
+      if (!ACCEPT_CLOBBER_RISK) {
+        console.error(
+          'Refusing to roll back: Task 3\'s quote-edit endpoint has shipped, so ' +
+          'booking_items rows for these booking ids may be legitimate quote edits ' +
+          'made since --apply, not this script\'s own output. This rollback deletes ' +
+          'by booking_id membership in the snapshot only — it cannot tell the two ' +
+          'apart — so it would silently destroy any edited quote among them.\n' +
+          'If you have checked that none of these bookings have been edited since ' +
+          '--apply, re-run with --accept-clobber-risk to proceed:\n' +
+          '  node scripts/backfill-booking-items.js --rollback --accept-clobber-risk'
+        );
+        process.exit(1);
+      }
       console.log(
-        'Rollback deletes booking_items by booking_id only — it cannot tell a ' +
-        'backfilled row from one written later by a quote edit. Safe before ' +
-        "Task 3's quote-edit endpoint ships; after that, only run this if you " +
-        'are certain none of these bookings have been hand-edited since --apply.'
+        'Proceeding on the operator\'s explicit --accept-clobber-risk ruling: ' +
+        'rollback deletes booking_items by booking_id only — it cannot tell a ' +
+        'backfilled row from one written later by a quote edit.'
       );
       const ids = JSON.parse(fs.readFileSync(SNAPSHOT, 'utf8')).ids;
       const r = await client.query('DELETE FROM booking_items WHERE booking_id = ANY($1)', [ids]);

@@ -2,7 +2,7 @@ const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
 const { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
-const { ensureBookingItems, replaceItems, rollupItems, getItems, balanceIsDerivable } = require('./_items');
+const { ensureBookingItems, replaceItems, rollupItems, getItems, balanceIsDerivable, normaliseItems } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -88,6 +88,13 @@ exports.handler = async (event) => {
       if (event.httpMethod === "PATCH") {
         const u = JSON.parse(event.body || "{}");
 
+        // Normalise once, gate on this everywhere. normaliseItems drops
+        // blank-name rows — an array of them must not pass as "non-empty"
+        // just because the raw payload had entries; that is the exact quote
+        // wipe the guard below exists to prevent. bookings.js:430 already
+        // does it this way; this brings booking.js into agreement.
+        const postedItems = Array.isArray(u.items) ? normaliseItems(u.items) : [];
+
         // A cleared <input> posts '' — Postgres rejects that for non-text
         // columns. Only touch keys actually present, so no null is invented.
         for (const f of ['event_date', 'confirmation_deadline', 'deposit_paid_at']) {
@@ -161,6 +168,12 @@ exports.handler = async (event) => {
         // cannot make a balance derivable by editing it in the same PATCH.
         const canDeriveBalance = balanceIsDerivable(prev);
 
+        // Captured before the BALANCE_INPUTS block below sets u.balance_due for
+        // the benefit of the change-logging loop. Without this, the items block
+        // cannot tell a value the caller sent from one this handler injected,
+        // and would persist a balance derived from the pre-edit total_price.
+        const explicitBalance = u.balance_due !== undefined;
+
         const sets = [], vals = [];
         let idx = 1;
         for (const [k, col] of Object.entries(colMap)) {
@@ -172,7 +185,7 @@ exports.handler = async (event) => {
         // "No fields to update" before the items block below ever ran. The
         // admin quote builder sends exactly that shape, because it deletes the
         // derived money keys and lets rollupItems own them.
-        const hasItems = Array.isArray(u.items) && u.items.length > 0;
+        const hasItems = postedItems.length > 0;
         if (!sets.length && !hasItems) return json(400, { error: "No fields to update" });
 
         // Add missing columns if needed (safe migration)
@@ -243,10 +256,10 @@ exports.handler = async (event) => {
         // in the UI: trusting the caller is this codebase's documented
         // recurring failure mode.
         let items = null;
-        if (Array.isArray(u.items) && u.items.length > 0) {
+        if (postedItems.length > 0) {
           await ensureBookingItems(c);
           const before = await getItems(c, parseInt(id));
-          items = await replaceItems(c, parseInt(id), u.items);
+          items = await replaceItems(c, parseInt(id), postedItems);
           const roll = rollupItems(items);
           // An explicit balance_due from the caller is a decision, not a
           // derivation — it wins over both the formula and the "leave it"
@@ -254,7 +267,7 @@ exports.handler = async (event) => {
           // above (balance_due is a colMap column), so `updated.balance_due`
           // already holds it; no skip log, because nothing was skipped.
           let newBalance;
-          if (u.balance_due !== undefined) {
+          if (explicitBalance) {
             newBalance = Number(updated.balance_due || 0);
           } else if (canDeriveBalance) {
             newBalance = Math.max(0, roll.total_price + roll.mileage_cost - Number(updated.deposit_amount || 0));
