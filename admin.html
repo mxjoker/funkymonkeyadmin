@@ -1468,8 +1468,13 @@ function readItemRows(bookingId) {
   if (!host) return [];
   return [...host.querySelectorAll('[data-item-row]')].map(row => {
     const get = (f) => { const el = row.querySelector(`[data-if="${f}"]`); return el ? el.value : ''; };
-    return { service_id: get('service_id'), name: get('name'), price: Number(get('price')) || 0,
-             quantity: Number(get('quantity')) || 1, kind: get('kind') || 'custom' };
+    // Clamp to match _items.js clampPrice/normaliseItems exactly — otherwise a
+    // negative price or fractional quantity shows one total in the modal and
+    // saves a different one server-side.
+    return { service_id: get('service_id'), name: get('name'),
+             price: Math.min(Math.max(Number(get('price')) || 0, 0), 100000),
+             quantity: Math.min(Math.max(Math.floor(Number(get('quantity'))) || 1, 1), 1000),
+             kind: get('kind') || 'custom' };
   }).filter(i => i.name.trim() !== '');
 }
 
@@ -1571,19 +1576,13 @@ function openBooking(id) {
     <!-- Quote -->
     <div class="quote-block">
       <span class="section-label">Quote Breakdown</span>
-      <div id="items-list-${b.id}">
+      <div id="items-list-${b.id}" data-had-items="${items.length ? '1' : '0'}">
         ${items.map(itemRowHtml).join('')}
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin:10px 0">
         <button class="btn btn-outline btn-sm" onclick="addItemRow('${b.id}')">+ Line</button>
         <select id="item-picker-${b.id}" onchange="addItemFromCatalogue('${b.id}', this)" style="max-width:260px">
-          <option value="">+ From catalogue…</option>
-          <optgroup label="Services">
-            ${(catServices || []).map(s => `<option value="svc:${esc(s.service_id)}">${esc(s.name)} — $${Number(s.price).toFixed(2)}</option>`).join('')}
-          </optgroup>
-          <optgroup label="Add-ons">
-            ${(catAddons || []).map(a => `<option value="add:${esc(a.addon_id)}">${esc(a.name)} — $${Number(a.price).toFixed(2)}</option>`).join('')}
-          </optgroup>
+          ${catalogueOptionsHtml()}
         </select>
         <span style="margin-left:auto;font-weight:600" id="items-total-${b.id}"></span>
       </div>
@@ -1600,7 +1599,7 @@ function openBooking(id) {
           <input class="bk-edit" data-f="deposit_ref" data-orig="${esc(b.deposit_ref || '')}" value="${esc(b.deposit_ref || '')}" placeholder="ref" style="max-width:110px">
         </span>
       </div>
-      <div class="q-row"><span>Balance Due at Event</span><span>${Number(b.balance_due||0)>0?'$'+Number(b.balance_due).toFixed(2):'TBD'}</span></div>
+      <div class="q-row"><span>Balance Due at Event</span><span id="balance-due-${b.id}">${Number(b.balance_due||0)>0?'$'+Number(b.balance_due).toFixed(2):'TBD'}</span></div>
     </div>
 
     ${isNew ? '' : `
@@ -1756,6 +1755,7 @@ function openBooking(id) {
     itemsHost.addEventListener('change', () => renderItemsTotal(b.id));
     renderItemsTotal(b.id);
   }
+  ensureCatalogueLoaded(b.id);
 
   document.getElementById('booking-modal').classList.add('open');
 
@@ -2368,6 +2368,18 @@ async function saveBookingEdits(id) {
     if (el.value !== (el.dataset.orig || '')) payload[el.dataset.f] = el.value;
   });
   const items = readItemRows(id);
+  // Deleting every row and saving some other field in the same click would
+  // otherwise send `items: []`, which booking.js correctly refuses to act on
+  // (an items-only or items-included PATCH never zeroes a quote by design —
+  // see Step 0's hasItems guard) — but the OTHER fields in that same payload
+  // still save, the UI still flashes "✓ Saved", and the admin has no way to
+  // know their deletion did nothing. Catch it client-side instead of letting
+  // it round-trip as a silent no-op.
+  const itemsHost = document.getElementById('items-list-' + id);
+  if (itemsHost && itemsHost.dataset.hadItems === '1' && !items.length) {
+    warnCantEmptyQuote(id);
+    return;
+  }
   // An empty payload AND no item rows means nothing changed. For an existing
   // booking that is a no-op worth confirming; for a new one there is nothing
   // to create. Item rows must be checked too — editing only the quote (no
@@ -2409,6 +2421,14 @@ async function saveBookingEdits(id) {
     // Keep local state in sync so re-opening the modal shows the new values
     const i = allBookings.findIndex(x => String(x.id) === String(id));
     if (i > -1) allBookings[i] = updated;
+    // The modal's own DOM doesn't re-render after a save (it's a one-shot
+    // innerHTML from openBooking), so Balance Due would otherwise sit stale —
+    // now that quote editing is the modal's main job, a wrong money figure in
+    // front of the owner is routine, not rare. Refresh just that one span,
+    // not the whole modal — cheaper and doesn't disturb scroll position.
+    const bdEl = document.getElementById('balance-due-' + id);
+    if (bdEl) bdEl.textContent = Number(updated.balance_due || 0) > 0
+      ? '$' + Number(updated.balance_due).toFixed(2) : 'TBD';
     flash('bk-flash-' + id);
     renderBookingsTable();
   } catch (e) {
@@ -4772,11 +4792,50 @@ function itemRowHtml(i, idx) {
   </div>`;
 }
 
+// Shared by the initial modal render and by ensureCatalogueLoaded's
+// post-fetch refresh, so the two never drift out of sync.
+function catalogueOptionsHtml() {
+  return `<option value="">+ From catalogue…</option>
+          <optgroup label="Services">
+            ${(catServices || []).map(s => `<option value="svc:${esc(s.service_id)}">${esc(s.name)} — $${Number(s.price).toFixed(2)}</option>`).join('')}
+          </optgroup>
+          <optgroup label="Add-ons">
+            ${(catAddons || []).map(a => `<option value="add:${esc(a.addon_id)}">${esc(a.name)} — $${Number(a.price).toFixed(2)}</option>`).join('')}
+          </optgroup>`;
+}
+
+// Catalogue data only loads when the admin visits the Catalogue tab
+// (showPage -> loadCatalogue). openBooking is the only other consumer, and an
+// admin quoting a booking first thing in a session would otherwise see an
+// empty picker. Fire-and-forget: loadCatalogue already swallows its own
+// fetch errors, so this never blocks or breaks the modal that's already open.
+function ensureCatalogueLoaded(bookingId) {
+  if (catServices.length) return;
+  loadCatalogue().then(() => {
+    const sel = document.getElementById('item-picker-' + bookingId);
+    if (sel) sel.innerHTML = catalogueOptionsHtml();
+  });
+}
+
 function flash(id) {
   const el = document.getElementById(id);
   if (!el) return;
   el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// Reuses the modal's existing save-flash span rather than alert() — alert()
+// freezes browser automation and this project's gates depend on it. Swaps
+// the text/color in place, then restores both so the span is back to normal
+// "✓ Saved" the next time a real save succeeds.
+function warnCantEmptyQuote(id) {
+  const el = document.getElementById('bk-flash-' + id);
+  if (!el) return;
+  const origText = el.textContent, origColor = el.style.color;
+  el.textContent = "⚠ Can't save an empty quote — edit or replace lines instead of deleting them all";
+  el.style.color = '#dc2626';
+  el.classList.add('show');
+  setTimeout(() => { el.classList.remove('show'); el.textContent = origText; el.style.color = origColor; }, 4000);
 }
 
 // ══════════════════════════════════════════════════
