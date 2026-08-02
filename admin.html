@@ -1463,6 +1463,56 @@ function bookingField(label, name, value, type = 'text', opts = null) {
   return `<div class="detail-field"><label>${label}</label>${input}</div>`;
 }
 
+function readItemRows(bookingId) {
+  const host = document.getElementById('items-list-' + bookingId);
+  if (!host) return [];
+  return [...host.querySelectorAll('[data-item-row]')].map(row => {
+    const get = (f) => { const el = row.querySelector(`[data-if="${f}"]`); return el ? el.value : ''; };
+    return { service_id: get('service_id'), name: get('name'), price: Number(get('price')) || 0,
+             quantity: Number(get('quantity')) || 1, kind: get('kind') || 'custom' };
+  }).filter(i => i.name.trim() !== '');
+}
+
+// Mirrors rollupItems() in _items.js: travel is excluded from the total.
+function renderItemsTotal(bookingId) {
+  const rows = readItemRows(bookingId);
+  const total = rows.filter(i => i.kind !== 'travel')
+                    .reduce((s, i) => s + i.price * Math.max(1, i.quantity), 0);
+  const travel = rows.filter(i => i.kind === 'travel')
+                     .reduce((s, i) => s + i.price * Math.max(1, i.quantity), 0);
+  const el = document.getElementById('items-total-' + bookingId);
+  if (el) el.textContent = `Total $${total.toFixed(2)}` + (travel > 0 ? ` + $${travel.toFixed(2)} travel` : '');
+}
+
+function addItemRow(bookingId, seed) {
+  const host = document.getElementById('items-list-' + bookingId);
+  if (!host) return;
+  const idx = host.querySelectorAll('[data-item-row]').length;
+  host.insertAdjacentHTML('beforeend', itemRowHtml(seed || { kind: 'service', name: '', price: 0, quantity: 1, service_id: '' }, idx));
+  renderItemsTotal(bookingId);
+}
+
+function addItemFromCatalogue(bookingId, sel) {
+  const v = sel.value;
+  if (!v) return;
+  const [kind, id] = v.split(':');
+  if (kind === 'svc') {
+    const s = (catServices || []).find(x => x.service_id === id);
+    if (s) addItemRow(bookingId, { kind: 'service', name: s.name, price: Number(s.price), quantity: 1, service_id: s.service_id });
+  } else {
+    const a = (catAddons || []).find(x => x.addon_id === id);
+    if (a) addItemRow(bookingId, { kind: 'addon', name: a.name, price: Number(a.price), quantity: 1, service_id: '' });
+  }
+  sel.value = '';
+}
+
+function removeItemRow(btn) {
+  const row = btn.closest('[data-item-row]');
+  const host = row && row.parentElement;
+  if (row) row.remove();
+  if (host) renderItemsTotal(host.id.replace('items-list-', ''));
+}
+
 // id === null opens an empty modal for a new booking taken over the phone.
 // Saving it POSTs a draft; every other path is identical to editing.
 function openBooking(id) {
@@ -1476,14 +1526,10 @@ function openBooking(id) {
     ? 'New Booking'
     : `${b.reference||'Booking'} — ${b.client_name}`;
 
-  const addons = parseAddons(b.addons);
-  const addonRows = addons.map(a =>
-    `<div class="q-row sub"><span>${esc(a.name)}</span><span>${Number(a.price||0)>0?'+$'+Number(a.price).toFixed(2):'Custom'}</span></div>`
-  ).join('');
-  const mileageRow = Number(b.mileage_cost) > 0
-    ? `<div class="q-row sub"><span>🚗 Travel (${b.mileage_miles} mi)</span><span>+$${Number(b.mileage_cost).toFixed(2)}</span></div>` : '';
-  const extraRow = Number(b.extra_hours) > 0
-    ? `<div class="q-row sub"><span>+${b.extra_hours} extra hr${b.extra_hours>1?'s':''}</span><span>+$${Number(b.extra_hours_cost||0).toFixed(2)}</span></div>` : '';
+  // Items are authoritative. A booking with none (never re-saved since the
+  // backfill, or brand new) starts from its legacy columns so the editor is
+  // never blank on a booking that clearly has a price.
+  const items = Array.isArray(b.items) && b.items.length ? b.items : legacyToItems(b);
 
   document.getElementById('modal-body').innerHTML = `
     <!-- Status pills -->
@@ -1525,14 +1571,21 @@ function openBooking(id) {
     <!-- Quote -->
     <div class="quote-block">
       <span class="section-label">Quote Breakdown</span>
-      <div class="q-row">
-        <input class="bk-edit" data-f="service_name" data-orig="${esc(b.service_name || '')}" value="${esc(b.service_name || '')}" placeholder="Service" style="max-width:60%">
-        <input class="bk-edit" data-f="service_price" data-orig="${esc(b.service_price ?? '')}" type="number" step="0.01" value="${b.service_price ?? ''}" style="max-width:110px">
+      <div id="items-list-${b.id}">
+        ${items.map(itemRowHtml).join('')}
       </div>
-      ${extraRow}${addonRows}${mileageRow}
-      <div class="q-row">
-        <span>Total</span>
-        <input class="bk-edit" data-f="total_price" data-orig="${esc(b.total_price ?? '')}" type="number" step="0.01" value="${b.total_price ?? ''}" style="max-width:110px">
+      <div style="display:flex;gap:8px;align-items:center;margin:10px 0">
+        <button class="btn btn-outline btn-sm" onclick="addItemRow('${b.id}')">+ Line</button>
+        <select id="item-picker-${b.id}" onchange="addItemFromCatalogue('${b.id}', this)" style="max-width:260px">
+          <option value="">+ From catalogue…</option>
+          <optgroup label="Services">
+            ${(catServices || []).map(s => `<option value="svc:${esc(s.service_id)}">${esc(s.name)} — $${Number(s.price).toFixed(2)}</option>`).join('')}
+          </optgroup>
+          <optgroup label="Add-ons">
+            ${(catAddons || []).map(a => `<option value="add:${esc(a.addon_id)}">${esc(a.name)} — $${Number(a.price).toFixed(2)}</option>`).join('')}
+          </optgroup>
+        </select>
+        <span style="margin-left:auto;font-weight:600" id="items-total-${b.id}"></span>
       </div>
       <div class="q-row deposit-row"><span>Deposit ${b.deposit_paid?'✅ Paid':'⏳ Unpaid'}</span><span>$${Number(b.deposit_amount||100).toFixed(2)}</span></div>
       <div class="q-row sub">
@@ -1696,6 +1749,13 @@ function openBooking(id) {
     </div>
   ` : ''}
   `;
+
+  const itemsHost = document.getElementById('items-list-' + b.id);
+  if (itemsHost) {
+    itemsHost.addEventListener('input', () => renderItemsTotal(b.id));
+    itemsHost.addEventListener('change', () => renderItemsTotal(b.id));
+    renderItemsTotal(b.id);
+  }
 
   document.getElementById('booking-modal').classList.add('open');
 
@@ -2307,13 +2367,25 @@ async function saveBookingEdits(id) {
   document.querySelectorAll('#modal-body .bk-edit').forEach(el => {
     if (el.value !== (el.dataset.orig || '')) payload[el.dataset.f] = el.value;
   });
-  // An empty payload means nothing changed. For an existing booking that is a
-  // no-op worth confirming; for a new one there is nothing to create.
-  if (!Object.keys(payload).length) {
+  const items = readItemRows(id);
+  // An empty payload AND no item rows means nothing changed. For an existing
+  // booking that is a no-op worth confirming; for a new one there is nothing
+  // to create. Item rows must be checked too — editing only the quote (no
+  // .bk-edit field touched) is the normal path now, and must not be treated
+  // as a no-op or the quote silently never reaches the server.
+  if (!Object.keys(payload).length && !items.length) {
     if (id === 'new') { alert('Nothing to save yet — enter at least a name.'); return; }
     flash('bk-flash-' + id);
     return;
   }
+  // Items replace the whole quote. service_name / service_price / total_price /
+  // mileage_cost are derived server-side from these, so do not also send them —
+  // _items.js rollupItems() is the single source of that arithmetic.
+  payload.items = items;
+  delete payload.service_name;
+  delete payload.service_price;
+  delete payload.total_price;
+  delete payload.mileage_cost;
   try {
     if (id === 'new') {
       payload.status = 'draft';
@@ -4668,6 +4740,36 @@ function parseAddons(raw) {
   if (Array.isArray(raw)) return raw;
   if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return []; } }
   return [];
+}
+
+// Mirrors _items.js itemsFor() in scripts/backfill-booking-items.js — used only
+// to seed the editor for a booking that predates the backfill.
+function legacyToItems(b) {
+  const out = [];
+  if (String(b.service_name || '').trim()) {
+    out.push({ service_id: b.service_id || '', name: b.service_name, price: Number(b.service_price || 0), quantity: 1, kind: 'service' });
+  }
+  for (const a of parseAddons(b.addons)) {
+    out.push({ service_id: '', name: a.name, price: Number(a.price || 0), quantity: 1, kind: 'addon' });
+  }
+  if (Number(b.mileage_cost || 0) > 0) {
+    out.push({ service_id: '', name: `Travel (${b.mileage_miles || 0} miles)`, price: Number(b.mileage_cost), quantity: 1, kind: 'travel' });
+  }
+  return out;
+}
+
+function itemRowHtml(i, idx) {
+  const kinds = ['service', 'addon', 'travel', 'custom'];
+  return `<div class="q-row item-row" data-item-row="${idx}">
+    <select class="item-f" data-if="kind" style="max-width:96px">
+      ${kinds.map(k => `<option value="${k}" ${k === i.kind ? 'selected' : ''}>${k}</option>`).join('')}
+    </select>
+    <input class="item-f" data-if="name" value="${esc(i.name || '')}" placeholder="Description" style="flex:1;min-width:140px">
+    <input class="item-f" data-if="quantity" type="number" min="1" step="1" value="${Number(i.quantity) || 1}" style="max-width:64px">
+    <input class="item-f" data-if="price" type="number" step="0.01" min="0" value="${Number(i.price) || 0}" style="max-width:104px">
+    <input type="hidden" class="item-f" data-if="service_id" value="${esc(i.service_id || '')}">
+    <button class="btn btn-outline btn-sm" onclick="removeItemRow(this)" title="Remove">✕</button>
+  </div>`;
 }
 
 function flash(id) {

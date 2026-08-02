@@ -163,7 +163,13 @@ exports.handler = async (event) => {
           if (u[k] !== undefined) { sets.push(`${col}=$${idx}`); vals.push(u[k]); idx++; }
         }
 
-        if (!sets.length) return json(400, { error: "No fields to update" });
+        // `items` never appears in colMap — it writes to booking_items, not to
+        // a bookings column — so an items-only PATCH would be rejected here as
+        // "No fields to update" before the items block below ever ran. The
+        // admin quote builder sends exactly that shape, because it deletes the
+        // derived money keys and lets rollupItems own them.
+        const hasItems = Array.isArray(u.items) && u.items.length > 0;
+        if (!sets.length && !hasItems) return json(400, { error: "No fields to update" });
 
         // Add missing columns if needed (safe migration)
         const newCols = [
@@ -176,14 +182,19 @@ exports.handler = async (event) => {
         ];
         for (const sql of newCols) { try { await c.query(sql); } catch(_) {} }
 
-        vals.push(parseInt(id));
-        const r = await c.query(
-          `UPDATE bookings SET ${sets.join(",")}, updated_at=NOW() WHERE id=$${idx} RETURNING *`,
-          vals
-        );
-        if (!r.rows.length) return json(404, { error: "Not found" });
-
-        let updated = r.rows[0];
+        // An items-only PATCH has no bookings columns to set. Skip the UPDATE
+        // entirely rather than emitting `SET , updated_at=NOW()`; the items
+        // block below writes the derived columns and bumps updated_at itself.
+        let updated = prev;
+        if (sets.length) {
+          vals.push(parseInt(id));
+          const r = await c.query(
+            `UPDATE bookings SET ${sets.join(",")}, updated_at=NOW() WHERE id=$${idx} RETURNING *`,
+            vals
+          );
+          if (!r.rows.length) return json(404, { error: "Not found" });
+          updated = r.rows[0];
+        }
         let stripeLink = null;
 
         // total_price / mileage_cost / deposit_amount feed balance_due
