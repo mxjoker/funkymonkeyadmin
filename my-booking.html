@@ -387,10 +387,17 @@
       document.getElementById('result-reference').textContent = booking.reference;
 
       const detailsHtml = `
-        <div class="detail-row">
-          <span class="detail-label">Service</span>
-          <span class="detail-value">${esc(booking.service_name)}</span>
-        </div>
+        ${(Array.isArray(booking.items) && booking.items.length
+          ? booking.items.map(i => `
+            <div class="detail-row">
+              <span class="detail-label">${i.kind === 'service' ? 'Service' : i.kind === 'travel' ? 'Travel' : 'Add-on'}</span>
+              <span class="detail-value">${esc(i.name)}${i.quantity > 1 ? ` ×${i.quantity}` : ''} — $${(Number(i.price) * Math.max(1, Number(i.quantity) || 1)).toFixed(2)}</span>
+            </div>`).join('')
+          : `
+            <div class="detail-row">
+              <span class="detail-label">Service</span>
+              <span class="detail-value">${esc(booking.service_name)}</span>
+            </div>`)}
         <div class="detail-row">
           <span class="detail-label">Date</span>
           <span class="detail-value">${formatDate(booking.event_date)}</span>
@@ -427,6 +434,23 @@
             <span class="detail-value" style="font-weight:400;line-height:1.6">${esc(booking.notes)}</span>
           </div>
         ` : ''}
+        ${booking.status === 'quoted' ? `
+          <div style="margin-top:20px;padding-top:20px;border-top:1px solid rgba(255,255,255,.12);text-align:center">
+            <p style="color:#A78BCA;line-height:1.6;margin-bottom:14px">
+              Happy with this quote? Accept it and we'll send your deposit link to confirm the date.
+            </p>
+            <button id="accept-btn" onclick="acceptQuote()"
+              style="background:#FF6B00;color:#0F0A1E;padding:14px 32px;border:none;border-radius:10px;font-weight:900;font-size:15px;cursor:pointer">
+              Accept This Quote
+            </button>
+            <div id="accept-msg" style="margin-top:12px;font-size:14px"></div>
+          </div>
+        ` : ''}
+        ${booking._justAccepted ? `
+          <div style="margin-top:20px;padding-top:20px;border-top:1px solid rgba(255,255,255,.12);text-align:center">
+            <p style="color:#4ade80;font-weight:700">🎉 Accepted! We'll email your deposit link shortly.</p>
+          </div>
+        ` : ''}
       `;
 
       document.getElementById('booking-details').innerHTML = detailsHtml;
@@ -450,8 +474,11 @@
 
     function formatStatus(status) {
       const labels = {
-        review: '📋 Under Review',
-        pending: '⏳ Pending Confirmation',
+        draft:     '📝 Being Prepared',
+        review:    '📋 Under Review',
+        quoted:    '💬 Quote Ready',
+        accepted:  '🤝 Accepted — Deposit Next',
+        pending:   '⏳ Pending Confirmation',
         confirmed: '✅ Confirmed',
         completed: '🎉 Completed',
         cancelled: '❌ Cancelled'
@@ -490,6 +517,46 @@
       } catch(e) {
         console.error('COI request error:', e);
         alert('❌ Failed to send COI request. Please contact us at (405) 431-6625.');
+      }
+    }
+
+    async function acceptQuote() {
+      if (!currentBooking) return;
+      const btn = document.getElementById('accept-btn');
+      const msg = document.getElementById('accept-msg');
+      btn.disabled = true;
+      btn.textContent = 'Accepting…';
+      msg.textContent = '';
+
+      try {
+        const res = await fetch('/api/accept-quote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reference: currentBooking.reference,
+            client_email: currentBooking.client_email
+          })
+        });
+        const data = await res.json();
+
+        // Report what the server actually said. A non-ok response with a body
+        // is not a success, and its message is more useful than a generic one.
+        if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+
+        // displayBooking() below replaces #booking-details.innerHTML synchronously,
+        // so #accept-msg (and this button) are gone before the browser ever paints
+        // them — status is 'accepted' now, which drops the whole `status==='quoted'`
+        // block that contains them. The confirmation has to live in the re-rendered
+        // markup itself; _justAccepted tells displayBooking to include it.
+        currentBooking.status = 'accepted';
+        currentBooking._justAccepted = true;
+        displayBooking(currentBooking);
+      } catch (e) {
+        console.error('Accept error:', e);
+        msg.style.color = '#f87171';
+        msg.textContent = e.message + ' — call us on (405) 431-6625 if this looks wrong.';
+        btn.disabled = false;
+        btn.textContent = 'Accept This Quote';
       }
     }
 

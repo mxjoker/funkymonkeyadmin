@@ -1463,6 +1463,71 @@ function bookingField(label, name, value, type = 'text', opts = null) {
   return `<div class="detail-field"><label>${label}</label>${input}</div>`;
 }
 
+// Mirrors _items.js clampPrice() exactly, including the isFinite guard —
+// `Number(v) || 0` alone lets Infinity through, which then clamps to 100000
+// client-side while the server's isFinite check stores 0. Not reachable via
+// the widget's type="number" input, but the client total must never disagree
+// with what the server actually persists.
+function clampItemPrice(v) {
+  const n = Number(v);
+  return isFinite(n) ? Math.min(Math.max(n, 0), 100000) : 0;
+}
+
+function readItemRows(bookingId) {
+  const host = document.getElementById('items-list-' + bookingId);
+  if (!host) return [];
+  return [...host.querySelectorAll('[data-item-row]')].map(row => {
+    const get = (f) => { const el = row.querySelector(`[data-if="${f}"]`); return el ? el.value : ''; };
+    // Clamp to match _items.js clampPrice/normaliseItems exactly — otherwise a
+    // negative price or fractional quantity shows one total in the modal and
+    // saves a different one server-side.
+    return { service_id: get('service_id'), name: get('name'),
+             price: clampItemPrice(get('price')),
+             quantity: Math.min(Math.max(Math.floor(Number(get('quantity'))) || 1, 1), 1000),
+             kind: get('kind') || 'custom' };
+  }).filter(i => i.name.trim() !== '');
+}
+
+// Mirrors rollupItems() in _items.js: travel is excluded from the total.
+function renderItemsTotal(bookingId) {
+  const rows = readItemRows(bookingId);
+  const total = rows.filter(i => i.kind !== 'travel')
+                    .reduce((s, i) => s + i.price * Math.max(1, i.quantity), 0);
+  const travel = rows.filter(i => i.kind === 'travel')
+                     .reduce((s, i) => s + i.price * Math.max(1, i.quantity), 0);
+  const el = document.getElementById('items-total-' + bookingId);
+  if (el) el.textContent = `Total $${total.toFixed(2)}` + (travel > 0 ? ` + $${travel.toFixed(2)} travel` : '');
+}
+
+function addItemRow(bookingId, seed) {
+  const host = document.getElementById('items-list-' + bookingId);
+  if (!host) return;
+  const idx = host.querySelectorAll('[data-item-row]').length;
+  host.insertAdjacentHTML('beforeend', itemRowHtml(seed || { kind: 'service', name: '', price: 0, quantity: 1, service_id: '' }, idx));
+  renderItemsTotal(bookingId);
+}
+
+function addItemFromCatalogue(bookingId, sel) {
+  const v = sel.value;
+  if (!v) return;
+  const [kind, id] = v.split(':');
+  if (kind === 'svc') {
+    const s = (catServices || []).find(x => x.service_id === id);
+    if (s) addItemRow(bookingId, { kind: 'service', name: s.name, price: Number(s.price), quantity: 1, service_id: s.service_id });
+  } else {
+    const a = (catAddons || []).find(x => x.addon_id === id);
+    if (a) addItemRow(bookingId, { kind: 'addon', name: a.name, price: Number(a.price), quantity: 1, service_id: '' });
+  }
+  sel.value = '';
+}
+
+function removeItemRow(btn) {
+  const row = btn.closest('[data-item-row]');
+  const host = row && row.parentElement;
+  if (row) row.remove();
+  if (host) renderItemsTotal(host.id.replace('items-list-', ''));
+}
+
 // id === null opens an empty modal for a new booking taken over the phone.
 // Saving it POSTs a draft; every other path is identical to editing.
 function openBooking(id) {
@@ -1476,14 +1541,10 @@ function openBooking(id) {
     ? 'New Booking'
     : `${b.reference||'Booking'} — ${b.client_name}`;
 
-  const addons = parseAddons(b.addons);
-  const addonRows = addons.map(a =>
-    `<div class="q-row sub"><span>${esc(a.name)}</span><span>${Number(a.price||0)>0?'+$'+Number(a.price).toFixed(2):'Custom'}</span></div>`
-  ).join('');
-  const mileageRow = Number(b.mileage_cost) > 0
-    ? `<div class="q-row sub"><span>🚗 Travel (${b.mileage_miles} mi)</span><span>+$${Number(b.mileage_cost).toFixed(2)}</span></div>` : '';
-  const extraRow = Number(b.extra_hours) > 0
-    ? `<div class="q-row sub"><span>+${b.extra_hours} extra hr${b.extra_hours>1?'s':''}</span><span>+$${Number(b.extra_hours_cost||0).toFixed(2)}</span></div>` : '';
+  // Items are authoritative. A booking with none (never re-saved since the
+  // backfill, or brand new) starts from its legacy columns so the editor is
+  // never blank on a booking that clearly has a price.
+  const items = Array.isArray(b.items) && b.items.length ? b.items : legacyToItems(b);
 
   document.getElementById('modal-body').innerHTML = `
     <!-- Status pills -->
@@ -1525,14 +1586,15 @@ function openBooking(id) {
     <!-- Quote -->
     <div class="quote-block">
       <span class="section-label">Quote Breakdown</span>
-      <div class="q-row">
-        <input class="bk-edit" data-f="service_name" data-orig="${esc(b.service_name || '')}" value="${esc(b.service_name || '')}" placeholder="Service" style="max-width:60%">
-        <input class="bk-edit" data-f="service_price" data-orig="${esc(b.service_price ?? '')}" type="number" step="0.01" value="${b.service_price ?? ''}" style="max-width:110px">
+      <div id="items-list-${b.id}" data-had-items="${items.length ? '1' : '0'}">
+        ${items.map(itemRowHtml).join('')}
       </div>
-      ${extraRow}${addonRows}${mileageRow}
-      <div class="q-row">
-        <span>Total</span>
-        <input class="bk-edit" data-f="total_price" data-orig="${esc(b.total_price ?? '')}" type="number" step="0.01" value="${b.total_price ?? ''}" style="max-width:110px">
+      <div style="display:flex;gap:8px;align-items:center;margin:10px 0">
+        <button class="btn btn-outline btn-sm" onclick="addItemRow('${b.id}')">+ Line</button>
+        <select id="item-picker-${b.id}" onchange="addItemFromCatalogue('${b.id}', this)" style="max-width:260px">
+          ${catalogueOptionsHtml()}
+        </select>
+        <span style="margin-left:auto;font-weight:600" id="items-total-${b.id}"></span>
       </div>
       <div class="q-row deposit-row"><span>Deposit ${b.deposit_paid?'✅ Paid':'⏳ Unpaid'}</span><span>$${Number(b.deposit_amount||100).toFixed(2)}</span></div>
       <div class="q-row sub">
@@ -1547,7 +1609,7 @@ function openBooking(id) {
           <input class="bk-edit" data-f="deposit_ref" data-orig="${esc(b.deposit_ref || '')}" value="${esc(b.deposit_ref || '')}" placeholder="ref" style="max-width:110px">
         </span>
       </div>
-      <div class="q-row"><span>Balance Due at Event</span><span>${Number(b.balance_due||0)>0?'$'+Number(b.balance_due).toFixed(2):'TBD'}</span></div>
+      <div class="q-row"><span>Balance Due at Event</span><span id="balance-due-${b.id}">${Number(b.balance_due||0)>0?'$'+Number(b.balance_due).toFixed(2):'TBD'}</span></div>
     </div>
 
     ${isNew ? '' : `
@@ -1696,6 +1758,14 @@ function openBooking(id) {
     </div>
   ` : ''}
   `;
+
+  const itemsHost = document.getElementById('items-list-' + b.id);
+  if (itemsHost) {
+    itemsHost.addEventListener('input', () => renderItemsTotal(b.id));
+    itemsHost.addEventListener('change', () => renderItemsTotal(b.id));
+    renderItemsTotal(b.id);
+  }
+  ensureCatalogueLoaded(b.id);
 
   document.getElementById('booking-modal').classList.add('open');
 
@@ -2307,13 +2377,37 @@ async function saveBookingEdits(id) {
   document.querySelectorAll('#modal-body .bk-edit').forEach(el => {
     if (el.value !== (el.dataset.orig || '')) payload[el.dataset.f] = el.value;
   });
-  // An empty payload means nothing changed. For an existing booking that is a
-  // no-op worth confirming; for a new one there is nothing to create.
-  if (!Object.keys(payload).length) {
+  const items = readItemRows(id);
+  // Deleting every row and saving some other field in the same click would
+  // otherwise send `items: []`, which booking.js correctly refuses to act on
+  // (an items-only or items-included PATCH never zeroes a quote by design —
+  // see Step 0's hasItems guard) — but the OTHER fields in that same payload
+  // still save, the UI still flashes "✓ Saved", and the admin has no way to
+  // know their deletion did nothing. Catch it client-side instead of letting
+  // it round-trip as a silent no-op.
+  const itemsHost = document.getElementById('items-list-' + id);
+  if (itemsHost && itemsHost.dataset.hadItems === '1' && !items.length) {
+    warnCantEmptyQuote(id);
+    return;
+  }
+  // An empty payload AND no item rows means nothing changed. For an existing
+  // booking that is a no-op worth confirming; for a new one there is nothing
+  // to create. Item rows must be checked too — editing only the quote (no
+  // .bk-edit field touched) is the normal path now, and must not be treated
+  // as a no-op or the quote silently never reaches the server.
+  if (!Object.keys(payload).length && !items.length) {
     if (id === 'new') { alert('Nothing to save yet — enter at least a name.'); return; }
     flash('bk-flash-' + id);
     return;
   }
+  // Items replace the whole quote. service_name / service_price / total_price /
+  // mileage_cost are derived server-side from these, so do not also send them —
+  // _items.js rollupItems() is the single source of that arithmetic.
+  payload.items = items;
+  delete payload.service_name;
+  delete payload.service_price;
+  delete payload.total_price;
+  delete payload.mileage_cost;
   try {
     if (id === 'new') {
       payload.status = 'draft';
@@ -2337,6 +2431,14 @@ async function saveBookingEdits(id) {
     // Keep local state in sync so re-opening the modal shows the new values
     const i = allBookings.findIndex(x => String(x.id) === String(id));
     if (i > -1) allBookings[i] = updated;
+    // The modal's own DOM doesn't re-render after a save (it's a one-shot
+    // innerHTML from openBooking), so Balance Due would otherwise sit stale —
+    // now that quote editing is the modal's main job, a wrong money figure in
+    // front of the owner is routine, not rare. Refresh just that one span,
+    // not the whole modal — cheaper and doesn't disturb scroll position.
+    const bdEl = document.getElementById('balance-due-' + id);
+    if (bdEl) bdEl.textContent = Number(updated.balance_due || 0) > 0
+      ? '$' + Number(updated.balance_due).toFixed(2) : 'TBD';
     flash('bk-flash-' + id);
     renderBookingsTable();
   } catch (e) {
@@ -4670,11 +4772,80 @@ function parseAddons(raw) {
   return [];
 }
 
+// Mirrors _items.js itemsFor() in scripts/backfill-booking-items.js — used only
+// to seed the editor for a booking that predates the backfill.
+function legacyToItems(b) {
+  const out = [];
+  if (String(b.service_name || '').trim()) {
+    out.push({ service_id: b.service_id || '', name: b.service_name, price: Number(b.service_price || 0), quantity: 1, kind: 'service' });
+  }
+  for (const a of parseAddons(b.addons)) {
+    out.push({ service_id: '', name: a.name, price: Number(a.price || 0), quantity: 1, kind: 'addon' });
+  }
+  if (Number(b.mileage_cost || 0) > 0) {
+    out.push({ service_id: '', name: `Travel (${b.mileage_miles || 0} miles)`, price: Number(b.mileage_cost), quantity: 1, kind: 'travel' });
+  }
+  return out;
+}
+
+function itemRowHtml(i, idx) {
+  const kinds = ['service', 'addon', 'travel', 'custom'];
+  return `<div class="q-row item-row" data-item-row="${idx}">
+    <select class="item-f" data-if="kind" style="max-width:96px">
+      ${kinds.map(k => `<option value="${k}" ${k === i.kind ? 'selected' : ''}>${k}</option>`).join('')}
+    </select>
+    <input class="item-f" data-if="name" value="${esc(i.name || '')}" placeholder="Description" style="flex:1;min-width:140px">
+    <input class="item-f" data-if="quantity" type="number" min="1" step="1" value="${Number(i.quantity) || 1}" style="max-width:64px">
+    <input class="item-f" data-if="price" type="number" step="0.01" min="0" value="${Number(i.price) || 0}" style="max-width:104px">
+    <input type="hidden" class="item-f" data-if="service_id" value="${esc(i.service_id || '')}">
+    <button class="btn btn-outline btn-sm" onclick="removeItemRow(this)" title="Remove">✕</button>
+  </div>`;
+}
+
+// Shared by the initial modal render and by ensureCatalogueLoaded's
+// post-fetch refresh, so the two never drift out of sync.
+function catalogueOptionsHtml() {
+  return `<option value="">+ From catalogue…</option>
+          <optgroup label="Services">
+            ${(catServices || []).map(s => `<option value="svc:${esc(s.service_id)}">${esc(s.name)} — $${Number(s.price).toFixed(2)}</option>`).join('')}
+          </optgroup>
+          <optgroup label="Add-ons">
+            ${(catAddons || []).map(a => `<option value="add:${esc(a.addon_id)}">${esc(a.name)} — $${Number(a.price).toFixed(2)}</option>`).join('')}
+          </optgroup>`;
+}
+
+// Catalogue data only loads when the admin visits the Catalogue tab
+// (showPage -> loadCatalogue). openBooking is the only other consumer, and an
+// admin quoting a booking first thing in a session would otherwise see an
+// empty picker. Fire-and-forget: loadCatalogue already swallows its own
+// fetch errors, so this never blocks or breaks the modal that's already open.
+function ensureCatalogueLoaded(bookingId) {
+  if (catServices.length) return;
+  loadCatalogue().then(() => {
+    const sel = document.getElementById('item-picker-' + bookingId);
+    if (sel) sel.innerHTML = catalogueOptionsHtml();
+  });
+}
+
 function flash(id) {
   const el = document.getElementById(id);
   if (!el) return;
   el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// Reuses the modal's existing save-flash span rather than alert() — alert()
+// freezes browser automation and this project's gates depend on it. Swaps
+// the text/color in place, then restores both so the span is back to normal
+// "✓ Saved" the next time a real save succeeds.
+function warnCantEmptyQuote(id) {
+  const el = document.getElementById('bk-flash-' + id);
+  if (!el) return;
+  const origText = el.textContent, origColor = el.style.color;
+  el.textContent = "⚠ Nothing was saved — a quote can't be emptied. Edit or replace the lines, then save again.";
+  el.style.color = '#dc2626';
+  el.classList.add('show');
+  setTimeout(() => { el.classList.remove('show'); el.textContent = origText; el.style.color = origColor; }, 4000);
 }
 
 // ══════════════════════════════════════════════════
@@ -5256,7 +5427,8 @@ async function loadOtto() {
   try {
     const [gateData, briefData, runData] = await Promise.all([
       leadsApi('agent-queue?kind=gate&status=open'),
-      leadsApi('agent-queue?kind=briefing&limit=1'),
+      // status=open so a cancelled or superseded briefing can't masquerade as the latest
+      leadsApi('agent-queue?kind=briefing&status=open&limit=1'),
       leadsApi('agent-queue?kind=run&status=open'),
     ]);
 

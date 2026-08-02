@@ -2,6 +2,7 @@ const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
 const { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
+const { ensureBookingItems, replaceItems, rollupItems, getItems, balanceIsDerivable, normaliseItems } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -87,6 +88,13 @@ exports.handler = async (event) => {
       if (event.httpMethod === "PATCH") {
         const u = JSON.parse(event.body || "{}");
 
+        // Normalise once, gate on this everywhere. normaliseItems drops
+        // blank-name rows — an array of them must not pass as "non-empty"
+        // just because the raw payload had entries; that is the exact quote
+        // wipe the guard below exists to prevent. bookings.js:430 already
+        // does it this way; this brings booking.js into agreement.
+        const postedItems = Array.isArray(u.items) ? normaliseItems(u.items) : [];
+
         // A cleared <input> posts '' — Postgres rejects that for non-text
         // columns. Only touch keys actually present, so no null is invented.
         for (const f of ['event_date', 'confirmation_deadline', 'deposit_paid_at']) {
@@ -156,13 +164,29 @@ exports.handler = async (event) => {
         const prev = prevRes.rows[0];
         const prevStatus = prev.status || '?';
 
+        // Decided against the row as it stood BEFORE this request, so a caller
+        // cannot make a balance derivable by editing it in the same PATCH.
+        const canDeriveBalance = balanceIsDerivable(prev);
+
+        // Captured before the BALANCE_INPUTS block below sets u.balance_due for
+        // the benefit of the change-logging loop. Without this, the items block
+        // cannot tell a value the caller sent from one this handler injected,
+        // and would persist a balance derived from the pre-edit total_price.
+        const explicitBalance = u.balance_due !== undefined;
+
         const sets = [], vals = [];
         let idx = 1;
         for (const [k, col] of Object.entries(colMap)) {
           if (u[k] !== undefined) { sets.push(`${col}=$${idx}`); vals.push(u[k]); idx++; }
         }
 
-        if (!sets.length) return json(400, { error: "No fields to update" });
+        // `items` never appears in colMap — it writes to booking_items, not to
+        // a bookings column — so an items-only PATCH would be rejected here as
+        // "No fields to update" before the items block below ever ran. The
+        // admin quote builder sends exactly that shape, because it deletes the
+        // derived money keys and lets rollupItems own them.
+        const hasItems = postedItems.length > 0;
+        if (!sets.length && !hasItems) return json(400, { error: "No fields to update" });
 
         // Add missing columns if needed (safe migration)
         const newCols = [
@@ -175,14 +199,19 @@ exports.handler = async (event) => {
         ];
         for (const sql of newCols) { try { await c.query(sql); } catch(_) {} }
 
-        vals.push(parseInt(id));
-        const r = await c.query(
-          `UPDATE bookings SET ${sets.join(",")}, updated_at=NOW() WHERE id=$${idx} RETURNING *`,
-          vals
-        );
-        if (!r.rows.length) return json(404, { error: "Not found" });
-
-        let updated = r.rows[0];
+        // An items-only PATCH has no bookings columns to set. Skip the UPDATE
+        // entirely rather than emitting `SET , updated_at=NOW()`; the items
+        // block below writes the derived columns and bumps updated_at itself.
+        let updated = prev;
+        if (sets.length) {
+          vals.push(parseInt(id));
+          const r = await c.query(
+            `UPDATE bookings SET ${sets.join(",")}, updated_at=NOW() WHERE id=$${idx} RETURNING *`,
+            vals
+          );
+          if (!r.rows.length) return json(404, { error: "Not found" });
+          updated = r.rows[0];
+        }
         let stripeLink = null;
 
         // total_price / mileage_cost / deposit_amount feed balance_due
@@ -193,16 +222,81 @@ exports.handler = async (event) => {
         // the recompute is logged like any other change.
         const BALANCE_INPUTS = ['total_price', 'mileage_cost', 'deposit_amount'];
         if (BALANCE_INPUTS.some(f => u[f] !== undefined) && u.balance_due === undefined) {
-          const newBalance = Math.max(0,
-            Number(updated.total_price || 0) + Number(updated.mileage_cost || 0) - Number(updated.deposit_amount || 0));
-          const r3 = await c.query(
-            `UPDATE bookings SET balance_due=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
-            [newBalance, parseInt(id)]
+          if (!canDeriveBalance) {
+            // This booking's balance was settled out-of-band. Recomputing would
+            // re-bill a customer who has already paid. Leave it and leave a trail.
+            await logChange(c, parseInt(id), 'Balance recompute skipped',
+              `stored $${Number(prev.balance_due || 0).toFixed(2)} is not explained by ` +
+              `total + mileage - deposit; left unchanged`);
+          } else {
+            const newBalance = Math.max(0,
+              Number(updated.total_price || 0) + Number(updated.mileage_cost || 0) - Number(updated.deposit_amount || 0));
+            const r3 = await c.query(
+              `UPDATE bookings SET balance_due=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
+              [newBalance, parseInt(id)]
+            );
+            updated = r3.rows[0];
+            // Mark balance_due as "sent" so the field-level logging loop below
+            // (which only inspects keys present in `u`) picks up the change.
+            u.balance_due = newBalance;
+          }
+        }
+
+        // ── Items (Phase 3) ────────────────────────────────────────────────
+        // A supplied items array replaces the whole set and re-derives every
+        // legacy money column. Runs before the Stripe-link block below so a
+        // link generated on this same PATCH quotes the new deposit basis.
+        // A non-empty array is required, not merely a present key. An empty
+        // array would otherwise delete every item and zero total_price,
+        // service_price, addon_total, mileage_cost and balance_due on a real
+        // booking — so an admin form that PATCHed before its item rows loaded
+        // would silently wipe a customer's quote. A genuine quote always has
+        // at least one line, so nothing legitimate is lost by ignoring [].
+        // The guard lives here, where every caller routes through, rather than
+        // in the UI: trusting the caller is this codebase's documented
+        // recurring failure mode.
+        let items = null;
+        if (postedItems.length > 0) {
+          await ensureBookingItems(c);
+          const before = await getItems(c, parseInt(id));
+          items = await replaceItems(c, parseInt(id), postedItems);
+          const roll = rollupItems(items);
+          // An explicit balance_due from the caller is a decision, not a
+          // derivation — it wins over both the formula and the "leave it"
+          // fallback below. It's already been written by the initial UPDATE
+          // above (balance_due is a colMap column), so `updated.balance_due`
+          // already holds it; no skip log, because nothing was skipped.
+          let newBalance;
+          if (explicitBalance) {
+            newBalance = Number(updated.balance_due || 0);
+          } else if (canDeriveBalance) {
+            newBalance = Math.max(0, roll.total_price + roll.mileage_cost - Number(updated.deposit_amount || 0));
+          } else {
+            newBalance = Number(updated.balance_due || 0);
+            await logChange(c, parseInt(id), 'Balance recompute skipped',
+              `quote edited, but stored $${Number(prev.balance_due || 0).toFixed(2)} is not ` +
+              `explained by total + mileage - deposit; left unchanged`);
+          }
+          const r4 = await c.query(
+            `UPDATE bookings SET service_id=$1, service_name=$2, service_price=$3,
+                    addons=$4, addon_total=$5, mileage_cost=$6, total_price=$7,
+                    balance_due=$8, updated_at=NOW()
+             WHERE id=$9 RETURNING *`,
+            [roll.service_id, roll.service_name, roll.service_price,
+             JSON.stringify(roll.addons), roll.addon_total, roll.mileage_cost,
+             roll.total_price, newBalance, parseInt(id)]
           );
-          updated = r3.rows[0];
-          // Mark balance_due as "sent" so the field-level logging loop below
-          // (which only inspects keys present in `u`) picks up the change.
-          u.balance_due = newBalance;
+          updated = r4.rows[0];
+
+          // Traceability: the spec chose a child table over the addons JSONB
+          // precisely so quote edits leave a trail. Log the whole before/after
+          // line set, not just a count.
+          const fmt = (list) => list.length
+            ? list.map(i => `${i.name} x${i.quantity} $${Number(i.price).toFixed(2)}`).join('; ')
+            : '—';
+          if (fmt(before) !== fmt(items)) {
+            await logChange(c, parseInt(id), 'Quote items changed', `${fmt(before)} → ${fmt(items)}`);
+          }
         }
 
         // Auto-generate Stripe link when confirmed
@@ -283,7 +377,7 @@ exports.handler = async (event) => {
           }
         }
 
-        return json(200, updated);
+        return json(200, items === null ? updated : { ...updated, items });
       }
 
       if (event.httpMethod === "DELETE") {

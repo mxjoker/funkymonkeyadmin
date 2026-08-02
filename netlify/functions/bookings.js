@@ -3,6 +3,7 @@ const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
 const { esc, wrap, sendEmail, fmtEventDate } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
+const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems, getItemsForBookings } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -13,6 +14,7 @@ const PUBLIC_FIELDS = [
   'start_time', 'end_time', 'guest_count', 'venue_name',
   'event_address', 'client_name', 'client_email', 'addons', 'total_price', 'mileage_cost',
   'deposit_amount', 'deposit_paid', 'balance_due', 'payment_amount', 'created_at',
+  'items',
 ];
 
 function pickPublicFields(row) {
@@ -170,11 +172,13 @@ exports.handler = async (event) => {
         // Admin: full row
         return withClient(async (client) => {
           await ensureTable(client);
+          await ensureBookingItems(client);
           const { rows } = await client.query(
             'SELECT * FROM bookings WHERE reference = $1',
             [ref]
           );
           if (!rows.length) return json(404, { error: 'Not found' });
+          rows[0].items = await getItems(client, rows[0].id);
           return json(200, { bookings: rows });
         });
       }
@@ -185,6 +189,7 @@ exports.handler = async (event) => {
 
       return withClient(async (client) => {
         await ensureTable(client);
+        await ensureBookingItems(client);
         const { rows } = await client.query(
           'SELECT * FROM bookings WHERE reference = $1',
           [ref]
@@ -194,6 +199,7 @@ exports.handler = async (event) => {
         if ((rows[0].client_email || '').toLowerCase() !== emailParam) {
           return json(404, { error: 'Not found' });
         }
+        rows[0].items = await getItems(client, rows[0].id);
         return json(200, { bookings: [pickPublicFields(rows[0])] });
       });
     }
@@ -234,6 +240,9 @@ exports.handler = async (event) => {
         `SELECT * FROM bookings ${where} ORDER BY created_at DESC`,
         params
       );
+      await ensureBookingItems(client);
+      const itemMap = await getItemsForBookings(client, rows.map(r => r.id));
+      for (const r of rows) r.items = itemMap.get(r.id) || [];
       return json(200, rows);
     });
   }
@@ -415,6 +424,27 @@ exports.handler = async (event) => {
 
       const booking = rows[0];
 
+      // Items are authoritative when supplied. The legacy columns are then
+      // derived, never hand-set, so there is one definition of the price.
+      let items = [];
+      const posted = normaliseItems(b.items);
+      if (posted.length) {
+        await ensureBookingItems(client);
+        items = await replaceItems(client, booking.id, posted);
+        const roll = rollupItems(items);
+        const newBalance = Math.max(0, roll.total_price + roll.mileage_cost - Number(booking.deposit_amount || 0));
+        const { rows: re } = await client.query(
+          `UPDATE bookings SET service_id=$1, service_name=$2, service_price=$3,
+                  addons=$4, addon_total=$5, mileage_cost=$6, total_price=$7,
+                  balance_due=$8, updated_at=NOW()
+           WHERE id=$9 RETURNING *`,
+          [roll.service_id, roll.service_name, roll.service_price,
+           JSON.stringify(roll.addons), roll.addon_total, roll.mileage_cost,
+           roll.total_price, newBalance, booking.id]
+        );
+        Object.assign(booking, re[0]);
+      }
+
       // Await both — in a serverless function the container may terminate as soon
       // as the handler returns, dropping any unawaited fetch calls to Resend.
       // Drafts send nothing: the record is half-finished, the client may have no
@@ -426,7 +456,7 @@ exports.handler = async (event) => {
 
       // `booking` is additive — booking-form.html reads `reference` and is
       // unaffected. The admin UI needs the full row for its local state.
-      return json(201, { success: true, reference: booking.reference, id: booking.id, booking });
+      return json(201, { success: true, reference: booking.reference, id: booking.id, booking, items });
     });
   }
 

@@ -3,6 +3,7 @@
 
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
+const { ensureBookingItems } = require('./_items');
 
 /**
  * Generate CSV from array of objects
@@ -49,6 +50,10 @@ async function getBookingFinancials(client, startDate, endDate) {
       b.status,
       b.event_date,
       b.service_name,
+      COALESCE((
+        SELECT string_agg(bi.name || CASE WHEN bi.quantity > 1 THEN ' x' || bi.quantity ELSE '' END, ' + ' ORDER BY bi.sort_order, bi.id)
+        FROM booking_items bi WHERE bi.booking_id = b.id
+      ), b.service_name) AS items,
       b.client_name,
       b.total_price,
       b.deposit_amount,
@@ -136,27 +141,51 @@ async function getExpenses(client, startDate, endDate) {
 }
 
 /**
- * Get revenue summary by service type
+ * Get revenue summary by service.
+ *
+ * Groups by booking_items.name so a multi-service package contributes to each
+ * service it contains. Revenue is apportioned across a booking's billable
+ * items by their share of the line total — a package's $970 splits 385/200/385
+ * rather than counting $970 three times.
+ *
+ * Bookings with no items fall back to a single synthetic line from
+ * service_name, so pre-Phase-3 rows that were never backfilled still appear.
  */
 async function getRevenueByService(client, startDate, endDate) {
   const query = `
+    WITH lines AS (
+      SELECT b.id AS booking_id,
+             COALESCE(bi.name, b.service_name) AS service_name,
+             COALESCE(bi.price * GREATEST(bi.quantity, 1), b.total_price) AS line_amount
+      FROM bookings b
+      LEFT JOIN booking_items bi
+        ON bi.booking_id = b.id AND bi.kind <> 'travel'
+      WHERE b.event_date >= $1 AND b.event_date <= $2
+        AND b.status IN ('confirmed', 'completed')
+    ),
+    shares AS (
+      SELECT l.booking_id, l.service_name,
+             CASE WHEN SUM(l.line_amount) OVER (PARTITION BY l.booking_id) > 0
+                  THEN l.line_amount / SUM(l.line_amount) OVER (PARTITION BY l.booking_id)
+                  ELSE 0 END AS share
+      FROM lines l
+    )
     SELECT
-      b.service_name,
-      COUNT(*) as booking_count,
-      SUM(b.total_price) as total_revenue,
-      AVG(b.total_price) as avg_price,
-      SUM(COALESCE(sp.total_staff_cost, 0)) as total_staff_cost,
-      SUM(b.total_price) - SUM(COALESCE(sp.total_staff_cost, 0)) as gross_profit
-    FROM bookings b
+      s.service_name,
+      COUNT(DISTINCT s.booking_id)                                    AS booking_count,
+      SUM(b.total_price * s.share)                                    AS total_revenue,
+      SUM(b.total_price * s.share) / NULLIF(COUNT(DISTINCT s.booking_id), 0) AS avg_price,
+      SUM(COALESCE(sp.total_staff_cost, 0) * s.share)                 AS total_staff_cost,
+      SUM(b.total_price * s.share) - SUM(COALESCE(sp.total_staff_cost, 0) * s.share) AS gross_profit
+    FROM shares s
+    JOIN bookings b ON b.id = s.booking_id
     LEFT JOIN (
-      SELECT booking_id, SUM(amount) as total_staff_cost
+      SELECT booking_id, SUM(amount) AS total_staff_cost
       FROM staff_payments
       GROUP BY booking_id
     ) sp ON sp.booking_id = b.id
-    WHERE b.event_date >= $1
-      AND b.event_date <= $2
-      AND b.status IN ('confirmed', 'completed')
-    GROUP BY b.service_name
+    WHERE COALESCE(s.service_name, '') <> ''
+    GROUP BY s.service_name
     ORDER BY total_revenue DESC
   `;
 
@@ -182,6 +211,9 @@ exports.handler = async (event) => {
 
   return withClient(async (client) => {
     try {
+      // Two report queries below reference booking_items directly.
+      await ensureBookingItems(client);
+
       const { report_type, start_date, end_date, year } = event.queryStringParameters || {};
 
       // Determine date range
@@ -212,6 +244,7 @@ exports.handler = async (event) => {
             { key: 'event_date', label: 'Event Date' },
             { key: 'status', label: 'Status' },
             { key: 'service_name', label: 'Service' },
+            { key: 'items', label: 'Line Items' },
             { key: 'client_name', label: 'Client' },
             { key: 'total_price', label: 'Total Price', format: 'currency' },
             { key: 'deposit_amount', label: 'Deposit', format: 'currency' },

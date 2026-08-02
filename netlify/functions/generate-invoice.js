@@ -2,6 +2,7 @@ const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth } = require('./_auth');
 const { fmtEventDate } = require('./_email');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
+const { ensureBookingItems, getItems } = require('./_items');
 
 // PDF responses need different Content-Type but still need CORS headers
 const pdfHeaders = {
@@ -62,6 +63,9 @@ exports.handler = async (event, context) => {
           return { statusCode: 404, headers: pdfHeaders, body: JSON.stringify({ error: 'Not found' }) };
         }
       }
+
+      await ensureBookingItems(client);
+      booking.items = await getItems(client, booking.id);
 
       // Create PDF
       const pdfDoc = await PDFDocument.create();
@@ -154,28 +158,35 @@ exports.handler = async (event, context) => {
       page.drawLine({ start: { x: 50, y }, end: { x: 562, y }, thickness: 1, color: lightGray });
       y -= 15;
 
-      // Service line
-      page.drawText(booking.service_name || 'Service', { x: 60, y, size: 10, font: fontBold, color: darkBlue });
-      page.drawText('1', { x: 400, y, size: 10, font, color: darkGray });
-      page.drawText(`$${Number(booking.service_price || 0).toFixed(2)}`, { x: 480, y, size: 10, font, color: darkGray });
-      y -= 20;
+      // Line items. booking_items is authoritative when the booking has any;
+      // bookings created before Phase 3 and never re-saved fall back to the
+      // legacy columns, which the backfill has already mirrored anyway.
+      const invoiceLines = (booking.items && booking.items.length)
+        ? booking.items.map(i => ({
+            label: i.name,
+            qty: i.quantity,
+            amount: Number(i.price || 0) * Math.max(1, Number(i.quantity) || 1),
+            primary: i.kind === 'service',
+          }))
+        : [
+            { label: booking.service_name || 'Service', qty: 1, amount: Number(booking.service_price || 0), primary: true },
+            ...(Array.isArray(booking.addons) ? booking.addons : []).map(a => ({
+              label: a.name, qty: 1, amount: Number(a.price || 0), primary: false,
+            })),
+            ...(Number(booking.mileage_cost) > 0
+              ? [{ label: `Travel (${booking.mileage_miles || 0} miles)`, qty: 1, amount: Number(booking.mileage_cost), primary: false }]
+              : []),
+          ];
 
-      // Add-ons
-      if (booking.addons && Array.isArray(booking.addons) && booking.addons.length > 0) {
-        booking.addons.forEach(addon => {
-          page.drawText(`  + ${addon.name}`, { x: 60, y, size: 9, font, color: gray });
-          page.drawText('1', { x: 400, y, size: 9, font, color: gray });
-          page.drawText(`$${Number(addon.price || 0).toFixed(2)}`, { x: 480, y, size: 9, font, color: gray });
-          y -= 18;
-        });
-      }
-
-      // Mileage
-      if (booking.mileage_cost && Number(booking.mileage_cost) > 0) {
-        page.drawText(`  + Travel (${booking.mileage_miles || 0} miles)`, { x: 60, y, size: 9, font, color: gray });
-        page.drawText('1', { x: 400, y, size: 9, font, color: gray });
-        page.drawText(`$${Number(booking.mileage_cost).toFixed(2)}`, { x: 480, y, size: 9, font, color: gray });
-        y -= 18;
+      for (const line of invoiceLines) {
+        const size = line.primary ? 10 : 9;
+        const useFont = line.primary ? fontBold : font;
+        const colour = line.primary ? darkBlue : gray;
+        page.drawText(`${line.primary ? '' : '  + '}${String(line.label).substring(0, 46)}`,
+          { x: 60, y, size, font: useFont, color: colour });
+        page.drawText(String(line.qty), { x: 400, y, size, font, color: line.primary ? darkGray : gray });
+        page.drawText(`$${line.amount.toFixed(2)}`, { x: 480, y, size, font, color: line.primary ? darkGray : gray });
+        y -= line.primary ? 20 : 18;
       }
 
       y -= 10;

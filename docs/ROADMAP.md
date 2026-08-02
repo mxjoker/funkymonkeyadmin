@@ -1,5 +1,46 @@
 # Roadmap
 
+## Phase 3 — booking_items and client quote accept (complete, 2026-08-02)
+
+`booking_items` is live: a child table making multi-service packages
+expressible, with write endpoints (`bookings.js` POST, `booking.js` PATCH)
+deriving the legacy money columns (`total_price`, `balance_due`, etc.) from
+items via `rollupItems`. Invoice PDF, accounting export, and the client/admin
+booking views all read line items now, not just the legacy single
+`service_name` + `service_price` columns.
+
+**Backfill, as actually reported by the script (not estimated):**
+- Initial backfill applied to production 2026-08-01: 933 `booking_items` rows
+  across 666 of 667 bookings (the 667th, the designated test row, had no
+  `service_name` and correctly got none). Additive only — `sum(total_price)`
+  unchanged at $276,738.29, verified by md5 checksum over the money columns
+  before/after.
+- Task 7b mileage-normalisation fix (2026-08-02) corrected 83 bookings that
+  stored `total_price` inclusive of `mileage_cost`, which had caused the
+  backfill to double-count travel inside a balancing line. Net effect:
+  `booking_items` row count 937 → 859, balancing ("Unitemised balance
+  (pre-Phase-3 import)") lines 168 → 90, `total_price` fell by exactly
+  $8,104.32 in aggregate. `balance_due` did not move for any booking —
+  the corrected formula reproduces what was already stored.
+
+**Legacy columns are still populated** — `service_name`, `service_price`,
+`total_price`, `mileage_cost`, `balance_due`, `deposit_amount` continue to be
+written on every quote/booking write, kept in sync from `booking_items` via
+`rollupItems`. This is the deliberate rollback window: nothing downstream
+that still reads the legacy columns directly will break. Once every consumer
+is confirmed on items-based reads and this window has run long enough to
+trust, the legacy columns can be deprecated — not scheduled yet.
+
+Client-facing quote accept shipped in the same phase: `quoted` → `accepted`
+via `my-booking.html`'s Accept button, `/api/accept-quote`, and an owner
+email notification (`email_log`, trigger `Quote accepted`).
+
+Gate (a 3-service package in all three consumers) run against test booking
+`FM-E5EFPPQX` (id 717) 2026-08-02: client view, invoice PDF, accounting
+financials export (`Line Items` column), and revenue-by-service export
+(apportioned across the three services) all confirmed correct. Full detail
+in `.superpowers/sdd/2026-08-01-crm-takeover-phase-3/task-8-report.md`.
+
 ## Instant Booking v2 (foam parties)
 
 The original `instant-book.html` (now in `docs/attic/`) let anyone create a
