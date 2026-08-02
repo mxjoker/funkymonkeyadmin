@@ -446,6 +446,11 @@
             <div id="accept-msg" style="margin-top:12px;font-size:14px"></div>
           </div>
         ` : ''}
+        ${booking._justAccepted ? `
+          <div style="margin-top:20px;padding-top:20px;border-top:1px solid rgba(255,255,255,.12);text-align:center">
+            <p style="color:#4ade80;font-weight:700">🎉 Accepted! We'll email your deposit link shortly.</p>
+          </div>
+        ` : ''}
       `;
 
       document.getElementById('booking-details').innerHTML = detailsHtml;
@@ -538,10 +543,13 @@
         // is not a success, and its message is more useful than a generic one.
         if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
 
+        // displayBooking() below replaces #booking-details.innerHTML synchronously,
+        // so #accept-msg (and this button) are gone before the browser ever paints
+        // them — status is 'accepted' now, which drops the whole `status==='quoted'`
+        // block that contains them. The confirmation has to live in the re-rendered
+        // markup itself; _justAccepted tells displayBooking to include it.
         currentBooking.status = 'accepted';
-        msg.style.color = '#4ade80';
-        msg.textContent = "🎉 Accepted! We'll email your deposit link shortly.";
-        btn.style.display = 'none';
+        currentBooking._justAccepted = true;
         displayBooking(currentBooking);
       } catch (e) {
         console.error('Accept error:', e);
