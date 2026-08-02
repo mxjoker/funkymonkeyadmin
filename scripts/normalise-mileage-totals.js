@@ -31,6 +31,17 @@
  * particular must not be touched, and how that fact is used as a check
  * rather than an assumption.
  *
+ * Amended after Task 7a: 5 of these 83 have balance_due settled out-of-band
+ * (deposit_amount was never backfilled to what was actually collected), so
+ * the post-fix formula can never reproduce their stored balance_due — not a
+ * bug in this script, a pre-existing hole in that column. Task 7a's
+ * balanceIsDerivable() (netlify/functions/_items.js) is now consulted by
+ * booking.js at every recompute site, so those 5 can never have balance_due
+ * silently rewritten by a future edit — which makes leaving their
+ * total_price inconsistent harmless. This script excludes them (reported,
+ * not silently dropped) rather than fixing 78 and refusing the whole batch
+ * over 5 rows that are now permanently safe either way.
+ *
  * Dry run (default) prints a report and writes nothing:
  *   node scripts/normalise-mileage-totals.js
  *
@@ -52,7 +63,7 @@ if (!process.env.DATABASE_URL && fs.existsSync(envPath)) {
 }
 
 const { Pool } = require('pg');
-const { getItems } = require('../netlify/functions/_items');
+const { getItems, balanceIsDerivable } = require('../netlify/functions/_items');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
@@ -127,18 +138,49 @@ async function main() {
       return;
     }
 
-    // For each candidate, load its items and locate the one balancing line.
-    // anomalies are shapes the brief didn't anticipate (no line, or more than
-    // one) — refused for the same reason as a balance_due mismatch: this
-    // script fixes the documented simple case only, never "most of" a batch.
+    // ── REQUIREMENT 2 (amended after Task 7a): exclude, don't abort, on the
+    // balance-derivability question; keep aborting on anything else ─────────
+    //
+    // balanceIsDerivable() is checked against the row this fix would PRODUCE
+    // (total_price already reduced by mileage_cost) — that is the same
+    // question booking.js will ask the next time this booking is edited, and
+    // reusing the shared function means this script can never drift out of
+    // sync with what booking.js actually enforces at edit time. A row it
+    // rejects is excluded from writing (reported below, not silently
+    // dropped) rather than aborting the whole batch, because Task 7a already
+    // makes that row permanently safe to leave as-is: booking.js will refuse
+    // to rewrite its balance_due on a future edit either way.
+    //
+    // Anything balanceIsDerivable does NOT cover — an unexpected number of
+    // balancing lines — still aborts the whole batch. That is a shape nobody
+    // has reasoned about, not a known-safe exclusion, so the original "do
+    // not fix most of them" rule still applies to it.
     const plans = [];
+    const excluded = [];
     const anomalies = [];
-    const refusals = [];
 
     for (const b of candidates) {
+      const mileage = round2(b.mileage_cost);
+      const newTotalPrice = round2(b.total_price - mileage);
+      const storedBalanceDue = round2(b.balance_due);
+
+      const derivable = balanceIsDerivable({
+        total_price: newTotalPrice, mileage_cost: mileage,
+        deposit_amount: b.deposit_amount, balance_due: b.balance_due,
+      });
+      if (!derivable) {
+        excluded.push({
+          reference: b.reference, status: b.status, client_name: b.client_name,
+          total_price: round2(b.total_price), mileage_cost: mileage,
+          deposit_amount: round2(b.deposit_amount), balance_due: storedBalanceDue,
+        });
+        continue;
+      }
+
+      // Only fetch items for rows we might actually normalise — the excluded
+      // ones are left untouched, so there is nothing here worth reading.
       const items = await getItems(client, b.id);
       const balancingLines = items.filter(i => i.kind === 'custom' && i.name === BALANCING_NAME);
-
       if (balancingLines.length !== 1) {
         anomalies.push({
           reference: b.reference, id: b.id,
@@ -148,9 +190,6 @@ async function main() {
       }
       const line = balancingLines[0];
 
-      const mileage = round2(b.mileage_cost);
-      const newTotalPrice = round2(b.total_price - mileage);
-
       // ── REQUIREMENT: recompute the balancing line ───────────────────────
       const nonTravelNonBalancing = items
         .filter(i => i.kind !== 'travel' && i.id !== line.id)
@@ -158,52 +197,32 @@ async function main() {
       const newLinePrice = round2(newTotalPrice - nonTravelNonBalancing);
       const deleteLine = newLinePrice <= TOLERANCE;
 
-      // ── REQUIREMENT 2: refuse rather than guess ─────────────────────────
-      // balance_due is never written by this script. It was computed
-      // correctly at the time it was stored — total_price + mileage_cost -
-      // deposit, where the *effective* total_price already excluded mileage
-      // even though the stored column didn't. Substituting the new stored
-      // total_price back into that same formula must reproduce the exact
-      // number already on the row:
-      //   new_total + mileage - deposit
-      //     = (old_total - mileage) + mileage - deposit
-      //     = old_total - deposit
-      // which is what the correct total already implied. If it does not
-      // reproduce, this row is not the simple case this script understands,
-      // and the whole batch is refused rather than applying to "most" of it.
-      const expectedBalanceDue = round2(Math.max(0, newTotalPrice + mileage - b.deposit_amount));
-      const storedBalanceDue = round2(b.balance_due);
-      const balanceDrift = round2(expectedBalanceDue - storedBalanceDue);
-
-      const plan = {
+      plans.push({
         id: b.id, reference: b.reference, status: b.status, client_name: b.client_name,
         mileage_cost: mileage, deposit_amount: round2(b.deposit_amount),
         total_price_before: round2(b.total_price), total_price_after: newTotalPrice,
-        balance_due: storedBalanceDue, balance_due_expected: expectedBalanceDue,
+        balance_due: storedBalanceDue,
         line_id: line.id, line_price_before: round2(line.price),
         line_price_after: deleteLine ? 0 : newLinePrice, deleteLine,
-      };
-
-      if (Math.abs(balanceDrift) > TOLERANCE) {
-        refusals.push({ ...plan, balance_drift: balanceDrift });
-        continue;
-      }
-      plans.push(plan);
+      });
     }
 
+    if (excluded.length) {
+      console.log(
+        `\n${excluded.length} booking(s) excluded — balance_due is not derivable from the ` +
+        'post-fix formula (balanceIsDerivable), almost always because deposit_amount never ' +
+        'recorded what was actually collected. Left untouched; Task 7a\'s guard protects them ' +
+        'from a future edit rewriting balance_due either way:'
+      );
+      console.table(excluded);
+    }
     if (anomalies.length) {
-      console.log(`\n${anomalies.length} booking(s) had an unexpected balancing-line shape (refused):`);
+      console.log(`\n${anomalies.length} booking(s) had an unexpected balancing-line shape (aborts the batch):`);
       console.table(anomalies);
-    }
-    if (refusals.length) {
-      console.log(`\n${refusals.length} booking(s) would change balance_due (refused):`);
-      console.table(refusals);
-    }
-    if (anomalies.length || refusals.length) {
       console.error(
-        `\nABORTED: ${anomalies.length + refusals.length} row(s) failed a safety check. ` +
-        'Fix the data or narrow the query, then re-run. Nothing was written for any row ' +
-        'in this batch, including the ones that looked fine.'
+        `\nABORTED: ${anomalies.length} row(s) failed a safety check nobody has reasoned about. ` +
+        'Fix the data or narrow the query, then re-run. Nothing was written for any row in this ' +
+        'batch, including the ones that looked fine.'
       );
       process.exitCode = 1;
       return;
@@ -214,7 +233,8 @@ async function main() {
     const reducedCount = plans.filter(p => !p.deleteLine).length;
     const deletedCount = plans.filter(p => p.deleteLine).length;
 
-    console.log(`\n${plans.length} candidate booking(s).`);
+    console.log(`\n${candidates.length} total candidate(s) matched Requirement 1; ` +
+      `${excluded.length} excluded (above), ${plans.length} to normalise.`);
     console.log(`Aggregate total_price reduction: $${aggregateReduction.toFixed(2)}`);
     console.log(`Balancing lines: ${reducedCount} reduced, ${deletedCount} deleted.`);
 
