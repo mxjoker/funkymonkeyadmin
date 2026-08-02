@@ -135,7 +135,26 @@ async function replaceItems(client, bookingId, items) {
   return getItems(client, bookingId);
 }
 
+// Is this booking's stored balance_due explained by the standard formula?
+//
+// balance_due = max(0, total_price + mileage_cost - deposit_amount) is the
+// formula bookings.js:329 and booking.js use. It only works when deposit_amount
+// reflects what was actually collected. It frequently does not: when a client
+// settles in full, balance_due is zeroed directly and deposit_amount is left at
+// whatever was originally requested. The formula then cannot reconstruct the
+// truth, and re-running it resurrects the whole bill.
+//
+// Measured 2026-08-02: 106 of 667 production bookings fail this test, and 12 of
+// them are fully paid — recomputing would have billed them $7,530 they had
+// already paid. So: never overwrite a balance the formula does not already
+// explain. Half a cent of tolerance absorbs NUMERIC/float round-tripping.
+function balanceIsDerivable(row) {
+  const derived = Math.max(0,
+    Number(row.total_price || 0) + Number(row.mileage_cost || 0) - Number(row.deposit_amount || 0));
+  return Math.abs(derived - Number(row.balance_due || 0)) <= 0.005;
+}
+
 module.exports = {
   ITEM_KINDS, ensureBookingItems, normaliseItems, rollupItems,
-  getItems, getItemsForBookings, replaceItems,
+  getItems, getItemsForBookings, replaceItems, balanceIsDerivable,
 };

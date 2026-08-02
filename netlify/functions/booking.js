@@ -2,7 +2,7 @@ const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
 const { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
-const { ensureBookingItems, replaceItems, rollupItems, getItems } = require('./_items');
+const { ensureBookingItems, replaceItems, rollupItems, getItems, balanceIsDerivable } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -157,6 +157,10 @@ exports.handler = async (event) => {
         const prev = prevRes.rows[0];
         const prevStatus = prev.status || '?';
 
+        // Decided against the row as it stood BEFORE this request, so a caller
+        // cannot make a balance derivable by editing it in the same PATCH.
+        const canDeriveBalance = balanceIsDerivable(prev);
+
         const sets = [], vals = [];
         let idx = 1;
         for (const [k, col] of Object.entries(colMap)) {
@@ -205,16 +209,24 @@ exports.handler = async (event) => {
         // the recompute is logged like any other change.
         const BALANCE_INPUTS = ['total_price', 'mileage_cost', 'deposit_amount'];
         if (BALANCE_INPUTS.some(f => u[f] !== undefined) && u.balance_due === undefined) {
-          const newBalance = Math.max(0,
-            Number(updated.total_price || 0) + Number(updated.mileage_cost || 0) - Number(updated.deposit_amount || 0));
-          const r3 = await c.query(
-            `UPDATE bookings SET balance_due=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
-            [newBalance, parseInt(id)]
-          );
-          updated = r3.rows[0];
-          // Mark balance_due as "sent" so the field-level logging loop below
-          // (which only inspects keys present in `u`) picks up the change.
-          u.balance_due = newBalance;
+          if (!canDeriveBalance) {
+            // This booking's balance was settled out-of-band. Recomputing would
+            // re-bill a customer who has already paid. Leave it and leave a trail.
+            await logChange(c, parseInt(id), 'Balance recompute skipped',
+              `stored $${Number(prev.balance_due || 0).toFixed(2)} is not explained by ` +
+              `total + mileage - deposit; left unchanged`);
+          } else {
+            const newBalance = Math.max(0,
+              Number(updated.total_price || 0) + Number(updated.mileage_cost || 0) - Number(updated.deposit_amount || 0));
+            const r3 = await c.query(
+              `UPDATE bookings SET balance_due=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
+              [newBalance, parseInt(id)]
+            );
+            updated = r3.rows[0];
+            // Mark balance_due as "sent" so the field-level logging loop below
+            // (which only inspects keys present in `u`) picks up the change.
+            u.balance_due = newBalance;
+          }
         }
 
         // ── Items (Phase 3) ────────────────────────────────────────────────
@@ -236,8 +248,14 @@ exports.handler = async (event) => {
           const before = await getItems(c, parseInt(id));
           items = await replaceItems(c, parseInt(id), u.items);
           const roll = rollupItems(items);
-          const newBalance = Math.max(0,
-            roll.total_price + roll.mileage_cost - Number(updated.deposit_amount || 0));
+          const newBalance = canDeriveBalance
+            ? Math.max(0, roll.total_price + roll.mileage_cost - Number(updated.deposit_amount || 0))
+            : Number(updated.balance_due || 0);
+          if (!canDeriveBalance) {
+            await logChange(c, parseInt(id), 'Balance recompute skipped',
+              `quote edited, but stored $${Number(prev.balance_due || 0).toFixed(2)} is not ` +
+              `explained by total + mileage - deposit; left unchanged`);
+          }
           const r4 = await c.query(
             `UPDATE bookings SET service_id=$1, service_name=$2, service_price=$3,
                     addons=$4, addon_total=$5, mileage_cost=$6, total_price=$7,

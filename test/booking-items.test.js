@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { rollupItems, normaliseItems } = require('../netlify/functions/_items');
+const { rollupItems, normaliseItems, balanceIsDerivable } = require('../netlify/functions/_items');
 
 test('a single service rolls up to the legacy columns unchanged', () => {
   const r = rollupItems([
@@ -111,4 +111,37 @@ test('normaliseItems assigns sort_order by position', () => {
 test('normaliseItems caps a runaway payload rather than writing 10000 rows', () => {
   const items = normaliseItems(Array.from({ length: 500 }, (_, i) => ({ name: 'X' + i, price: 1, kind: 'service' })));
   assert.strictEqual(items.length, 50);
+});
+
+test('a balance the formula explains is derivable', () => {
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: 970, mileage_cost: 48, deposit_amount: 100, balance_due: 918 }), true);
+});
+
+test('a fully-paid booking whose balance was zeroed out-of-band is NOT derivable', () => {
+  // Mica Andrews 25-354, real production shape: paid in full, balance zeroed
+  // directly, deposit_amount never updated. Recomputing would bill $1,114.
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: 902, mileage_cost: 212, deposit_amount: 0, balance_due: 0 }), false);
+});
+
+test('a deposit-paid booking with a partial balance is still derivable', () => {
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: 461, mileage_cost: 116, deposit_amount: 100, balance_due: 477 }), true);
+});
+
+test('the formula clamps at zero, so an over-deposited booking is derivable', () => {
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: 100, mileage_cost: 0, deposit_amount: 500, balance_due: 0 }), true);
+});
+
+test('half a cent of float drift does not make a balance underivable', () => {
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: 970.004, mileage_cost: 48, deposit_amount: 100, balance_due: 918 }), true);
+});
+
+test('null and missing columns are treated as zero, not NaN', () => {
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: null, mileage_cost: null, deposit_amount: null, balance_due: null }), true);
+  assert.strictEqual(balanceIsDerivable({}), true);
 });
