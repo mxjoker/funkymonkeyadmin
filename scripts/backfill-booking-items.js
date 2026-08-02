@@ -107,6 +107,25 @@ async function main() {
         console.error('No snapshot at ' + SNAPSHOT + ' — nothing to roll back.');
         process.exit(1);
       }
+      // This deletes by booking_id membership in the snapshot, not by any mark
+      // on the rows themselves — there is no provenance column distinguishing
+      // "this script wrote it" from "something else wrote it since". That is
+      // safe only as long as nothing else touches these bookings' items between
+      // --apply and --rollback. _items.js's replaceItems() is delete-all-then-
+      // reinsert per booking, and Task 3's quote-edit endpoint will call it. Once
+      // that ships, running --rollback after a human has edited one of these
+      // bookings' items would delete their replacement items too — the snapshot
+      // has no way to tell a hand-edited row from a backfilled one. replaceItems
+      // has zero call sites today, so this is not yet reachable; it becomes live
+      // the day Task 3 wires it up. No guard is added here — provenance tracking
+      // on every row would exist only to serve a one-off script, which is not
+      // worth a schema column. Roll back before Task 3 ships, not after.
+      console.log(
+        'Rollback deletes booking_items by booking_id only — it cannot tell a ' +
+        'backfilled row from one written later by a quote edit. Safe before ' +
+        "Task 3's quote-edit endpoint ships; after that, only run this if you " +
+        'are certain none of these bookings have been hand-edited since --apply.'
+      );
       const ids = JSON.parse(fs.readFileSync(SNAPSHOT, 'utf8')).ids;
       const r = await client.query('DELETE FROM booking_items WHERE booking_id = ANY($1)', [ids]);
       console.log(`Deleted ${r.rowCount} booking_items rows across ${ids.length} bookings.`);
