@@ -439,7 +439,7 @@ module.exports = {
 npm test 2>&1 | tail -10
 ```
 
-Expected: `pass 50`, `fail 0` (39 existing + 11 new).
+Expected: `pass 49`, `fail 0` (39 existing + 10 new).
 
 - [ ] **Step 5: Commit**
 
@@ -726,7 +726,7 @@ node --check netlify/functions/bookings.js && echo "syntax ok"
 npm test 2>&1 | tail -6
 ```
 
-Expected: syntax ok, `pass 50 / fail 0`. The existing tests cover the email paths that this must not disturb.
+Expected: syntax ok, `pass 49 / fail 0`. The existing tests cover the email paths that this must not disturb.
 
 - [ ] **Step 3: Wire `items` into `booking.js` PATCH**
 
@@ -789,7 +789,7 @@ node --check netlify/functions/booking.js && echo "syntax ok"
 npm test 2>&1 | tail -6
 ```
 
-Expected: syntax ok, `pass 50 / fail 0`.
+Expected: syntax ok, `pass 49 / fail 0`.
 
 - [ ] **Step 5: Commit**
 
@@ -1004,7 +1004,7 @@ for f in bookings booking generate-invoice accounting-export _items; do node --c
 npm test 2>&1 | tail -6
 ```
 
-Expected: no `FAILED` lines, `pass 50 / fail 0`.
+Expected: no `FAILED` lines, `pass 49 / fail 0`.
 
 - [ ] **Step 5: Commit**
 
@@ -1457,7 +1457,7 @@ node --check netlify/functions/accept-quote.js && echo "syntax ok"
 npm test 2>&1 | tail -6
 ```
 
-Expected: syntax ok, `pass 56 / fail 0`.
+Expected: syntax ok, `pass 55 / fail 0` (49 + 6 accept tests).
 
 - [ ] **Step 6: Commit**
 
@@ -1623,7 +1623,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 npm test 2>&1 | tail -8
 ```
 
-Expected: `pass 56`, `fail 0`. Do not proceed on anything else.
+Expected: `pass 55`, `fail 0`. Do not proceed on anything else.
 
 - [ ] **Step 2: Run the spec's gate — a 3-service package in all three consumers**
 
