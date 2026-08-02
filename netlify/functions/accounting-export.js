@@ -3,6 +3,7 @@
 
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
+const { ensureBookingItems } = require('./_items');
 
 /**
  * Generate CSV from array of objects
@@ -210,6 +211,9 @@ exports.handler = async (event) => {
 
   return withClient(async (client) => {
     try {
+      // Two report queries below reference booking_items directly.
+      await ensureBookingItems(client);
+
       const { report_type, start_date, end_date, year } = event.queryStringParameters || {};
 
       // Determine date range

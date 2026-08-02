@@ -12,8 +12,16 @@ const ITEM_KINDS = ['service', 'addon', 'travel', 'custom'];
 // unbounded rows, not because 50 is meaningful.
 const MAX_ITEMS = 50;
 
+// Memoized per function instance, matching bookings.js's `schemaReady`. The
+// two IF NOT EXISTS statements are no-ops after the first call, but they are
+// still two network round trips to Neon on every request, and this now runs
+// on the admin list path. A failed run nulls the memo so it is retried
+// rather than caching the failure.
+let itemsReady;
 async function ensureBookingItems(client) {
-  await client.query(`
+  if (!itemsReady) {
+    itemsReady = (async () => {
+      await client.query(`
     CREATE TABLE IF NOT EXISTS booking_items (
       id         SERIAL PRIMARY KEY,
       booking_id INTEGER NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
@@ -26,9 +34,12 @@ async function ensureBookingItems(client) {
       created_at TIMESTAMPTZ  DEFAULT NOW()
     )
   `);
-  await client.query(
-    'CREATE INDEX IF NOT EXISTS idx_booking_items_booking ON booking_items(booking_id, sort_order)'
-  );
+      await client.query(
+        'CREATE INDEX IF NOT EXISTS idx_booking_items_booking ON booking_items(booking_id, sort_order)'
+      );
+    })().catch(e => { itemsReady = null; throw e; });
+  }
+  return itemsReady;
 }
 
 function clampPrice(v) {
