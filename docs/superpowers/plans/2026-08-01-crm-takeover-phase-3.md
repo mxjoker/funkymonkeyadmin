@@ -539,6 +539,33 @@ function itemsFor(b) {
     items.push({ name: miles > 0 ? `Travel (${miles} miles)` : 'Travel', price: Number(b.mileage_cost), quantity: 1, kind: 'travel' });
   }
 
+  // ── Balancing line ────────────────────────────────────────────────────────
+  // Measured against production on 2026-08-01: of 667 bookings, only 481 have
+  // total_price == service_price + addon_total. 164 carry MORE — $32,339.42 in
+  // total — because the legacy schema had exactly one service slot, so
+  // multi-service packages were folded into total_price with no line-item
+  // trail. That unexplained money is the whole reason this phase exists.
+  //
+  // Without this line the backfilled items would under-explain the total, and
+  // the first quote edit after Phase 3 ships would recompute total_price from
+  // the items and silently delete the difference. Booking 24-329 would fall
+  // from $3,000 to $875 because someone corrected a typo.
+  //
+  // Travel is excluded from the comparison because total_price excludes travel,
+  // per the same rule rollupItems() follows.
+  const billable = items
+    .filter(i => i.kind !== 'travel')
+    .reduce((s, i) => s + Number(i.price || 0) * Math.max(1, Number(i.quantity) || 1), 0);
+  const gap = +(Number(b.total_price || 0) - billable).toFixed(2);
+  if (gap > 0.005) {
+    items.push({ name: 'Unitemised balance (pre-Phase-3 import)', price: gap, quantity: 1, kind: 'custom' });
+  }
+  // A negative gap cannot be represented — normaliseItems clamps price to >= 0,
+  // and inventing a discount would be a guess about money. 22 bookings are in
+  // that state (service_price exceeds total_price, mostly completed events
+  // recorded with total_price = 0). They are reported by the dry run and left
+  // alone deliberately: the data was already wrong before this script existed.
+
   return normaliseItems(items);
 }
 
