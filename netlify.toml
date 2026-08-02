@@ -109,6 +109,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/accept-quote"
+  to = "/.netlify/functions/accept-quote"
+  status = 200
+
+[[redirects]]
   from = "/api/refund"
   to = "/.netlify/functions/refund"
   status = 200
