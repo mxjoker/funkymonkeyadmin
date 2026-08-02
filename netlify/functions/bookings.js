@@ -3,7 +3,7 @@ const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
 const { esc, wrap, sendEmail, fmtEventDate } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
-const { ensureBookingItems, replaceItems, rollupItems, normaliseItems } = require('./_items');
+const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems, getItemsForBookings } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -14,6 +14,7 @@ const PUBLIC_FIELDS = [
   'start_time', 'end_time', 'guest_count', 'venue_name',
   'event_address', 'client_name', 'client_email', 'addons', 'total_price', 'mileage_cost',
   'deposit_amount', 'deposit_paid', 'balance_due', 'payment_amount', 'created_at',
+  'items',
 ];
 
 function pickPublicFields(row) {
@@ -171,11 +172,13 @@ exports.handler = async (event) => {
         // Admin: full row
         return withClient(async (client) => {
           await ensureTable(client);
+          await ensureBookingItems(client);
           const { rows } = await client.query(
             'SELECT * FROM bookings WHERE reference = $1',
             [ref]
           );
           if (!rows.length) return json(404, { error: 'Not found' });
+          rows[0].items = await getItems(client, rows[0].id);
           return json(200, { bookings: rows });
         });
       }
@@ -186,6 +189,7 @@ exports.handler = async (event) => {
 
       return withClient(async (client) => {
         await ensureTable(client);
+        await ensureBookingItems(client);
         const { rows } = await client.query(
           'SELECT * FROM bookings WHERE reference = $1',
           [ref]
@@ -195,6 +199,7 @@ exports.handler = async (event) => {
         if ((rows[0].client_email || '').toLowerCase() !== emailParam) {
           return json(404, { error: 'Not found' });
         }
+        rows[0].items = await getItems(client, rows[0].id);
         return json(200, { bookings: [pickPublicFields(rows[0])] });
       });
     }
@@ -235,6 +240,9 @@ exports.handler = async (event) => {
         `SELECT * FROM bookings ${where} ORDER BY created_at DESC`,
         params
       );
+      await ensureBookingItems(client);
+      const itemMap = await getItemsForBookings(client, rows.map(r => r.id));
+      for (const r of rows) r.items = itemMap.get(r.id) || [];
       return json(200, rows);
     });
   }
