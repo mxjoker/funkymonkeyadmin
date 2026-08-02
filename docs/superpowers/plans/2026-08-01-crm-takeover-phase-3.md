@@ -1702,6 +1702,70 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
+## Task 7b: Normalise the 83 mileage-inclusive bookings
+
+Added 2026-08-02, approved by the owner. Not in the original spec — it surfaced from Task 2's dry run and must land before Task 8's deploy, because Task 3's balance recompute is what arms it.
+
+**Files:**
+- Create: `scripts/normalise-mileage-totals.js`
+
+**Interfaces:**
+- Consumes: `rollupItems`, `getItems` from `netlify/functions/_items.js`.
+- Produces: nothing other tasks import. A one-off, like `scripts/backfill-booking-items.js`.
+
+**The defect.** 83 of 667 bookings store `total_price` INCLUDING `mileage_cost`. The other 481 that reconcile exclude it, which is what every formula in the codebase assumes: `balance_due = max(0, total_price + mileage_cost - deposit_amount)` (`bookings.js:329`, `booking.js:196-197`).
+
+Nobody has been overcharged — 78 of the 83 store a `balance_due` that is correct as it stands, and none stores the double-counted figure. The bug is latent in the *recompute* path: the moment one of those bookings is edited, its balance inflates by the travel amount. **10 confirmed bookings with unpaid balances are exposed, totalling $1,248.54 of inflation** — worst cases Heather Ross `26-266` ($611.80 → $838.60) and Michael Avila `26-264` ($1,026.80 → $1,253.60). Phase 3 makes an edit far more likely, because Task 3 recomputes the balance on every quote change.
+
+**The backfill copied the defect into the items.** All 83 received a balancing line, and on 81 of them it equals `mileage_cost` exactly — so travel is recorded twice, once as a `travel` item and once inside `Unitemised balance (pre-Phase-3 import)`. Fixing `bookings` alone would leave the items still wrong.
+
+**The fix, per booking:**
+- `total_price := total_price - mileage_cost`, so it excludes travel like every other row.
+- Recompute the balancing line as `new_total_price - (sum of billable items excluding the balancing line)`. Where that is `<= 0.005`, delete the line instead.
+- **`balance_due` must NOT change.** The corrected formula yields exactly the number already stored. If a row's `balance_due` would move, that row is not the simple case — refuse it and report it rather than guessing.
+
+Aggregate effect: reported revenue falls **$8,887.12**, which is the point — those 83 were overstating relative to the other 481, and the accounting export already tracks mileage separately on its expenses sheet.
+
+- [ ] **Step 1: Write the script**
+
+Model it on `scripts/backfill-booking-items.js` — same `.env` loader, same `--apply` / `--rollback` flags, same snapshot-to-`.superpowers/sdd/…` rollback, same tone of safety comment. Requirements it must meet, each of which is a real failure mode here:
+
+1. **Select only the simple case.** A booking qualifies only when `ABS((service_price + addon_total + mileage_cost) - total_price) <= 0.005 AND mileage_cost > 0`. Anything else is left alone.
+2. **Refuse rather than guess.** Before writing, compute the post-fix `balance_due` for every candidate. If any row's would differ from its stored value by more than half a cent, print those rows and abort the whole batch. Do not fix "most" of them.
+3. **Snapshot before writing**, holding each booking's id, `total_price`, `balance_due`, and the id and price of the balancing line — enough to reverse both tables. Write it before `BEGIN`, so the only reachable failure state is "snapshot exists, nothing written", which rolls back harmlessly.
+4. **One transaction** for the whole batch.
+5. **Dry run by default**, printing the candidate count, the aggregate `total_price` reduction, how many balancing lines would be reduced versus deleted, and the 10 at-risk open bookings by reference with their before/after.
+6. Use `COALESCE(col,'') <> ''` rather than `IS NOT NULL` anywhere a text column is tested — `IS NOT NULL` is a dead test on this schema.
+7. Do not touch `mileage_cost`, `service_price`, `addon_total`, `deposit_amount`, `balance_due`, or any `service`/`travel` item. The only writes are `bookings.total_price` and the one balancing `booking_items` row per booking.
+
+- [ ] **Step 2: Syntax-check and dry-run**
+
+```bash
+node --check scripts/normalise-mileage-totals.js && echo "syntax ok"
+node scripts/normalise-mileage-totals.js
+```
+
+Expected: 83 candidates, aggregate reduction $8,887.12, and no refusal. **Report the numbers and stop.** The owner reviews before anything is written.
+
+- [ ] **Step 3: Commit the script (not the data change)**
+
+```bash
+git add scripts/normalise-mileage-totals.js
+git commit -m "feat: normalise the 83 bookings whose total_price includes mileage
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+- [ ] **Step 4: Apply, only after the dry-run numbers are accepted**
+
+```bash
+node scripts/normalise-mileage-totals.js --apply
+```
+
+Then verify independently, not from the script's own output: every one of the 83 must satisfy `total_price == service_price + addon_total`; `balance_due` must be unchanged for all 83; `sum(total_price)` across all bookings must have fallen by exactly $8,887.12; and for each of the 83, `rollupItems(getItems(...))` must now reproduce the stored `total_price` and `mileage_cost`.
+
+---
+
 ## Task 8: Gate, deploy, and the deferred key rotation
 
 **Files:**
