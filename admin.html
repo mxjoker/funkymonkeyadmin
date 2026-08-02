@@ -1463,6 +1463,16 @@ function bookingField(label, name, value, type = 'text', opts = null) {
   return `<div class="detail-field"><label>${label}</label>${input}</div>`;
 }
 
+// Mirrors _items.js clampPrice() exactly, including the isFinite guard —
+// `Number(v) || 0` alone lets Infinity through, which then clamps to 100000
+// client-side while the server's isFinite check stores 0. Not reachable via
+// the widget's type="number" input, but the client total must never disagree
+// with what the server actually persists.
+function clampItemPrice(v) {
+  const n = Number(v);
+  return isFinite(n) ? Math.min(Math.max(n, 0), 100000) : 0;
+}
+
 function readItemRows(bookingId) {
   const host = document.getElementById('items-list-' + bookingId);
   if (!host) return [];
@@ -1472,7 +1482,7 @@ function readItemRows(bookingId) {
     // negative price or fractional quantity shows one total in the modal and
     // saves a different one server-side.
     return { service_id: get('service_id'), name: get('name'),
-             price: Math.min(Math.max(Number(get('price')) || 0, 0), 100000),
+             price: clampItemPrice(get('price')),
              quantity: Math.min(Math.max(Math.floor(Number(get('quantity'))) || 1, 1), 1000),
              kind: get('kind') || 'custom' };
   }).filter(i => i.name.trim() !== '');
@@ -4832,7 +4842,7 @@ function warnCantEmptyQuote(id) {
   const el = document.getElementById('bk-flash-' + id);
   if (!el) return;
   const origText = el.textContent, origColor = el.style.color;
-  el.textContent = "⚠ Can't save an empty quote — edit or replace lines instead of deleting them all";
+  el.textContent = "⚠ Nothing was saved — a quote can't be emptied. Edit or replace the lines, then save again.";
   el.style.color = '#dc2626';
   el.classList.add('show');
   setTimeout(() => { el.classList.remove('show'); el.textContent = origText; el.style.color = origColor; }, 4000);
