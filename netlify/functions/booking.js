@@ -2,6 +2,7 @@ const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
 const { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
+const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -205,6 +206,40 @@ exports.handler = async (event) => {
           u.balance_due = newBalance;
         }
 
+        // ── Items (Phase 3) ────────────────────────────────────────────────
+        // A supplied items array replaces the whole set and re-derives every
+        // legacy money column. Runs before the Stripe-link block below so a
+        // link generated on this same PATCH quotes the new deposit basis.
+        let items = null;
+        if (u.items !== undefined) {
+          await ensureBookingItems(c);
+          const before = await getItems(c, parseInt(id));
+          items = await replaceItems(c, parseInt(id), u.items);
+          const roll = rollupItems(items);
+          const newBalance = Math.max(0,
+            roll.total_price + roll.mileage_cost - Number(updated.deposit_amount || 0));
+          const r4 = await c.query(
+            `UPDATE bookings SET service_id=$1, service_name=$2, service_price=$3,
+                    addons=$4, addon_total=$5, mileage_cost=$6, total_price=$7,
+                    balance_due=$8, updated_at=NOW()
+             WHERE id=$9 RETURNING *`,
+            [roll.service_id, roll.service_name, roll.service_price,
+             JSON.stringify(roll.addons), roll.addon_total, roll.mileage_cost,
+             roll.total_price, newBalance, parseInt(id)]
+          );
+          updated = r4.rows[0];
+
+          // Traceability: the spec chose a child table over the addons JSONB
+          // precisely so quote edits leave a trail. Log the whole before/after
+          // line set, not just a count.
+          const fmt = (list) => list.length
+            ? list.map(i => `${i.name} x${i.quantity} $${Number(i.price).toFixed(2)}`).join('; ')
+            : '—';
+          if (fmt(before) !== fmt(items)) {
+            await logChange(c, parseInt(id), 'Quote items changed', `${fmt(before)} → ${fmt(items)}`);
+          }
+        }
+
         // Auto-generate Stripe link when confirmed
         if (u.status === "confirmed") {
           const depositAmount = Number(updated.deposit_amount || 0);
@@ -283,7 +318,7 @@ exports.handler = async (event) => {
           }
         }
 
-        return json(200, updated);
+        return json(200, items === null ? updated : { ...updated, items });
       }
 
       if (event.httpMethod === "DELETE") {
