@@ -2,7 +2,7 @@ const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
 const { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
-const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems } = require('./_items');
+const { ensureBookingItems, replaceItems, rollupItems, getItems } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -210,8 +210,17 @@ exports.handler = async (event) => {
         // A supplied items array replaces the whole set and re-derives every
         // legacy money column. Runs before the Stripe-link block below so a
         // link generated on this same PATCH quotes the new deposit basis.
+        // A non-empty array is required, not merely a present key. An empty
+        // array would otherwise delete every item and zero total_price,
+        // service_price, addon_total, mileage_cost and balance_due on a real
+        // booking — so an admin form that PATCHed before its item rows loaded
+        // would silently wipe a customer's quote. A genuine quote always has
+        // at least one line, so nothing legitimate is lost by ignoring [].
+        // The guard lives here, where every caller routes through, rather than
+        // in the UI: trusting the caller is this codebase's documented
+        // recurring failure mode.
         let items = null;
-        if (u.items !== undefined) {
+        if (Array.isArray(u.items) && u.items.length > 0) {
           await ensureBookingItems(c);
           const before = await getItems(c, parseInt(id));
           items = await replaceItems(c, parseInt(id), u.items);
