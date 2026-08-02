@@ -145,3 +145,10 @@ test('null and missing columns are treated as zero, not NaN', () => {
     { total_price: null, mileage_cost: null, deposit_amount: null, balance_due: null }), true);
   assert.strictEqual(balanceIsDerivable({}), true);
 });
+
+// Pins the 0.005 tolerance constant: a regression that widened it (e.g. to
+// absorb whole-dollar drift) would let this pass, quietly reopening the bug.
+test('a balance off by two cents is NOT derivable — pins the half-cent tolerance', () => {
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: 100, mileage_cost: 0, deposit_amount: 0, balance_due: 99.98 }), false);
+});

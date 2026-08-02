@@ -248,10 +248,18 @@ exports.handler = async (event) => {
           const before = await getItems(c, parseInt(id));
           items = await replaceItems(c, parseInt(id), u.items);
           const roll = rollupItems(items);
-          const newBalance = canDeriveBalance
-            ? Math.max(0, roll.total_price + roll.mileage_cost - Number(updated.deposit_amount || 0))
-            : Number(updated.balance_due || 0);
-          if (!canDeriveBalance) {
+          // An explicit balance_due from the caller is a decision, not a
+          // derivation — it wins over both the formula and the "leave it"
+          // fallback below. It's already been written by the initial UPDATE
+          // above (balance_due is a colMap column), so `updated.balance_due`
+          // already holds it; no skip log, because nothing was skipped.
+          let newBalance;
+          if (u.balance_due !== undefined) {
+            newBalance = Number(updated.balance_due || 0);
+          } else if (canDeriveBalance) {
+            newBalance = Math.max(0, roll.total_price + roll.mileage_cost - Number(updated.deposit_amount || 0));
+          } else {
+            newBalance = Number(updated.balance_due || 0);
             await logChange(c, parseInt(id), 'Balance recompute skipped',
               `quote edited, but stored $${Number(prev.balance_due || 0).toFixed(2)} is not ` +
               `explained by total + mileage - deposit; left unchanged`);
