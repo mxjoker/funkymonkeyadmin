@@ -1702,6 +1702,187 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
+## Task 7a: Stop the balance recompute re-billing paid customers
+
+Added 2026-08-02, approved by the owner. **This is the highest-severity item in the phase and must land before Task 7b and before any deploy.** Not in the original spec — it surfaced when Task 7b's safety check refused its batch.
+
+**Files:**
+- Modify: `netlify/functions/booking.js` — the `BALANCE_INPUTS` block and the items block.
+- Modify: `netlify/functions/_items.js` — add and export `balanceIsDerivable`.
+- Test: `test/booking-items.test.js` — add cases for the new function.
+
+**Interfaces:**
+- Produces: `balanceIsDerivable(row) -> boolean`, exported from `_items.js`.
+
+**The defect.** `booking.js:196-206` recomputes `balance_due = max(0, total_price + mileage_cost - deposit_amount)` whenever one of those three changes. But `deposit_amount` records what was *requested*, not what was *paid*. When a customer settles in full, `balance_due` is zeroed directly and `deposit_amount` is never updated — so the formula can no longer reconstruct the truth, and re-running it resurrects the entire bill.
+
+Measured against production 2026-08-02: **106 of 667 bookings would have `balance_due` increase on an edit, totalling $17,673.12.** Twelve are fully paid (`deposit_paid = true`, `balance_due = 0`) and would be billed **$7,530** they do not owe. Worst cases: Mica Andrews `25-354` and `25-353` at **$1,114.00 each**, Rachel Miller `26-280` at $929.40, Yvonne Rose `25-377` at $756.60.
+
+This is pre-existing, not caused by Phase 3. But Phase 3 arms it: Task 3 recomputes the balance on every quote edit, and quote editing is the feature this phase exists to add.
+
+**The fix, stated as a principle:** the formula is only authoritative for a booking whose stored `balance_due` the formula already explains. Where it does not, the booking carries payment history the formula cannot see, and the stored value must be left alone. One guard, at the single place every caller routes through.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `test/booking-items.test.js`:
+
+```js
+const { balanceIsDerivable } = require('../netlify/functions/_items');
+
+test('a balance the formula explains is derivable', () => {
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: 970, mileage_cost: 48, deposit_amount: 100, balance_due: 918 }), true);
+});
+
+test('a fully-paid booking whose balance was zeroed out-of-band is NOT derivable', () => {
+  // Mica Andrews 25-354, real production shape: paid in full, balance zeroed
+  // directly, deposit_amount never updated. Recomputing would bill $1,114.
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: 902, mileage_cost: 212, deposit_amount: 0, balance_due: 0 }), false);
+});
+
+test('a deposit-paid booking with a partial balance is still derivable', () => {
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: 461, mileage_cost: 116, deposit_amount: 100, balance_due: 477 }), true);
+});
+
+test('the formula clamps at zero, so an over-deposited booking is derivable', () => {
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: 100, mileage_cost: 0, deposit_amount: 500, balance_due: 0 }), true);
+});
+
+test('half a cent of float drift does not make a balance underivable', () => {
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: 970.004, mileage_cost: 48, deposit_amount: 100, balance_due: 918 }), true);
+});
+
+test('null and missing columns are treated as zero, not NaN', () => {
+  assert.strictEqual(balanceIsDerivable(
+    { total_price: null, mileage_cost: null, deposit_amount: null, balance_due: null }), true);
+  assert.strictEqual(balanceIsDerivable({}), true);
+});
+```
+
+- [ ] **Step 2: Run them and watch them fail**
+
+```bash
+npm test 2>&1 | grep -E "balanceIsDerivable|not a function|fail"
+```
+
+Expected: FAIL — `balanceIsDerivable is not a function`.
+
+- [ ] **Step 3: Add the function to `_items.js`**
+
+```js
+// Is this booking's stored balance_due explained by the standard formula?
+//
+// balance_due = max(0, total_price + mileage_cost - deposit_amount) is the
+// formula bookings.js:329 and booking.js use. It only works when deposit_amount
+// reflects what was actually collected. It frequently does not: when a client
+// settles in full, balance_due is zeroed directly and deposit_amount is left at
+// whatever was originally requested. The formula then cannot reconstruct the
+// truth, and re-running it resurrects the whole bill.
+//
+// Measured 2026-08-02: 106 of 667 production bookings fail this test, and 12 of
+// them are fully paid — recomputing would have billed them $7,530 they had
+// already paid. So: never overwrite a balance the formula does not already
+// explain. Half a cent of tolerance absorbs NUMERIC/float round-tripping.
+function balanceIsDerivable(row) {
+  const derived = Math.max(0,
+    Number(row.total_price || 0) + Number(row.mileage_cost || 0) - Number(row.deposit_amount || 0));
+  return Math.abs(derived - Number(row.balance_due || 0)) <= 0.005;
+}
+```
+
+Add `balanceIsDerivable` to the `module.exports` list.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+npm test 2>&1 | tail -6
+```
+
+Expected: `pass 61`, `fail 0` (55 existing + 6 new).
+
+- [ ] **Step 5: Apply the guard in `booking.js`**
+
+Add `balanceIsDerivable` to the existing `_items.js` require line.
+
+Immediately after `const prevStatus = prev.status || '?';`, add:
+
+```js
+        // Decided against the row as it stood BEFORE this request, so a caller
+        // cannot make a balance derivable by editing it in the same PATCH.
+        const canDeriveBalance = balanceIsDerivable(prev);
+```
+
+In the `BALANCE_INPUTS` block, change the condition and add the skip log:
+
+```js
+        const BALANCE_INPUTS = ['total_price', 'mileage_cost', 'deposit_amount'];
+        if (BALANCE_INPUTS.some(f => u[f] !== undefined) && u.balance_due === undefined) {
+          if (!canDeriveBalance) {
+            // This booking's balance was settled out-of-band. Recomputing would
+            // re-bill a customer who has already paid. Leave it and leave a trail.
+            await logChange(c, parseInt(id), 'Balance recompute skipped',
+              `stored $${Number(prev.balance_due || 0).toFixed(2)} is not explained by ` +
+              `total + mileage - deposit; left unchanged`);
+          } else {
+            const newBalance = Math.max(0,
+              Number(updated.total_price || 0) + Number(updated.mileage_cost || 0) - Number(updated.deposit_amount || 0));
+            const r3 = await c.query(
+              `UPDATE bookings SET balance_due=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
+              [newBalance, parseInt(id)]
+            );
+            updated = r3.rows[0];
+            u.balance_due = newBalance;
+          }
+        }
+```
+
+In the items block, the same guard — the items must still rewrite the derived money columns, only `balance_due` is held back:
+
+```js
+          const newBalance = canDeriveBalance
+            ? Math.max(0, roll.total_price + roll.mileage_cost - Number(updated.deposit_amount || 0))
+            : Number(updated.balance_due || 0);
+          if (!canDeriveBalance) {
+            await logChange(c, parseInt(id), 'Balance recompute skipped',
+              `quote edited, but stored $${Number(prev.balance_due || 0).toFixed(2)} is not ` +
+              `explained by total + mileage - deposit; left unchanged`);
+          }
+```
+
+An explicit `u.balance_due` from the caller still wins in both paths — an admin deliberately setting a balance is a decision, not a derivation, and must not be blocked.
+
+- [ ] **Step 6: Verify**
+
+```bash
+node --check netlify/functions/booking.js && node --check netlify/functions/_items.js && echo "syntax ok"
+npm test 2>&1 | tail -6
+```
+
+Expected: syntax ok, `pass 61 / fail 0`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add netlify/functions/_items.js netlify/functions/booking.js test/booking-items.test.js
+git commit -m "fix: never recompute a balance the formula does not already explain
+
+106 of 667 production bookings would have balance_due increase on an edit,
+\$17,673.12 in total. Twelve are fully paid and would be billed \$7,530 they
+had already settled — deposit_amount records what was requested, not what
+was collected, so the formula cannot reconstruct a balance someone zeroed
+by hand.
+
+Pre-existing, but Phase 3 arms it: the quote editor recomputes on every save.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
 ## Task 7b: Normalise the 83 mileage-inclusive bookings
 
 Added 2026-08-02, approved by the owner. Not in the original spec — it surfaced from Task 2's dry run and must land before Task 8's deploy, because Task 3's balance recompute is what arms it.
