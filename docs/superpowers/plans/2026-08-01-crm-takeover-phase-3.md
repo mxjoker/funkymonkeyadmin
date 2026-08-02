@@ -1056,11 +1056,69 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 5: Admin UI — build a multi-service quote
 
 **Files:**
+- Modify: `netlify/functions/booking.js` — the `sets.length` guard and the main UPDATE (Step 0).
 - Modify: `admin.html` — the quote block at lines 1479-1551, and `saveBookingEdits`.
 
 **Interfaces:**
 - Consumes: `PATCH /api/booking/:id` accepting `{ items: [...] }` (Task 3); `GET /api/bookings` returning `items` (Task 4); `catServices` / `catAddons` already loaded at `admin.html:3636`.
 - Produces: no new API surface.
+
+- [ ] **Step 0: Fix the PATCH guard that rejects an items-only save**
+
+Found by driving the browser on 2026-08-01, after a save failed with a 400. A plan defect, not an implementation one: static checks and all 49 unit tests pass with this bug present, because it only appears on a real request.
+
+`booking.js` builds its `sets` array from `colMap` only. `items` is deliberately absent from `colMap` — it writes to `booking_items`, not to a `bookings` column. So `if (!sets.length) return json(400, ...)` fires on a PATCH that carries only `items`, returning "No fields to update" before the items block further down ever runs. That is precisely what Step 3's `saveBookingEdits` sends, since it deletes the derived money keys and lets the server own them.
+
+Replace:
+
+```js
+        if (!sets.length) return json(400, { error: "No fields to update" });
+```
+
+with:
+
+```js
+        // `items` never appears in colMap — it writes to booking_items, not to
+        // a bookings column — so an items-only PATCH would be rejected here as
+        // "No fields to update" before the items block below ever ran. The
+        // admin quote builder sends exactly that shape, because it deletes the
+        // derived money keys and lets rollupItems own them.
+        const hasItems = Array.isArray(u.items) && u.items.length > 0;
+        if (!sets.length && !hasItems) return json(400, { error: "No fields to update" });
+```
+
+Then make the main UPDATE conditional, because `SET ${sets.join(",")}` produces invalid SQL when `sets` is empty. Replace:
+
+```js
+        vals.push(parseInt(id));
+        const r = await c.query(
+          `UPDATE bookings SET ${sets.join(",")}, updated_at=NOW() WHERE id=$${idx} RETURNING *`,
+          vals
+        );
+        if (!r.rows.length) return json(404, { error: "Not found" });
+
+        let updated = r.rows[0];
+```
+
+with:
+
+```js
+        // An items-only PATCH has no bookings columns to set. Skip the UPDATE
+        // entirely rather than emitting `SET , updated_at=NOW()`; the items
+        // block below writes the derived columns and bumps updated_at itself.
+        let updated = prev;
+        if (sets.length) {
+          vals.push(parseInt(id));
+          const r = await c.query(
+            `UPDATE bookings SET ${sets.join(",")}, updated_at=NOW() WHERE id=$${idx} RETURNING *`,
+            vals
+          );
+          if (!r.rows.length) return json(404, { error: "Not found" });
+          updated = r.rows[0];
+        }
+```
+
+Verify: `node --check netlify/functions/booking.js`, then `npm test` still at 49/49. The browser checks in Step 5 are what actually prove this fix — a save must now persist.
 
 - [ ] **Step 1: Replace the quote block markup**
 
