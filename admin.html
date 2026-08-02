@@ -5427,7 +5427,8 @@ async function loadOtto() {
   try {
     const [gateData, briefData, runData] = await Promise.all([
       leadsApi('agent-queue?kind=gate&status=open'),
-      leadsApi('agent-queue?kind=briefing&limit=1'),
+      // status=open so a cancelled or superseded briefing can't masquerade as the latest
+      leadsApi('agent-queue?kind=briefing&status=open&limit=1'),
       leadsApi('agent-queue?kind=run&status=open'),
     ]);
 
