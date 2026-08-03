@@ -856,7 +856,9 @@ function selectService(id) {
     // Rebuild accordion for fresh state
     const acc = document.getElementById('acc-' + id);
     if (acc) acc.innerHTML = buildAccordion(SERVICES[id]);
-    // Scroll card into view
+    // Keep the section holding this card open, then bring the card into view.
+    const sec = card.closest('.svc-section');
+    if (sec && !sec.hasAttribute('open')) toggleSection(sec.dataset.section);
     setTimeout(() => card.scrollIntoView({ behavior:'smooth', block:'nearest' }), 50);
   }
   updateStep2Btn();
