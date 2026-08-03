@@ -494,6 +494,50 @@ const EVENT_TYPES = [
 
 const ALL_SVC_IDS = Object.keys(SERVICES);
 
+// ══ PURE HELPERS — extracted verbatim by test/booking-form-grouping.test.js ══
+// Nothing in this block may touch the DOM, network, or page state. It is
+// evaluated in a bare vm context by the tests.
+
+const CATEGORY_ORDER = ['shows', 'performers', 'experiences', 'library'];
+const CATEGORY_META = {
+  shows:       { label: 'Main Shows',          icon: '🎩' },
+  performers:  { label: 'Add-On Entertainers', icon: '🎨' },
+  experiences: { label: 'Party Experiences',   icon: '🎊' },
+  library:     { label: 'Library Programs',    icon: '📚' },
+};
+// A category added in Catalogue later must still render. Without this bucket
+// those services would silently disappear from the customer-facing form.
+const OTHER_CATEGORY = { key: 'other', label: 'More Options', icon: '✨' };
+
+// ids -> ordered, non-empty sections. catOf(id) returns a category or undefined.
+function groupByCategory(ids, catOf) {
+  const buckets = new Map();
+  for (const id of ids) {
+    const raw = catOf(id);
+    const key = CATEGORY_META[raw] ? raw : OTHER_CATEGORY.key;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(id);
+  }
+  return [...CATEGORY_ORDER, OTHER_CATEGORY.key]
+    .filter(k => buckets.has(k))
+    .map(k => ({
+      key:   k,
+      label: (CATEGORY_META[k] || OTHER_CATEGORY).label,
+      icon:  (CATEGORY_META[k] || OTHER_CATEGORY).icon,
+      ids:   buckets.get(k),
+    }));
+}
+
+// Sections only when they earn their keep: 2+ sections AND more than 4
+// services. Both halves matter — the category count alone would wrap
+// Corporate's 4 services in two drawers, and the service count alone would
+// wrap Library's 6 in one pointless drawer.
+function shouldSection(ids, catOf) {
+  if (ids.some(id => !catOf(id))) return false;  // catalogue data did not load
+  return groupByCategory(ids, catOf).length >= 2 && ids.length > 4;
+}
+// ══ END PURE HELPERS ══
+
 // ══════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════
@@ -515,6 +559,7 @@ const S = {
 // ══════════════════════════════════════════════════
 let dbAddons = [];        // all addons from DB: [{ addon_id, name, price, ... }]
 let dbServiceAddons = {}; // { service_id: [addon_id, ...] }
+let dbServiceCategories = {}; // { service_id: category } from /api/services
 
 async function loadAddonsFromDB() {
   try {
@@ -522,6 +567,11 @@ async function loadAddonsFromDB() {
     const data = await res.json();
     dbAddons = data.addons || [];
     dbServiceAddons = data.service_addons || {};
+    // The catalogue already carries the grouping the form needs; it was being
+    // discarded. Read it rather than duplicating 27 rows into SERVICES.
+    for (const s of (data.services || [])) {
+      if (s.service_id && s.category) dbServiceCategories[s.service_id] = s.category;
+    }
     const dbServiceEventTypes = data.service_event_types || {};
 
     // Patch each SERVICES entry's .addons with DB data
