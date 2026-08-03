@@ -41,6 +41,22 @@ h2{font-size:1.2rem;color:#1e1b4b;margin-bottom:6px;font-weight:800}
 
 /* ── Service Cards ── */
 .services-grid{display:flex;flex-direction:column;gap:10px;margin-bottom:20px}
+
+/* ── Service sections ── */
+.svc-section{border:2px solid #e9d5ff;border-radius:12px;overflow:hidden;background:#fff}
+.svc-section-head{width:100%;display:flex;align-items:center;gap:10px;padding:13px 16px;
+  background:#faf5ff;border:none;cursor:pointer;font:inherit;text-align:left;color:#1e1b4b}
+.svc-section-head:hover{background:#f3e8ff}
+.svc-section-icon{font-size:1.15rem;flex-shrink:0}
+.svc-section-label{flex:1;font-weight:800;font-size:.82rem;text-transform:uppercase;letter-spacing:.06em}
+.svc-section-count{font-size:.75rem;font-weight:700;color:#7c3aed;background:#ede9fe;
+  border-radius:10px;padding:2px 9px}
+.svc-section-chev{font-size:.7rem;color:#7c3aed;transition:transform .2s}
+.svc-section[open] .svc-section-chev{transform:rotate(180deg)}
+.svc-section-body{display:none;flex-direction:column;gap:10px;padding:10px;background:#fdfcff;
+  border-top:2px solid #e9d5ff}
+.svc-section[open] .svc-section-body{display:flex}
+
 .svc-card{border:2px solid #e9d5ff;border-radius:12px;overflow:hidden;transition:border-color .2s;background:#fff}
 .svc-card.selected{border-color:#7c3aed}
 .svc-card-header{padding:14px 16px;cursor:pointer;display:flex;align-items:center;gap:12px;background:#fafaf8;transition:background .2s}
@@ -652,36 +668,80 @@ function buildStep2() {
   const grid = document.getElementById('svc-grid');
   grid.innerHTML = '';
 
-  ids.forEach(id => {
-    const svc = SERVICES[id];
-    if (!svc) return;
-    const isSelected = S.svcId === id;
+  const catOf = (id) => dbServiceCategories[id];
+  const valid = ids.filter(id => SERVICES[id]);
 
-    const card = document.createElement('div');
-    card.className = 'svc-card' + (isSelected ? ' selected' : '');
-    card.id = 'svc-card-' + id;
+  if (!shouldSection(valid, catOf)) {
+    valid.forEach(id => grid.appendChild(renderSvcCard(id)));
+    return;
+  }
 
-    const priceStr = svc.priceNote
-      ? `<span class="price-note">${svc.priceNote} </span>$${svc.price.toLocaleString()}`
-      : `$${svc.price.toLocaleString()}`;
+  const sections = groupByCategory(valid, catOf);
+  // The first non-empty section opens — not literally "shows", so a
+  // library-only flow opens Library rather than showing shut drawers.
+  const openKey = sectionKeyToOpen(sections);
 
-    card.innerHTML = `
-      <div class="svc-card-header" onclick="selectService('${id}')">
-        <div class="svc-icon">${svc.icon}</div>
-        <div class="svc-info">
-          <div class="svc-name">${svc.name}</div>
-          <div class="svc-price">${priceStr}</div>
-          ${svc.desc ? `<div class="svc-desc">${svc.desc}</div>` : ''}
-          ${svc.duration ? `<div class="svc-duration">⏱ ${svc.duration}</div>` : ''}
-        </div>
-        <div class="svc-select-indicator"></div>
-      </div>
-      <div class="svc-accordion" id="acc-${id}">
-        ${buildAccordion(svc)}
-      </div>`;
+  sections.forEach(sec => {
+    const wrap = document.createElement('div');
+    wrap.className = 'svc-section';
+    wrap.dataset.section = sec.key;
+    if (sec.key === openKey) wrap.setAttribute('open', '');
 
-    grid.appendChild(card);
+    const head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'svc-section-head';
+    head.setAttribute('aria-expanded', String(sec.key === openKey));
+    head.innerHTML =
+      `<span class="svc-section-icon">${sec.icon}</span>` +
+      `<span class="svc-section-label">${sec.label}</span>` +
+      `<span class="svc-section-count">${sec.ids.length}</span>` +
+      `<span class="svc-section-chev">▼</span>`;
+    head.onclick = () => toggleSection(sec.key);
+
+    const body = document.createElement('div');
+    body.className = 'svc-section-body';
+    sec.ids.forEach(id => body.appendChild(renderSvcCard(id)));
+
+    wrap.appendChild(head);
+    wrap.appendChild(body);
+    grid.appendChild(wrap);
   });
+}
+
+// Open the section holding the current selection, else the first one.
+function sectionKeyToOpen(sections) {
+  if (S.svcId) {
+    const owner = sections.find(s => s.ids.includes(S.svcId));
+    if (owner) return owner.key;
+  }
+  return sections.length ? sections[0].key : null;
+}
+
+function renderSvcCard(id) {
+  const svc = SERVICES[id];
+  const card = document.createElement('div');
+  card.className = 'svc-card' + (S.svcId === id ? ' selected' : '');
+  card.id = 'svc-card-' + id;
+
+  const priceStr = svc.priceNote
+    ? `<span class="price-note">${svc.priceNote} </span>$${svc.price.toLocaleString()}`
+    : `$${svc.price.toLocaleString()}`;
+
+  card.innerHTML = `
+    <div class="svc-card-header" onclick="selectService('${id}')">
+      <div class="svc-icon">${svc.icon}</div>
+      <div class="svc-info">
+        <div class="svc-name">${svc.name}</div>
+        <div class="svc-price">${priceStr}</div>
+        ${svc.desc ? `<div class="svc-desc">${svc.desc}</div>` : ''}
+        ${svc.duration ? `<div class="svc-duration">⏱ ${svc.duration}</div>` : ''}
+      </div>
+      <div class="svc-select-indicator"></div>
+    </div>
+    <div class="svc-accordion" id="acc-${id}">
+      ${buildAccordion(svc)}
+    </div>`;
+  return card;
 }
 
 function buildAccordion(svc) {
@@ -771,6 +831,16 @@ function setExtraHours(svcId, val) {
   const acc = document.getElementById('acc-' + svcId);
   if (acc) acc.innerHTML = buildAccordion(SERVICES[svcId]);
   updateStep2Btn();
+}
+
+function toggleSection(key) {
+  const sec = document.querySelector(`.svc-section[data-section="${key}"]`);
+  if (!sec) return;
+  const nowOpen = !sec.hasAttribute('open');
+  if (nowOpen) sec.setAttribute('open', '');
+  else sec.removeAttribute('open');
+  const head = sec.querySelector('.svc-section-head');
+  if (head) head.setAttribute('aria-expanded', String(nowOpen));
 }
 
 function selectService(id) {
