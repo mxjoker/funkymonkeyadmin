@@ -17,13 +17,14 @@ function loadHelpers() {
   vm.createContext(ctx);
   vm.runInContext(
     HTML.slice(a, b) +
-    '\nout = { groupByCategory, shouldSection, CATEGORY_ORDER };',
+    '\nout = { groupByCategory, shouldSection, CATEGORY_ORDER, resolveAddon, step2Subtotal };',
     ctx
   );
   return ctx.out;
 }
 
 const { groupByCategory, shouldSection, CATEGORY_ORDER } = loadHelpers();
+const { resolveAddon, step2Subtotal } = loadHelpers();
 
 // Values built inside a vm context carry THAT realm's prototypes, so
 // assert.deepStrictEqual rejects them even when the structure is identical
@@ -130,4 +131,60 @@ test('customer-facing labels never leak the DB category strings', () => {
   for (const raw of plain(CATEGORY_ORDER)) {
     assert.ok(!labels.includes(raw), `raw category "${raw}" must not be shown to customers`);
   }
+});
+
+const FOAM = { id:'foam_single', name:'Foam Party', price:385,
+  addons:[{ id:'glitter_addon', name:'Glitter', price:75 }] };
+const QUOTE_SVC = { id:'game_show', name:'Game Show', price:3500, isQuote:true, addons:[] };
+const PAINT = { id:'face_paint', name:'Face Painting', price:200, extraHourRate:150, addons:[] };
+const PER_GUEST = { id:'deluxe_magic', name:'Deluxe Magic', price:385,
+  addons:[{ id:'mini_donuts', name:'Mini Donuts', price:'per_child', rate:5 }] };
+
+const PB = [{ id:'pb_360', name:'360 Video Booth', price:150 }];
+const DB_ADDONS = [{ addon_id:'extra_hour', name:'Extra Hour', price:'85' }];
+const mkResolve = (svc) => (aid) => resolveAddon(svc, aid, PB, DB_ADDONS);
+
+test('subtotal adds fixed-price add-ons to the service price', () => {
+  const r = step2Subtotal(FOAM, 0, ['glitter_addon'], mkResolve(FOAM));
+  assert.strictEqual(r.total, 460);
+  assert.strictEqual(r.addonCount, 1);
+  assert.strictEqual(r.perGuest, 0);
+});
+
+test('quote-only services contribute zero and are flagged, never shown as $0', () => {
+  const r = step2Subtotal(QUOTE_SVC, 0, [], mkResolve(QUOTE_SVC));
+  assert.strictEqual(r.total, 0);
+  assert.strictEqual(r.isQuote, true);
+});
+
+test('extra hours are billed at the service rate', () => {
+  const r = step2Subtotal(PAINT, 2, [], mkResolve(PAINT));
+  assert.strictEqual(r.total, 200 + 300);
+});
+
+test('per-guest add-ons are counted, not silently priced at zero', () => {
+  // Guest count is collected at step 3, so these cannot be priced here.
+  const r = step2Subtotal(PER_GUEST, 0, ['mini_donuts'], mkResolve(PER_GUEST));
+  assert.strictEqual(r.total, 385, 'per-guest add-on must not inflate the subtotal');
+  assert.strictEqual(r.perGuest, 1, 'and must not vanish either');
+});
+
+test('photo-booth add-ons resolve even though they are not on the service', () => {
+  const r = step2Subtotal(FOAM, 0, ['pb_360'], mkResolve(FOAM));
+  assert.strictEqual(r.total, 535);
+});
+
+test('add-ons resolve from the DB list as a last resort, with string prices', () => {
+  const r = step2Subtotal(FOAM, 0, ['extra_hour'], mkResolve(FOAM));
+  assert.strictEqual(r.total, 470, 'DB prices arrive as strings and must be coerced');
+});
+
+test('an unresolvable add-on is ignored rather than producing NaN', () => {
+  const r = step2Subtotal(FOAM, 0, ['ghost_addon'], mkResolve(FOAM));
+  assert.strictEqual(r.total, 385);
+  assert.ok(Number.isFinite(r.total));
+});
+
+test('no service selected yields null', () => {
+  assert.strictEqual(step2Subtotal(null, 0, [], mkResolve(FOAM)), null);
 });

@@ -552,6 +552,37 @@ function shouldSection(ids, catOf) {
   if (ids.some(id => !catOf(id))) return false;  // catalogue data did not load
   return groupByCategory(ids, catOf).length >= 2 && ids.length > 4;
 }
+
+// Resolve an add-on id using the same precedence as the submitted payload
+// (service list, then photo-booth list, then the DB catalogue). One resolver
+// so the sticky-bar subtotal and the price actually submitted cannot disagree.
+function resolveAddon(svc, aid, pbAddons, dbAddonList) {
+  let a = ((svc && svc.addons) || []).find(x => x.id === aid)
+       || (pbAddons || []).find(x => x.id === aid);
+  if (!a) {
+    const db = (dbAddonList || []).find(x => x.addon_id === aid);
+    if (db) a = { id: db.addon_id, name: db.name, price: Number(db.price) };
+  }
+  return a || null;
+}
+
+// Step-2 subtotal: service + extra hours + fixed-price add-ons.
+// Per-guest add-ons cannot be priced here because guest count is collected at
+// step 3, so they are counted separately and surfaced as "+ per-guest extras"
+// rather than being silently valued at zero.
+function step2Subtotal(svc, extraHours, addonIds, resolve) {
+  if (!svc) return null;
+  let total = svc.isQuote ? 0 : (Number(svc.price) || 0);
+  if (svc.extraHourRate && extraHours > 0) total += svc.extraHourRate * extraHours;
+  let perGuest = 0;
+  for (const aid of (addonIds || [])) {
+    const a = resolve(aid);
+    if (!a) continue;
+    if (a.price === 'per_child') { perGuest++; continue; }
+    total += Number(a.price) || 0;
+  }
+  return { total, perGuest, isQuote: !!svc.isQuote, addonCount: (addonIds || []).length };
+}
 // ══ END PURE HELPERS ══
 
 // ══════════════════════════════════════════════════
