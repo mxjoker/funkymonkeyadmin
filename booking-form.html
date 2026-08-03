@@ -74,6 +74,19 @@ h2{font-size:1.2rem;color:#1e1b4b;margin-bottom:6px;font-weight:800}
 .svc-select-indicator::after{content:'';width:8px;height:8px;border-radius:50%;background:#fff;opacity:0;transition:opacity .2s}
 .svc-card.selected .svc-select-indicator::after{opacity:1}
 
+/* ── Sticky selection bar ── */
+#svc-sticky{position:fixed;left:0;right:0;bottom:0;z-index:60;display:none;
+  background:#fff;border-top:2px solid #7c3aed;box-shadow:0 -6px 20px rgba(0,0,0,.12);
+  padding:12px 18px;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+#svc-sticky.show{display:block}
+.sticky-inner{max-width:760px;margin:0 auto;display:flex;align-items:center;gap:14px}
+.sticky-text{flex:1;min-width:0}
+.sticky-name{font-weight:700;color:#1e1b4b;font-size:.86rem;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.sticky-total{color:#7c3aed;font-weight:800;font-size:.95rem;margin-top:1px}
+.sticky-note{font-size:.7rem;color:#888;font-weight:400}
+body.sticky-on #step-2{padding-bottom:96px}
+
 /* ── Accordion / Add-ons ── */
 .svc-accordion{display:none;border-top:2px solid #e9d5ff;padding:16px;background:#fefefe}
 .svc-card.selected .svc-accordion{display:block}
@@ -196,6 +209,15 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#7c3aed}
       <div class="btn-row">
         <button class="btn btn-secondary" onclick="goTo(1)">← Back</button>
         <button class="btn btn-primary" id="btn-2" disabled onclick="goTo(3)">Next: Event Details →</button>
+      </div>
+      <div id="svc-sticky">
+        <div class="sticky-inner">
+          <div class="sticky-text">
+            <div class="sticky-name" id="sticky-name"></div>
+            <div class="sticky-total" id="sticky-total"></div>
+          </div>
+          <button class="btn btn-primary" onclick="goTo(3)">Continue →</button>
+        </div>
       </div>
     </div>
 
@@ -664,6 +686,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   renderEtGrid();
   populateTimes();
   setMinDate();
+  watchStep2BtnRow();
 });
 
 // ══════════════════════════════════════════════════
@@ -905,10 +928,65 @@ function toggleAddon(svcId, addonId) {
   if (el) el.classList.toggle('selected', S.addons.includes(addonId));
   const check = el ? el.querySelector('.addon-check') : null;
   if (check) check.style.background = S.addons.includes(addonId) ? '#7c3aed' : '';
+
+  renderStickyBar();
 }
 
 function updateStep2Btn() {
   document.getElementById('btn-2').disabled = !S.svcId;
+  renderStickyBar();
+}
+
+function renderStickyBar() {
+  const bar = document.getElementById('svc-sticky');
+  if (!bar) return;
+  const svc = S.svcId ? SERVICES[S.svcId] : null;
+
+  // Only on step 2, and only once something is selected.
+  if (!svc || S.currentStep !== 2) {
+    bar.classList.remove('show');
+    document.body.classList.remove('sticky-on');
+    return;
+  }
+
+  const pbList = ['pb_kiosk', 'pb_360']
+    .map(id => dbAddons.find(x => x.addon_id === id))
+    .filter(Boolean)
+    .map(db => ({ id: db.addon_id, name: db.name, price: Number(db.price) }));
+  const resolve = (aid) => resolveAddon(svc, aid,
+    pbList.length ? pbList : PHOTO_BOOTH_ADDONS, dbAddons);
+
+  const r = step2Subtotal(svc, getExtraHours(S.svcId), S.addons, resolve);
+
+  const addonBit = r.addonCount
+    ? ` + ${r.addonCount} add-on${r.addonCount > 1 ? 's' : ''}` : '';
+  document.getElementById('sticky-name').textContent = svc.name + addonBit;
+
+  // Quote-only services must never read "$0" — these are the highest-value
+  // bookings on the form. Travel is unknown until the ZIP at step 3, so the
+  // figure is always labelled a subtotal.
+  const perGuestNote = r.perGuest ? ' <span class="sticky-note">+ per-guest extras</span>' : '';
+  document.getElementById('sticky-total').innerHTML = r.isQuote
+    ? `Custom quote <span class="sticky-note">from $${svc.price.toLocaleString()}</span>`
+    : `$${r.total.toLocaleString()} <span class="sticky-note">subtotal</span>${perGuestNote}`;
+
+  bar.classList.add('show');
+  document.body.classList.add('sticky-on');
+}
+
+// When the real Back/Next row is already visible there is no reason to float a
+// second Continue over it.
+let btnRowObserver = null;
+function watchStep2BtnRow() {
+  if (btnRowObserver || !('IntersectionObserver' in window)) return;
+  const row = document.getElementById('btn-2');
+  if (!row) return;
+  btnRowObserver = new IntersectionObserver(([entry]) => {
+    const bar = document.getElementById('svc-sticky');
+    if (!bar || !bar.classList.contains('show')) return;
+    bar.style.visibility = entry.isIntersecting ? 'hidden' : 'visible';
+  }, { rootMargin: '0px 0px -40px 0px' });
+  btnRowObserver.observe(row);
 }
 
 // ══════════════════════════════════════════════════
@@ -919,6 +997,7 @@ function goTo(n) {
   if (n === 4) buildQuote();
 
   S.currentStep = n;
+  renderStickyBar();  // clears the bar when leaving step 2
   document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
   document.getElementById('step-' + n).classList.add('active');
 
