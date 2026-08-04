@@ -82,17 +82,21 @@ exports.handler = async (event) => {
 
       const { rows: ins } = await client.query(`
         INSERT INTO bookings (
-          reference, status, brand, service_name, service_price,
+          reference, status, brand, service_id, service_name, service_price,
           addon_total, mileage_cost, total_price, deposit_amount, balance_due,
           deposit_paid, event_date, event_time, event_zip, event_location,
           event_type, guest_count, notes, client_name, client_phone,
           client_email, child_name, customer_type, referral_source, admin_notes
         ) VALUES (
           $1,$2,$3,$4,$5, $6,$7,$8,$9,$10, $11,$12,$13,$14,$15,
-          $16,$17,$18,$19,$20, $21,$22,$23,$24,$25
+          $16,$17,$18,$19,$20, $21,$22,$23,$24,$25,$26
         ) RETURNING id, reference
       `, [
         ref, String(b.status).trim(), BRANDS.has(String(b.brand)) ? b.brand : 'fme',
+        // Optional, and the only link to staffing: staff_slots are keyed on
+        // service_id, so a booking created without one can never match a role
+        // or notify anyone. Callers that know the catalogue id should send it.
+        str(b.service_id, 64),
         str(b.service_name), num(b.service_price),
         num(b.addon_total), num(b.mileage_cost), total, deposit, balance,
         b.deposit_paid === true, b.event_date, str(b.event_time, 32), str(b.event_zip, 20), str(b.event_location, 5000),

@@ -859,19 +859,48 @@ let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth();
 let catServices = [], catAddons = [];
 
-const EXCLUSIVE_TAGS = new Set([
-  'Magic Show','Childrens Magic','Corporate Magic','Balloon Sculpting',
-  'Face Painting','Glitter Tattoos','Juggling','Stilt Walking',
-  'Acrobatics','Fire Breathing','Foam Party','Snow Experience',
-  'DJ Piñata','Game Show','Magic Camp','Photo Booth','Emcee'
-]);
+// Support roles stack — one person can drive AND perform on the same gig.
+// Everything else is exclusive: that body is busy for the whole show.
+// This mirrors the server rule in staff-assignments.js (save_service_slots),
+// which decides `exclusive` the same way. Keep it as one list plus one rule;
+// the old hand-kept pair of lists had already drifted apart.
+const STACKABLE_TAGS = new Set(['Driver','Setup']);
 
 const SKILL_PRESETS = [
   'Magic Show','Childrens Magic','Corporate Magic','Balloon Sculpting',
-  'Face Painting','Glitter Tattoos','Juggling','Stilt Walking',
+  'Face Painting','Glitter Tattoos','Airbrush Tattoos','Juggling','Stilt Walking',
   'Acrobatics','Fire Breathing','Foam Party','Snow Experience',
-  'DJ Piñata','Game Show','Magic Camp','Photo Booth','Emcee','Driver','Setup'
+  'DJ Piñata','Game Show','Magic Camp','Photo Booth','Emcee',
+  // Added to match skills already on staff records and services that had no
+  // tag to point at: Story Doodles, Bubble Show and the food carts.
+  'Bubble Show','Story Doodles','Cotton Candy','Mini Donuts',
+  'Boombox/Rocksteady','Goon',
+  'Driver','Setup'
 ];
+
+// Exclusivity is a rule, not a list: anything that is not a stackable support
+// role occupies the performer for the whole show. Kept as a predicate so a tag
+// invented later (on a staff record, or via Add Tag) is classified the same way
+// the server classifies it, instead of silently defaulting to "stackable".
+const EXCLUSIVE_TAGS = {
+  has: (tag) => !STACKABLE_TAGS.has(tag),
+  add() {}, delete() {},   // the rule decides; nothing to mutate
+  [Symbol.iterator]: function* () { yield* SKILL_PRESETS.filter(t => !STACKABLE_TAGS.has(t)); },
+};
+
+// Every skill dropdown reads this, not SKILL_PRESETS directly: the union of the
+// presets and every tag actually in use on a staff record or a service slot.
+// addSkillTag only ever pushed onto the in-memory array, so a custom tag was
+// gone on the next reload while staying on the staff record that used it —
+// which is how 'Goon' and 'Boombox/Rocksteady' ended up unselectable.
+function skillTags() {
+  const seen = new Set(SKILL_PRESETS);
+  (allStaff || []).forEach(s => parseSkills(s.skills).forEach(sk => sk && sk.name && seen.add(sk.name)));
+  (allServiceSlots || []).forEach(sl => sl.tag_required && seen.add(sl.tag_required));
+  // Support roles sort last — they are what you add on top of a performer.
+  return [...seen].sort((a, b) =>
+    (STACKABLE_TAGS.has(a) - STACKABLE_TAGS.has(b)) || a.localeCompare(b));
+}
 
 const EVENT_TYPE_DEFS = [
   { id:'kids_bday',   icon:'🎂', label:'Kids Birthday Party' },
@@ -1712,7 +1741,7 @@ function openBooking(id) {
         <div>
           <label style="font-size:.75rem;font-weight:600;color:#6b7280;display:block;margin-bottom:3px">Role / Tag</label>
           <select id="assign-tag-${b.id}" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem">
-            ${SKILL_PRESETS.map(t => `<option value="${t}">${t}</option>`).join('')}
+            ${skillTags().map(t => `<option value="${t}">${t}</option>`).join("")}
           </select>
         </div>
         <button class="btn btn-primary btn-sm" onclick="assignStaff('${b.id}')">Assign</button>
@@ -2924,7 +2953,7 @@ function openTagPicker(staffId) {
   const existing = parseSkills(s.skills).map(sk => sk.name);
 
   const exclusiveTags = [...EXCLUSIVE_TAGS];
-  const stackableTags = SKILL_PRESETS.filter(t => !EXCLUSIVE_TAGS.has(t));
+  const stackableTags = skillTags().filter(t => !EXCLUSIVE_TAGS.has(t));
 
   const tagBtn = (tag) => {
     const has = existing.includes(tag);
@@ -3760,12 +3789,12 @@ function renderCatalogue() {
     slotMap[sl.service_id].push(sl);
   });
 
-  const allTagOptions = SKILL_PRESETS.map(t => `<option value="${t}">${t}</option>`).join('');
+  const allTagOptions = skillTags().map(t => `<option value="${t}">${t}</option>`).join('');
 
   const slotRowHtml = (serviceId, sl, i) => `
     <div class="slot-row" style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
       <select class="slot-tag" style="padding:3px 6px;border:1px solid #e5e7eb;border-radius:5px;font-size:.75rem;flex:1">
-        ${SKILL_PRESETS.map(t => `<option value="${t}" ${sl&&sl.tag_required===t?'selected':''}>${t}</option>`).join('')}
+        ${skillTags().map(t => `<option value="${t}" ${sl&&sl.tag_required===t?"selected":""}>${t}</option>`).join("")}
       </select>
       <input type="number" class="slot-count" value="${sl?sl.slot_count||1:1}" min="1" max="10"
         style="width:40px;padding:3px 5px;border:1px solid #e5e7eb;border-radius:5px;font-size:.75rem;text-align:center"/>
@@ -3851,8 +3880,8 @@ function renderCatalogue() {
   html += `</tbody></table></div>`;
 
   // Skill Tags manager
-  const exclusiveTags = SKILL_PRESETS.filter(t => EXCLUSIVE_TAGS.has(t));
-  const stackableTags = SKILL_PRESETS.filter(t => !EXCLUSIVE_TAGS.has(t));
+  const exclusiveTags = skillTags().filter(t => EXCLUSIVE_TAGS.has(t));
+  const stackableTags = skillTags().filter(t => !EXCLUSIVE_TAGS.has(t));
   html += `<div class="cat-section">
     <h3>🏷 Skill Tags</h3>
     <p class="text-muted" style="margin-bottom:12px;font-size:.82rem">Tags are used on staff profiles and booking staff requirements. Exclusive tags = one performer per gig. Stackable = combinable.</p>
@@ -3943,7 +3972,7 @@ function addSlotRowInline(btn) {
   div.style.cssText = 'display:flex;align-items:center;gap:5px;margin-bottom:3px';
   div.innerHTML = `
     <select class="slot-tag" style="padding:3px 6px;border:1px solid #e5e7eb;border-radius:5px;font-size:.75rem;flex:1">
-      ${SKILL_PRESETS.map(t => `<option value="${t}">${t}</option>`).join('')}
+      ${skillTags().map(t => `<option value="${t}">${t}</option>`).join("")}
     </select>
     <input type="number" class="slot-count" value="1" min="1" max="10"
       style="width:40px;padding:3px 5px;border:1px solid #e5e7eb;border-radius:5px;font-size:.75rem;text-align:center"/>
@@ -4102,7 +4131,7 @@ function addSkillTag(type) {
   const input = document.getElementById(inputId);
   const name = input?.value.trim();
   if (!name) return;
-  if (SKILL_PRESETS.includes(name)) { alert('Tag already exists.'); return; }
+  if (skillTags().includes(name)) { alert('Tag already exists.'); return; }
   const isExcl = type === 'excl';
   SKILL_PRESETS.push(name);
   if (isExcl) EXCLUSIVE_TAGS.add(name);

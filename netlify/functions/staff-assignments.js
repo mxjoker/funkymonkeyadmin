@@ -15,6 +15,34 @@ const notify = ({ to_email, subject, html }) =>
     .catch(e => console.error('staff notify failed:', to_email, '|', e.message));
 
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
+const PORTAL = `${SITE}/staff-portal.html`;
+
+// ── The emailed ⟺ visible invariant ──────────────────────────────────────────
+// A "check your staff portal" email that lands on an empty page is the bug this
+// list exists to prevent. Both the notifier and the portal's open-gig query read
+// it, so a gig is emailed about exactly when the portal will show it.
+//   review  — raw inbound lead, not vetted, no gig to staff yet
+//   quoted  — client has not said yes
+//   pending/accepted/confirmed — real work that needs bodies
+const STAFFABLE_STATUSES = ['pending', 'accepted', 'confirmed'];
+const isStaffable = (booking) => STAFFABLE_STATUSES.includes(booking && booking.status);
+
+// Slots are the only source of truth for who a gig needs. The previous fallback
+// used the service name as a skill tag, but service names ("Foam Party — Single
+// Cannon") are never skill names ("Foam Party"), so a service with no slots
+// configured matched zero staff and reported that as a successful send.
+const slotTags = (slots) => [...new Set(slots.map(s => s.tag_required))];
+
+// Staff whose skills cover at least one required tag, with the matches attached.
+function eligibleStaff(allStaff, tags) {
+  const out = [];
+  for (const s of allStaff) {
+    const skills = Array.isArray(s.skills) ? s.skills : JSON.parse(s.skills || '[]');
+    const matched = skills.filter(sk => tags.includes(sk.name)).map(sk => sk.name);
+    if (matched.length) out.push({ staff: s, matched });
+  }
+  return out;
+}
 
 // ── ZIP → coords map for OKC metro drive-time estimation ─────────────────────
 const ZIP_COORDS = {
@@ -212,6 +240,32 @@ async function ensureTables(client) {
   for (const sql of migrations) {
     try { await client.query(sql); } catch (_) {}
   }
+
+  // ── One gig_log per assignment ───────────────────────────────────────────
+  // gig_logs had only a non-unique index on assignment_id, so the
+  // `ON CONFLICT DO NOTHING` inserts below could never conflict: every
+  // re-assign appended another log row, and the `LEFT JOIN gig_logs` in the
+  // admin and portal reads then returned the same staff member once per log.
+  // That is the duplicate-staff bug. Collapse the existing rows, keeping the
+  // furthest-progressed log, then make the constraint real.
+  //
+  // Deliberately outside the swallow-everything loop above: the INSERTs below
+  // name this constraint as their conflict target, so if it cannot be created
+  // the workflow is broken and must say so rather than resume duplicating.
+  await client.query(`
+    DELETE FROM gig_logs WHERE id NOT IN (
+      SELECT DISTINCT ON (assignment_id) id FROM gig_logs
+      ORDER BY assignment_id,
+               survey_submitted_at DESC NULLS LAST,
+               completed_at        DESC NULLS LAST,
+               arrived_at          DESC NULLS LAST,
+               on_my_way_at        DESC NULLS LAST,
+               id ASC
+    )
+  `);
+  await client.query(
+    'CREATE UNIQUE INDEX IF NOT EXISTS gig_logs_assignment_id_key ON gig_logs (assignment_id)'
+  );
     })().catch(e => { schemaReady = null; throw e; });
   }
   return schemaReady;
@@ -325,24 +379,27 @@ exports.handler = async (event) => {
 
           let openGigs = [];
           if (tags.length) {
+            // One row per (booking, role) the staff member can fill. Previously
+            // this joined on the booking alone, so taking one role on a
+            // multi-role gig hid every other role on it — Foam Party crews
+            // could never pick up the Driver slot on their own event.
             const { rows } = await client.query(
               `SELECT DISTINCT b.id, b.reference, b.service_name, b.event_date, b.event_time,
                       b.event_type, b.guest_count, b.event_zip, b.status as booking_status,
-                      COALESCE(ss.tag_required, b.service_name) as tag_required
+                      ss.tag_required
                FROM bookings b
-               LEFT JOIN staff_slots ss ON ss.service_id = b.service_id
-               WHERE b.status = 'confirmed'
+               JOIN staff_slots ss ON ss.service_id = b.service_id
+               WHERE b.status = ANY($3::text[])
                  AND b.event_date >= CURRENT_DATE
-                 AND (
-                   ss.tag_required = ANY($1::text[])
-                   OR
-                   (ss.id IS NULL AND b.service_name = ANY($1::text[]))
-                 )
-                 AND b.id NOT IN (
-                   SELECT booking_id FROM staff_assignments WHERE staff_id = $2
+                 AND ss.tag_required = ANY($1::text[])
+                 AND NOT EXISTS (
+                   SELECT 1 FROM staff_assignments sa
+                   WHERE sa.booking_id = b.id
+                     AND sa.staff_id   = $2
+                     AND sa.tag_filled = ss.tag_required
                  )
                ORDER BY b.event_date ASC`,
-              [tags, staffId]
+              [tags, staffId, STAFFABLE_STATUSES]
             );
             openGigs = rows;
           }
@@ -424,10 +481,15 @@ exports.handler = async (event) => {
               [status, parseInt(log_id)]
             ));
           } else {
+            // A staff member tapping the checklist before a log exists must not
+            // mint a second one. DO UPDATE (not DO NOTHING) so the tap still
+            // takes effect on the log that already exists, and RETURNING always
+            // hands the portal back a log_id.
             ({ rows } = await client.query(
               `INSERT INTO gig_logs (assignment_id, booking_id, staff_id, status)
                VALUES ($1,$2,$3,$4)
-               ON CONFLICT DO NOTHING
+               ON CONFLICT (assignment_id) DO UPDATE
+                 SET status=EXCLUDED.status${tsClause}, updated_at=NOW()
                RETURNING *`,
               [parseInt(assignment_id), parseInt(booking_id), parseInt(staff_id), status]
             ));
@@ -553,54 +615,11 @@ exports.handler = async (event) => {
           const booking = bookings[0];
           if (!booking) return json(404, { error: 'Booking not found' });
 
-          const { rows: slots } = await client.query(
-            'SELECT * FROM staff_slots WHERE service_id=$1 ORDER BY sort_order',
-            [booking.service_id]
-          );
-
-          const tags = slots.length
-            ? [...new Set(slots.map(s => s.tag_required))]
-            : [booking.service_name];
-
-          const { rows: allStaff } = await client.query('SELECT * FROM staff WHERE active=TRUE');
-          const eligible = allStaff.filter(s => {
-            const skills = Array.isArray(s.skills) ? s.skills : JSON.parse(s.skills || '[]');
-            return skills.some(sk => tags.includes(sk.name));
-          });
-
-          const dateStr = booking.event_date
-            ? new Date(booking.event_date + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
-            : 'TBD';
-          const timeStr = booking.event_time || '';
-
-          let notified = 0;
-          for (const staff of eligible) {
-            const skills = Array.isArray(staff.skills) ? staff.skills : JSON.parse(staff.skills || '[]');
-            const matchedTags = skills.filter(sk => tags.includes(sk.name)).map(sk => sk.name);
-
-            await notify({
-              to_email: staff.email,
-              to_name: staff.preferred_name || staff.name,
-              subject: `🎪 Gig Available — ${booking.service_name} on ${dateStr}`,
-              html: wrap(`
-                <p style="font-size:16px;margin-bottom:16px">Hi <strong>${staff.preferred_name || staff.name}</strong>! 👋</p>
-                <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">A new gig is available and your skills match what's needed. Log in to the staff portal to express your interest!</p>
-                <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
-                  <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</span><br><span style="font-weight:600">${booking.service_name}</span></div>
-                  <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date & Time</span><br><span style="font-weight:600">${dateStr}${timeStr?' at '+timeStr:''}</span></div>
-                  <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Area</span><br><span style="font-weight:600">${booking.event_zip || 'OKC area'}</span></div>
-                  <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Your Matching Skills</span><br><span style="color:#FFD600;font-weight:700">${matchedTags.join(', ')}</span></div>
-                </div>
-                <div style="text-align:center;margin-bottom:20px">
-                  <a href="${SITE}/admin.html" style="background-color:#7c3aed;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">Log In to Express Interest →</a>
-                </div>
-                <p style="font-size:12px;color:#A78BCA;text-align:center">Log in with your access code · ${SITE}/admin.html</p>
-              `)
-            });
-            notified++;
-          }
-
-          return json(200, { notified, tags, eligible: eligible.length });
+          const result = await notifyStaffForBooking(client, booking);
+          // A send that reached nobody is reported as such. "notified: 0" used
+          // to come back looking like success, which is how unconfigured
+          // services quietly staffed themselves with no one.
+          return json(200, result);
         }
 
         if (action === 'assign') {
@@ -623,7 +642,7 @@ exports.handler = async (event) => {
           await client.query(
             `INSERT INTO gig_logs (assignment_id, booking_id, staff_id, status)
              VALUES ($1,$2,$3,'upcoming')
-             ON CONFLICT DO NOTHING`,
+             ON CONFLICT (assignment_id) DO NOTHING`,
             [assignment.id, parseInt(booking_id), parseInt(staff_id)]
           ).catch((e) => console.error('gig_logs INSERT failed:', e.message));
 
@@ -723,7 +742,7 @@ exports.handler = async (event) => {
                 </div>
                 ${scheduleHtml}
                 <div style="text-align:center;margin-top:20px;margin-bottom:20px">
-                  <a href="${SITE}/admin.html" style="background-color:#10B981;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">View Full Gig Details →</a>
+                  <a href="${PORTAL}" style="background-color:#10B981;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">View Full Gig Details →</a>
                 </div>
                 <p style="font-size:12px;color:#A78BCA;text-align:center">Questions? Contact Joe at <a href="tel:4054316625" style="color:#06B6D4">(405) 431-6625</a></p>
               `)
@@ -735,12 +754,19 @@ exports.handler = async (event) => {
 
         if (action === 'unassign') {
           const { booking_id, staff_id, tag_filled } = body;
-          await client.query(
+          if (!booking_id || !staff_id || !tag_filled) {
+            return json(400, { error: 'booking_id, staff_id, tag_filled required' });
+          }
+          const r = await client.query(
             `UPDATE staff_assignments SET status='interested', assigned_at=NULL, updated_at=NOW()
              WHERE booking_id=$1 AND staff_id=$2 AND tag_filled=$3`,
             [parseInt(booking_id), parseInt(staff_id), tag_filled]
           );
-          return json(200, { success: true });
+          // An update that matched nothing is not a successful unassign. The
+          // admin UI would otherwise redraw the person as removed while the
+          // row it failed to find stayed assigned.
+          if (r.rowCount === 0) return json(404, { error: 'No such assignment to unassign' });
+          return json(200, { success: true, unassigned: r.rowCount });
         }
 
         if (action === 'update_staff_notes') {
@@ -811,61 +837,86 @@ exports.handler = async (event) => {
   }
 };
 
-// Exported for use by bookings.js — fires automatically on new booking
+// ── The one gig-available notifier ───────────────────────────────────────────
+// Both the manual "Notify Staff" button and the automatic on-booking hook run
+// through here. They were two near-identical copies that had already drifted;
+// one path fixed and the other missed is how half these bugs survive.
+async function notifyStaffForBooking(client, booking) {
+  // Never email about a gig the portal will not show. This is the whole fix for
+  // "staff got the email, logged in, and saw nothing".
+  if (!isStaffable(booking)) {
+    console.log(`notifyStaffForBooking: skipped booking ${booking.id} — status '${booking.status}' is not staffable`);
+    return { notified: 0, skipped: true, reason: `status '${booking.status}' is not open to staff yet`, tags: [] };
+  }
+
+  const { rows: slots } = await client.query(
+    'SELECT * FROM staff_slots WHERE service_id=$1 ORDER BY sort_order',
+    [booking.service_id]
+  );
+
+  // No slots means nobody knows what this gig needs, so nobody can be matched.
+  // Say so instead of sending zero emails and calling it a success.
+  if (!slots.length) {
+    console.error(`notifyStaffForBooking: booking ${booking.id} — service '${booking.service_id}' has no staff requirements configured`);
+    return {
+      notified: 0, configured: false, tags: [],
+      reason: `"${booking.service_name}" has no staff requirements set. Add them in Catalogue → Staff Requirements.`,
+    };
+  }
+
+  const tags = slotTags(slots);
+  const { rows: allStaff } = await client.query('SELECT * FROM staff WHERE active=TRUE');
+  const eligible = eligibleStaff(allStaff, tags);
+
+  const dateStr = booking.event_date
+    ? new Date(String(booking.event_date).split('T')[0] + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
+    : 'TBD';
+  const timeStr = booking.event_time || '';
+
+  for (const { staff, matched } of eligible) {
+    await notify({
+      to_email: staff.email,
+      to_name: staff.preferred_name || staff.name,
+      subject: `🎪 Gig Available — ${booking.service_name} on ${dateStr}`,
+      html: wrap(`
+        <p style="font-size:16px;margin-bottom:16px">Hi <strong>${staff.preferred_name || staff.name}</strong>! 👋</p>
+        <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">A new gig is available and your skills match what's needed. Log in to the staff portal to express your interest!</p>
+        <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
+          <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</span><br><span style="font-weight:600">${booking.service_name}</span></div>
+          <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date & Time</span><br><span style="font-weight:600">${dateStr}${timeStr ? ' at ' + timeStr : ''}</span></div>
+          <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Area</span><br><span style="font-weight:600">${booking.event_zip || 'OKC area'}</span></div>
+          <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Your Matching Skills</span><br><span style="color:#FFD600;font-weight:700">${matched.join(', ')}</span></div>
+        </div>
+        <div style="text-align:center;margin-bottom:20px">
+          <a href="${PORTAL}" style="background-color:#7c3aed;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">Open the Staff Portal →</a>
+        </div>
+        <p style="font-size:12px;color:#A78BCA;text-align:center">Log in with your access code · ${PORTAL}</p>
+      `)
+    });
+  }
+
+  console.log(`notifyStaffForBooking: notified ${eligible.length} staff for booking ${booking.id} (tags: ${tags.join(', ')})`);
+  return { notified: eligible.length, configured: true, tags, eligible: eligible.length };
+}
+
+// Exported for use by bookings.js / booking.js — fires automatically on a new
+// or newly-confirmed booking.
 exports.notifyMatchingStaff = async function notifyMatchingStaff(booking) {
   if (!booking || !booking.id) return;
   let client;
   try {
     client = await getPool().connect();
     await ensureTables(client);
-
-    const { rows: slots } = await client.query(
-      'SELECT * FROM staff_slots WHERE service_id=$1 ORDER BY sort_order',
-      [booking.service_id]
-    );
-
-    const tags = slots.length
-      ? [...new Set(slots.map(s => s.tag_required))]
-      : [booking.service_name];
-
-    const { rows: allStaff } = await client.query('SELECT * FROM staff WHERE active=TRUE');
-    const eligible = allStaff.filter(s => {
-      const skills = Array.isArray(s.skills) ? s.skills : JSON.parse(s.skills || '[]');
-      return skills.some(sk => tags.includes(sk.name));
-    });
-
-    const dateStr = booking.event_date
-      ? new Date(booking.event_date + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
-      : 'TBD';
-    const timeStr = booking.event_time || '';
-
-    for (const staff of eligible) {
-      const skills = Array.isArray(staff.skills) ? staff.skills : JSON.parse(staff.skills || '[]');
-      const matchedTags = skills.filter(sk => tags.includes(sk.name)).map(sk => sk.name);
-      await notify({
-        to_email: staff.email,
-        to_name: staff.preferred_name || staff.name,
-        subject: `🎪 Gig Available — ${booking.service_name} on ${dateStr}`,
-        html: wrap(`
-          <p style="font-size:16px;margin-bottom:16px">Hi <strong>${staff.preferred_name || staff.name}</strong>! 👋</p>
-          <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">A new gig is available and your skills match what's needed. Log in to the staff portal to express your interest!</p>
-          <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
-            <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</span><br><span style="font-weight:600">${booking.service_name}</span></div>
-            <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date & Time</span><br><span style="font-weight:600">${dateStr}${timeStr ? ' at ' + timeStr : ''}</span></div>
-            <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Area</span><br><span style="font-weight:600">${booking.event_zip || 'OKC area'}</span></div>
-            <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Your Matching Skills</span><br><span style="color:#FFD600;font-weight:700">${matchedTags.join(', ')}</span></div>
-          </div>
-          <div style="text-align:center;margin-bottom:20px">
-            <a href="${SITE}/admin.html" style="background-color:#7c3aed;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">Log In to Express Interest →</a>
-          </div>
-          <p style="font-size:12px;color:#A78BCA;text-align:center">Log in with your access code · ${SITE}/admin.html</p>
-        `)
-      });
-    }
-    console.log(`notifyMatchingStaff: notified ${eligible.length} staff for booking ${booking.id}`);
+    return await notifyStaffForBooking(client, booking);
   } catch(e) {
     console.error('notifyMatchingStaff error:', e.message);
   } finally {
     if (client) client.release();
   }
 };
+
+// Exported for tests — the invariant these two share is the thing worth pinning.
+exports.STAFFABLE_STATUSES = STAFFABLE_STATUSES;
+exports.isStaffable = isStaffable;
+exports.slotTags = slotTags;
+exports.eligibleStaff = eligibleStaff;
