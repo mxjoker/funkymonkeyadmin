@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
 <title>Book Funky Monkey Events</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -41,6 +41,22 @@ h2{font-size:1.2rem;color:#1e1b4b;margin-bottom:6px;font-weight:800}
 
 /* ── Service Cards ── */
 .services-grid{display:flex;flex-direction:column;gap:10px;margin-bottom:20px}
+
+/* ── Service sections ── */
+.svc-section{border:2px solid #e9d5ff;border-radius:12px;overflow:hidden;background:#fff}
+.svc-section-head{width:100%;display:flex;align-items:center;gap:10px;padding:13px 16px;
+  background:#faf5ff;border:none;cursor:pointer;font:inherit;text-align:left;color:#1e1b4b}
+.svc-section-head:hover{background:#f3e8ff}
+.svc-section-icon{font-size:1.15rem;flex-shrink:0}
+.svc-section-label{flex:1;font-weight:800;font-size:.82rem;text-transform:uppercase;letter-spacing:.06em}
+.svc-section-count{font-size:.75rem;font-weight:700;color:#7c3aed;background:#ede9fe;
+  border-radius:10px;padding:2px 9px}
+.svc-section-chev{font-size:.7rem;color:#7c3aed;transition:transform .2s}
+.svc-section[open] .svc-section-chev{transform:rotate(180deg)}
+.svc-section-body{display:none;flex-direction:column;gap:10px;padding:10px;background:#fdfcff;
+  border-top:2px solid #e9d5ff}
+.svc-section[open] .svc-section-body{display:flex}
+
 .svc-card{border:2px solid #e9d5ff;border-radius:12px;overflow:hidden;transition:border-color .2s;background:#fff}
 .svc-card.selected{border-color:#7c3aed}
 .svc-card-header{padding:14px 16px;cursor:pointer;display:flex;align-items:center;gap:12px;background:#fafaf8;transition:background .2s}
@@ -57,6 +73,19 @@ h2{font-size:1.2rem;color:#1e1b4b;margin-bottom:6px;font-weight:800}
 .svc-card.selected .svc-select-indicator{background:#7c3aed;border-color:#7c3aed}
 .svc-select-indicator::after{content:'';width:8px;height:8px;border-radius:50%;background:#fff;opacity:0;transition:opacity .2s}
 .svc-card.selected .svc-select-indicator::after{opacity:1}
+
+/* ── Sticky selection bar ── */
+#svc-sticky{position:fixed;left:0;right:0;bottom:0;z-index:60;display:none;
+  background:#fff;border-top:2px solid #7c3aed;box-shadow:0 -6px 20px rgba(0,0,0,.12);
+  padding:12px 18px;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+#svc-sticky.show{display:block}
+.sticky-inner{max-width:760px;margin:0 auto;display:flex;align-items:center;gap:14px}
+.sticky-text{flex:1;min-width:0}
+.sticky-name{font-weight:700;color:#1e1b4b;font-size:.86rem;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.sticky-total{color:#7c3aed;font-weight:800;font-size:.95rem;margin-top:1px}
+.sticky-note{font-size:.7rem;color:#888;font-weight:400}
+body.sticky-on #step-2{padding-bottom:96px}
 
 /* ── Accordion / Add-ons ── */
 .svc-accordion{display:none;border-top:2px solid #e9d5ff;padding:16px;background:#fefefe}
@@ -180,6 +209,15 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#7c3aed}
       <div class="btn-row">
         <button class="btn btn-secondary" onclick="goTo(1)">← Back</button>
         <button class="btn btn-primary" id="btn-2" disabled onclick="goTo(3)">Next: Event Details →</button>
+      </div>
+      <div id="svc-sticky">
+        <div class="sticky-inner">
+          <div class="sticky-text">
+            <div class="sticky-name" id="sticky-name"></div>
+            <div class="sticky-total" id="sticky-total"></div>
+          </div>
+          <button class="btn btn-primary" onclick="goTo(3)">Continue →</button>
+        </div>
       </div>
     </div>
 
@@ -494,6 +532,96 @@ const EVENT_TYPES = [
 
 const ALL_SVC_IDS = Object.keys(SERVICES);
 
+// ══ PURE HELPERS — extracted verbatim by test/booking-form-grouping.test.js ══
+// Nothing in this block may touch the DOM, network, or page state. It is
+// evaluated in a bare vm context by the tests.
+
+const CATEGORY_ORDER = ['shows', 'performers', 'experiences', 'library'];
+const CATEGORY_META = {
+  shows:       { label: 'Main Shows',          icon: '🎩' },
+  performers:  { label: 'Add-On Entertainers', icon: '🎨' },
+  experiences: { label: 'Party Experiences',   icon: '🎊' },
+  library:     { label: 'Library Programs',    icon: '📚' },
+};
+// A category added in Catalogue later must still render. Without this bucket
+// those services would silently disappear from the customer-facing form.
+const OTHER_CATEGORY = { key: 'other', label: 'More Options', icon: '✨' };
+
+// ids -> ordered, non-empty sections. catOf(id) returns a category or undefined.
+function groupByCategory(ids, catOf) {
+  const buckets = new Map();
+  for (const id of ids) {
+    const raw = catOf(id);
+    const key = CATEGORY_META[raw] ? raw : OTHER_CATEGORY.key;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(id);
+  }
+  return [...CATEGORY_ORDER, OTHER_CATEGORY.key]
+    .filter(k => buckets.has(k))
+    .map(k => ({
+      key:   k,
+      label: (CATEGORY_META[k] || OTHER_CATEGORY).label,
+      icon:  (CATEGORY_META[k] || OTHER_CATEGORY).icon,
+      ids:   buckets.get(k),
+    }));
+}
+
+// Sections only when they earn their keep: 2+ sections AND more than 4
+// services. Both halves matter — the category count alone would wrap
+// Corporate's 4 services in two drawers, and the service count alone would
+// wrap Library's 6 in one pointless drawer.
+function shouldSection(ids, catOf) {
+  if (ids.some(id => !catOf(id))) return false;  // catalogue data did not load
+  return groupByCategory(ids, catOf).length >= 2 && ids.length > 4;
+}
+
+// Resolve an add-on id: service list, then photo-booth list, then the DB
+// catalogue. Used only by the sticky bar (renderStickyBar) — buildQuote and
+// submitBooking carry their own inline resolvers and, for pb_kiosk/pb_360,
+// check the static PHOTO_BOOTH_ADDONS list BEFORE the DB, the opposite order
+// used here. That divergence is currently latent because neither photo-booth
+// id exists in the addons table, but it means this resolver does not
+// guarantee the sticky-bar subtotal matches what gets submitted.
+function resolveAddon(svc, aid, pbAddons, dbAddonList) {
+  let a = ((svc && svc.addons) || []).find(x => x.id === aid)
+       || (pbAddons || []).find(x => x.id === aid);
+  if (!a) {
+    const db = (dbAddonList || []).find(x => x.addon_id === aid);
+    if (db) a = { id: db.addon_id, name: db.name, price: Number(db.price) };
+  }
+  return a || null;
+}
+
+// Step-2 subtotal: service + extra hours + fixed-price add-ons.
+// Per-guest add-ons cannot be priced here because guest count is collected at
+// step 3, so they are counted separately and surfaced as "+ per-guest extras"
+// rather than being silently valued at zero.
+function step2Subtotal(svc, extraHours, addonIds, resolve) {
+  if (!svc) return null;
+  let total = svc.isQuote ? 0 : (Number(svc.price) || 0);
+  if (svc.extraHourRate && extraHours > 0) total += svc.extraHourRate * extraHours;
+  let perGuest = 0;
+  let addonCount = 0;
+  for (const aid of (addonIds || [])) {
+    const a = resolve(aid);
+    if (!a) continue;
+    addonCount++;
+    if (a.price === 'per_child') { perGuest++; continue; }
+    total += Number(a.price) || 0;
+  }
+  return { total, perGuest, isQuote: !!svc.isQuote, addonCount };
+}
+
+// Which section should render open: the one holding svcId, else the first.
+function sectionKeyToOpen(sections, svcId) {
+  if (svcId) {
+    const owner = sections.find(s => s.ids.includes(svcId));
+    if (owner) return owner.key;
+  }
+  return sections.length ? sections[0].key : null;
+}
+// ══ END PURE HELPERS ══
+
 // ══════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════
@@ -515,6 +643,7 @@ const S = {
 // ══════════════════════════════════════════════════
 let dbAddons = [];        // all addons from DB: [{ addon_id, name, price, ... }]
 let dbServiceAddons = {}; // { service_id: [addon_id, ...] }
+let dbServiceCategories = {}; // { service_id: category } from /api/services
 
 async function loadAddonsFromDB() {
   try {
@@ -522,6 +651,11 @@ async function loadAddonsFromDB() {
     const data = await res.json();
     dbAddons = data.addons || [];
     dbServiceAddons = data.service_addons || {};
+    // The catalogue already carries the grouping the form needs; it was being
+    // discarded. Read it rather than duplicating 27 rows into SERVICES.
+    for (const s of (data.services || [])) {
+      if (s.service_id && s.category) dbServiceCategories[s.service_id] = s.category;
+    }
     const dbServiceEventTypes = data.service_event_types || {};
 
     // Patch each SERVICES entry's .addons with DB data
@@ -567,6 +701,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   renderEtGrid();
   populateTimes();
   setMinDate();
+  watchStep2BtnRow();
 });
 
 // ══════════════════════════════════════════════════
@@ -602,36 +737,72 @@ function buildStep2() {
   const grid = document.getElementById('svc-grid');
   grid.innerHTML = '';
 
-  ids.forEach(id => {
-    const svc = SERVICES[id];
-    if (!svc) return;
-    const isSelected = S.svcId === id;
+  const catOf = (id) => dbServiceCategories[id];
+  const valid = ids.filter(id => SERVICES[id]);
 
-    const card = document.createElement('div');
-    card.className = 'svc-card' + (isSelected ? ' selected' : '');
-    card.id = 'svc-card-' + id;
+  if (!shouldSection(valid, catOf)) {
+    valid.forEach(id => grid.appendChild(renderSvcCard(id)));
+  } else {
+    const sections = groupByCategory(valid, catOf);
+    // The first non-empty section opens — not literally "shows", so a
+    // library-only flow opens Library rather than showing shut drawers.
+    const openKey = sectionKeyToOpen(sections, S.svcId);
 
-    const priceStr = svc.priceNote
-      ? `<span class="price-note">${svc.priceNote} </span>$${svc.price.toLocaleString()}`
-      : `$${svc.price.toLocaleString()}`;
+    sections.forEach(sec => {
+      const wrap = document.createElement('div');
+      wrap.className = 'svc-section';
+      wrap.dataset.section = sec.key;
+      if (sec.key === openKey) wrap.setAttribute('open', '');
 
-    card.innerHTML = `
-      <div class="svc-card-header" onclick="selectService('${id}')">
-        <div class="svc-icon">${svc.icon}</div>
-        <div class="svc-info">
-          <div class="svc-name">${svc.name}</div>
-          <div class="svc-price">${priceStr}</div>
-          ${svc.desc ? `<div class="svc-desc">${svc.desc}</div>` : ''}
-          ${svc.duration ? `<div class="svc-duration">⏱ ${svc.duration}</div>` : ''}
-        </div>
-        <div class="svc-select-indicator"></div>
+      const head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'svc-section-head';
+      head.setAttribute('aria-expanded', String(sec.key === openKey));
+      head.innerHTML =
+        `<span class="svc-section-icon">${sec.icon}</span>` +
+        `<span class="svc-section-label">${sec.label}</span>` +
+        `<span class="svc-section-count">${sec.ids.length}</span>` +
+        `<span class="svc-section-chev">▼</span>`;
+      head.onclick = () => toggleSection(sec.key);
+
+      const body = document.createElement('div');
+      body.className = 'svc-section-body';
+      sec.ids.forEach(id => body.appendChild(renderSvcCard(id)));
+
+      wrap.appendChild(head);
+      wrap.appendChild(body);
+      grid.appendChild(wrap);
+    });
+  }
+
+  updateStep2Btn();
+}
+
+function renderSvcCard(id) {
+  const svc = SERVICES[id];
+  const card = document.createElement('div');
+  card.className = 'svc-card' + (S.svcId === id ? ' selected' : '');
+  card.id = 'svc-card-' + id;
+
+  const priceStr = svc.priceNote
+    ? `<span class="price-note">${svc.priceNote} </span>$${svc.price.toLocaleString()}`
+    : `$${svc.price.toLocaleString()}`;
+
+  card.innerHTML = `
+    <div class="svc-card-header" onclick="selectService('${id}')">
+      <div class="svc-icon">${svc.icon}</div>
+      <div class="svc-info">
+        <div class="svc-name">${svc.name}</div>
+        <div class="svc-price">${priceStr}</div>
+        ${svc.desc ? `<div class="svc-desc">${svc.desc}</div>` : ''}
+        ${svc.duration ? `<div class="svc-duration">⏱ ${svc.duration}</div>` : ''}
       </div>
-      <div class="svc-accordion" id="acc-${id}">
-        ${buildAccordion(svc)}
-      </div>`;
-
-    grid.appendChild(card);
-  });
+      <div class="svc-select-indicator"></div>
+    </div>
+    <div class="svc-accordion" id="acc-${id}">
+      ${buildAccordion(svc)}
+    </div>`;
+  return card;
 }
 
 function buildAccordion(svc) {
@@ -723,8 +894,17 @@ function setExtraHours(svcId, val) {
   updateStep2Btn();
 }
 
+function toggleSection(key) {
+  const sec = document.querySelector(`.svc-section[data-section="${key}"]`);
+  if (!sec) return;
+  const nowOpen = !sec.hasAttribute('open');
+  if (nowOpen) sec.setAttribute('open', '');
+  else sec.removeAttribute('open');
+  const head = sec.querySelector('.svc-section-head');
+  if (head) head.setAttribute('aria-expanded', String(nowOpen));
+}
+
 function selectService(id) {
-  const prev = S.svcId;
   S.svcId = id;
   S.addons = []; // clear addons when switching service
 
@@ -736,7 +916,9 @@ function selectService(id) {
     // Rebuild accordion for fresh state
     const acc = document.getElementById('acc-' + id);
     if (acc) acc.innerHTML = buildAccordion(SERVICES[id]);
-    // Scroll card into view
+    // Keep the section holding this card open, then bring the card into view.
+    const sec = card.closest('.svc-section');
+    if (sec && !sec.hasAttribute('open')) toggleSection(sec.dataset.section);
     setTimeout(() => card.scrollIntoView({ behavior:'smooth', block:'nearest' }), 50);
   }
   updateStep2Btn();
@@ -752,10 +934,66 @@ function toggleAddon(svcId, addonId) {
   if (el) el.classList.toggle('selected', S.addons.includes(addonId));
   const check = el ? el.querySelector('.addon-check') : null;
   if (check) check.style.background = S.addons.includes(addonId) ? '#7c3aed' : '';
+
+  renderStickyBar();
 }
 
 function updateStep2Btn() {
   document.getElementById('btn-2').disabled = !S.svcId;
+  renderStickyBar();
+}
+
+function renderStickyBar() {
+  const bar = document.getElementById('svc-sticky');
+  if (!bar) return;
+  const svc = S.svcId ? SERVICES[S.svcId] : null;
+
+  // Only on step 2, and only once something is selected.
+  if (!svc || S.currentStep !== 2) {
+    bar.classList.remove('show');
+    document.body.classList.remove('sticky-on');
+    return;
+  }
+
+  const pbList = ['pb_kiosk', 'pb_360']
+    .map(id => dbAddons.find(x => x.addon_id === id))
+    .filter(Boolean)
+    .map(db => ({ id: db.addon_id, name: db.name, price: Number(db.price) }));
+  const resolve = (aid) => resolveAddon(svc, aid,
+    pbList.length ? pbList : PHOTO_BOOTH_ADDONS, dbAddons);
+
+  const r = step2Subtotal(svc, getExtraHours(S.svcId), S.addons, resolve);
+
+  const addonBit = r.addonCount
+    ? ` + ${r.addonCount} add-on${r.addonCount > 1 ? 's' : ''}` : '';
+  document.getElementById('sticky-name').textContent = svc.name + addonBit;
+
+  // Quote-only services must never read "$0" — these are the highest-value
+  // bookings on the form. Travel is unknown until the ZIP at step 3, so the
+  // figure is always labelled a subtotal.
+  const perGuestNote = r.perGuest ? ' <span class="sticky-note">+ per-guest extras</span>' : '';
+  document.getElementById('sticky-total').innerHTML = r.isQuote
+    ? `Custom quote <span class="sticky-note">from $${svc.price.toLocaleString()}</span>`
+    : `$${r.total.toLocaleString()} <span class="sticky-note">subtotal</span>${perGuestNote}`;
+
+  bar.classList.add('show');
+  bar.style.visibility = '';
+  document.body.classList.add('sticky-on');
+}
+
+// When the real Back/Next row is already visible there is no reason to float a
+// second Continue over it.
+let btnRowObserver = null;
+function watchStep2BtnRow() {
+  if (btnRowObserver || !('IntersectionObserver' in window)) return;
+  const row = document.getElementById('btn-2');
+  if (!row) return;
+  btnRowObserver = new IntersectionObserver(([entry]) => {
+    const bar = document.getElementById('svc-sticky');
+    if (!bar || !bar.classList.contains('show')) return;
+    bar.style.visibility = entry.isIntersecting ? 'hidden' : 'visible';
+  }, { rootMargin: '0px 0px -40px 0px' });
+  btnRowObserver.observe(row);
 }
 
 // ══════════════════════════════════════════════════
@@ -766,6 +1004,7 @@ function goTo(n) {
   if (n === 4) buildQuote();
 
   S.currentStep = n;
+  renderStickyBar();  // clears the bar when leaving step 2
   document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
   document.getElementById('step-' + n).classList.add('active');
 
