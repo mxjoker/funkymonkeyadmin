@@ -17,14 +17,13 @@ function loadHelpers() {
   vm.createContext(ctx);
   vm.runInContext(
     HTML.slice(a, b) +
-    '\nout = { groupByCategory, shouldSection, CATEGORY_ORDER, resolveAddon, step2Subtotal };',
+    '\nout = { groupByCategory, shouldSection, CATEGORY_ORDER, resolveAddon, step2Subtotal, sectionKeyToOpen };',
     ctx
   );
   return ctx.out;
 }
 
-const { groupByCategory, shouldSection, CATEGORY_ORDER } = loadHelpers();
-const { resolveAddon, step2Subtotal } = loadHelpers();
+const { groupByCategory, shouldSection, CATEGORY_ORDER, resolveAddon, step2Subtotal, sectionKeyToOpen } = loadHelpers();
 
 // Values built inside a vm context carry THAT realm's prototypes, so
 // assert.deepStrictEqual rejects them even when the structure is identical
@@ -48,6 +47,13 @@ const CAT = {
 const catOf = (id) => CAT[id];
 
 // The nine real entry points, taken from EVENT_TYPES in booking-form.html.
+// FIXTURE, not a live-data guarantee: loadAddonsFromDB() overwrites each
+// EVENT_TYPES[].svcs from the DB at runtime, so these exact id lists (and
+// their per-category counts below) will drift from what's actually live —
+// e.g. kids_bday is 16 services live (2/5/9) vs. 14 (2/3/9) here, family is
+// 17 vs. 15, community is 18 vs. 16. That's fine: these tests pin the pure
+// grouping function against a fixed input, and all nine sectioning verdicts
+// (section vs. no section) are unchanged by the drift.
 const ENTRY_POINTS = {
   kids_bday: ['deluxe_magic','basic_magic','foam_single','foam_double','snow_45','snow_90',
               'cotton_candy','mini_donuts','face_paint','airbrush','glitter','bubble_show',
@@ -79,10 +85,17 @@ test('sections appear only for the entry points that earn them', () => {
 });
 
 test('both halves of the threshold are load-bearing', () => {
-  // Corporate has 2 categories but only 4 services.
-  assert.strictEqual(shouldSection(ENTRY_POINTS.corporate, catOf), false);
-  // Library has 6 services but only 1 category.
-  assert.strictEqual(shouldSection(ENTRY_POINTS.library, catOf), false);
+  // 5 services, all "shows": clears the >4 count half but fails the 2+
+  // category half on its own — proves the category check still rejects
+  // when the count check alone would have allowed it through.
+  const fiveOneCategory = ['deluxe_magic','basic_magic','corporate_magic','game_show','school_asm'];
+  assert.strictEqual(shouldSection(fiveOneCategory, catOf), false);
+
+  // 4 services split across 2 categories: clears the 2+ category half but
+  // fails the >4 count half on its own — proves the count check still
+  // rejects when the category check alone would have allowed it through.
+  const fourTwoCategories = ['deluxe_magic','basic_magic','balloon_40','balloon_60'];
+  assert.strictEqual(shouldSection(fourTwoCategories, catOf), false);
 });
 
 test('grouping never drops a service', () => {
@@ -99,7 +112,7 @@ test('sections come back in catalogue order regardless of input order', () => {
   assert.deepStrictEqual(keys, ['shows','performers','experiences','library']);
 });
 
-test('kids birthday splits 2 shows / 3 performers / 9 experiences', () => {
+test('groups a mixed fixture into shows/performers/experiences in that order', () => {
   const s = plain(groupByCategory(ENTRY_POINTS.kids_bday, catOf));
   assert.deepStrictEqual(s.map(x => [x.key, x.ids.length]),
     [['shows',2],['performers',3],['experiences',9]]);
@@ -125,12 +138,12 @@ test('missing category data forces the flat path', () => {
 });
 
 test('customer-facing labels never leak the DB category strings', () => {
-  const labels = plain(groupByCategory(ENTRY_POINTS.browse_all, catOf)).map(s => s.label);
-  assert.deepStrictEqual(labels,
+  const sections = plain(groupByCategory(ENTRY_POINTS.browse_all, catOf));
+  assert.deepStrictEqual(sections.map(s => s.label),
     ['Main Shows','Add-On Entertainers','Party Experiences','Library Programs']);
-  for (const raw of plain(CATEGORY_ORDER)) {
-    assert.ok(!labels.includes(raw), `raw category "${raw}" must not be shown to customers`);
-  }
+  // .key stays the raw DB category (used internally for dataset/toggle wiring);
+  // only .label is shown to customers. Pins that the two never get swapped.
+  assert.deepStrictEqual(sections.map(s => s.key), plain(CATEGORY_ORDER));
 });
 
 const FOAM = { id:'foam_single', name:'Foam Party', price:385,
@@ -182,9 +195,32 @@ test('add-ons resolve from the DB list as a last resort, with string prices', ()
 test('an unresolvable add-on is ignored rather than producing NaN', () => {
   const r = step2Subtotal(FOAM, 0, ['ghost_addon'], mkResolve(FOAM));
   assert.strictEqual(r.total, 385);
-  assert.ok(Number.isFinite(r.total));
+});
+
+test('an unresolvable add-on id does not inflate addonCount', () => {
+  const r = step2Subtotal(FOAM, 0, ['glitter_addon', 'ghost_addon'], mkResolve(FOAM));
+  assert.strictEqual(r.addonCount, 1, 'the stale/unresolvable id must not be counted');
 });
 
 test('no service selected yields null', () => {
   assert.strictEqual(step2Subtotal(null, 0, [], mkResolve(FOAM)), null);
+});
+
+test('sectionKeyToOpen returns the key of the section containing svcId', () => {
+  const sections = plain(groupByCategory(ENTRY_POINTS.kids_bday, catOf));
+  assert.strictEqual(sectionKeyToOpen(sections, 'foam_single'), 'experiences');
+});
+
+test('sectionKeyToOpen falls back to the first section when svcId is null', () => {
+  const sections = plain(groupByCategory(ENTRY_POINTS.kids_bday, catOf));
+  assert.strictEqual(sectionKeyToOpen(sections, null), 'shows');
+});
+
+test('sectionKeyToOpen falls back to the first section when svcId matches no section', () => {
+  const sections = plain(groupByCategory(ENTRY_POINTS.kids_bday, catOf));
+  assert.strictEqual(sectionKeyToOpen(sections, 'not_a_real_id'), 'shows');
+});
+
+test('sectionKeyToOpen returns null for an empty sections array', () => {
+  assert.strictEqual(sectionKeyToOpen([], 'anything'), null);
 });

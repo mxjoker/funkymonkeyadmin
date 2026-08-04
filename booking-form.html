@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
 <title>Book Funky Monkey Events</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -575,9 +575,13 @@ function shouldSection(ids, catOf) {
   return groupByCategory(ids, catOf).length >= 2 && ids.length > 4;
 }
 
-// Resolve an add-on id using the same precedence as the submitted payload
-// (service list, then photo-booth list, then the DB catalogue). One resolver
-// so the sticky-bar subtotal and the price actually submitted cannot disagree.
+// Resolve an add-on id: service list, then photo-booth list, then the DB
+// catalogue. Used only by the sticky bar (renderStickyBar) — buildQuote and
+// submitBooking carry their own inline resolvers and, for pb_kiosk/pb_360,
+// check the static PHOTO_BOOTH_ADDONS list BEFORE the DB, the opposite order
+// used here. That divergence is currently latent because neither photo-booth
+// id exists in the addons table, but it means this resolver does not
+// guarantee the sticky-bar subtotal matches what gets submitted.
 function resolveAddon(svc, aid, pbAddons, dbAddonList) {
   let a = ((svc && svc.addons) || []).find(x => x.id === aid)
        || (pbAddons || []).find(x => x.id === aid);
@@ -597,13 +601,24 @@ function step2Subtotal(svc, extraHours, addonIds, resolve) {
   let total = svc.isQuote ? 0 : (Number(svc.price) || 0);
   if (svc.extraHourRate && extraHours > 0) total += svc.extraHourRate * extraHours;
   let perGuest = 0;
+  let addonCount = 0;
   for (const aid of (addonIds || [])) {
     const a = resolve(aid);
     if (!a) continue;
+    addonCount++;
     if (a.price === 'per_child') { perGuest++; continue; }
     total += Number(a.price) || 0;
   }
-  return { total, perGuest, isQuote: !!svc.isQuote, addonCount: (addonIds || []).length };
+  return { total, perGuest, isQuote: !!svc.isQuote, addonCount };
+}
+
+// Which section should render open: the one holding svcId, else the first.
+function sectionKeyToOpen(sections, svcId) {
+  if (svcId) {
+    const owner = sections.find(s => s.ids.includes(svcId));
+    if (owner) return owner.key;
+  }
+  return sections.length ? sections[0].key : null;
 }
 // ══ END PURE HELPERS ══
 
@@ -727,48 +742,40 @@ function buildStep2() {
 
   if (!shouldSection(valid, catOf)) {
     valid.forEach(id => grid.appendChild(renderSvcCard(id)));
-    return;
+  } else {
+    const sections = groupByCategory(valid, catOf);
+    // The first non-empty section opens — not literally "shows", so a
+    // library-only flow opens Library rather than showing shut drawers.
+    const openKey = sectionKeyToOpen(sections, S.svcId);
+
+    sections.forEach(sec => {
+      const wrap = document.createElement('div');
+      wrap.className = 'svc-section';
+      wrap.dataset.section = sec.key;
+      if (sec.key === openKey) wrap.setAttribute('open', '');
+
+      const head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'svc-section-head';
+      head.setAttribute('aria-expanded', String(sec.key === openKey));
+      head.innerHTML =
+        `<span class="svc-section-icon">${sec.icon}</span>` +
+        `<span class="svc-section-label">${sec.label}</span>` +
+        `<span class="svc-section-count">${sec.ids.length}</span>` +
+        `<span class="svc-section-chev">▼</span>`;
+      head.onclick = () => toggleSection(sec.key);
+
+      const body = document.createElement('div');
+      body.className = 'svc-section-body';
+      sec.ids.forEach(id => body.appendChild(renderSvcCard(id)));
+
+      wrap.appendChild(head);
+      wrap.appendChild(body);
+      grid.appendChild(wrap);
+    });
   }
 
-  const sections = groupByCategory(valid, catOf);
-  // The first non-empty section opens — not literally "shows", so a
-  // library-only flow opens Library rather than showing shut drawers.
-  const openKey = sectionKeyToOpen(sections);
-
-  sections.forEach(sec => {
-    const wrap = document.createElement('div');
-    wrap.className = 'svc-section';
-    wrap.dataset.section = sec.key;
-    if (sec.key === openKey) wrap.setAttribute('open', '');
-
-    const head = document.createElement('button');
-    head.type = 'button';
-    head.className = 'svc-section-head';
-    head.setAttribute('aria-expanded', String(sec.key === openKey));
-    head.innerHTML =
-      `<span class="svc-section-icon">${sec.icon}</span>` +
-      `<span class="svc-section-label">${sec.label}</span>` +
-      `<span class="svc-section-count">${sec.ids.length}</span>` +
-      `<span class="svc-section-chev">▼</span>`;
-    head.onclick = () => toggleSection(sec.key);
-
-    const body = document.createElement('div');
-    body.className = 'svc-section-body';
-    sec.ids.forEach(id => body.appendChild(renderSvcCard(id)));
-
-    wrap.appendChild(head);
-    wrap.appendChild(body);
-    grid.appendChild(wrap);
-  });
-}
-
-// Open the section holding the current selection, else the first one.
-function sectionKeyToOpen(sections) {
-  if (S.svcId) {
-    const owner = sections.find(s => s.ids.includes(S.svcId));
-    if (owner) return owner.key;
-  }
-  return sections.length ? sections[0].key : null;
+  updateStep2Btn();
 }
 
 function renderSvcCard(id) {
@@ -898,7 +905,6 @@ function toggleSection(key) {
 }
 
 function selectService(id) {
-  const prev = S.svcId;
   S.svcId = id;
   S.addons = []; // clear addons when switching service
 
@@ -971,6 +977,7 @@ function renderStickyBar() {
     : `$${r.total.toLocaleString()} <span class="sticky-note">subtotal</span>${perGuestNote}`;
 
   bar.classList.add('show');
+  bar.style.visibility = '';
   document.body.classList.add('sticky-on');
 }
 
