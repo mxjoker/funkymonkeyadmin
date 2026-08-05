@@ -87,12 +87,6 @@ tr:hover td{background:#fafaf8}
 /* ── Badges ── */
 .badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:.72rem;font-weight:700;white-space:nowrap}
 .badge-custom{background:#fef3c7;color:#d97706}
-/* Legacy status — deliberately absent from STATUSES (see admin.html ~892) so
-   injectStatusCss() doesn't generate it. create-bookings.js and
-   import-bookings.js still allow/produce 'pending' and nine live bookings
-   hold it; keep this rule by hand until those two stop producing it and the
-   rows are migrated off it. */
-.badge-pending{background:#dbeafe;color:#1d4ed8}
 
 /* ── Modal ── */
 .modal-overlay{position:fixed;inset:0;background:rgba(15,10,30,.5);z-index:200;display:none;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto;backdrop-filter:blur(2px)}
@@ -1298,7 +1292,7 @@ function renderDashboard() {
   document.getElementById('st-confirmed-sub').textContent = pctChange(confirmedThisMonth, confirmedPriorMonth);
 
   const recent = [...allBookings]
-    .filter(b => ['review','pending','quoted','accepted'].includes(b.status))
+    .filter(b => ['review','quoted','accepted'].includes(b.status))
     .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))
     .slice(0, 8);
   document.getElementById('dash-tbody').innerHTML = recent.length
@@ -1837,7 +1831,14 @@ async function loadStaffAssignments(bookingId) {
     const { payments } = await payRes.json();
     const bookings = await bookingRes.json();
     const booking = bookings.find(b => b.id === parseInt(bookingId));
-    
+
+    // Slots are keyed on bookings.service_id, and the PPM importer never wrote
+    // one, so the slot join comes back empty for almost every booking. Without
+    // this flag both messages below blame the catalogue for a link the booking
+    // never had — the roles are configured, the booking just isn't attached to
+    // the service that owns them.
+    const unlinked = !booking?.service_id;
+
     // Index payments by staff_id
     const payByStaff = {};
     (payments || []).forEach(p => { payByStaff[p.staff_id] = p; });
@@ -1867,7 +1868,9 @@ async function loadStaffAssignments(bookingId) {
             <span style="background:#f0fdf4;color:#166534;border-radius:6px;padding:3px 10px;font-size:.78rem;font-weight:700">${assigned} / ${required} Assigned</span>
           </div>`;
       } else {
-        summaryEl.innerHTML = '<div style="font-size:.82rem;color:#6b7280;font-style:italic;margin-bottom:10px">⚙️ No staff requirements set for this service. Use Catalogue to configure.</div>';
+        summaryEl.innerHTML = `<div style="font-size:.82rem;color:#6b7280;font-style:italic;margin-bottom:10px">⚙️ ${unlinked
+          ? 'This booking is not linked to a catalogue service, so no staff requirements can be found.'
+          : 'No staff requirements set for this service. Use Catalogue to configure.'}</div>`;
       }
     }
     
@@ -1875,10 +1878,16 @@ async function loadStaffAssignments(bookingId) {
     if (!slots || slots.length === 0) {
       el.innerHTML = `
         <div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:12px;margin-bottom:12px">
-          <div style="font-weight:600;color:#92400e;margin-bottom:4px">⚙️ No Staff Requirements Configured</div>
+          <div style="font-weight:600;color:#92400e;margin-bottom:4px">⚙️ ${unlinked ? 'Booking Not Linked to a Catalogue Service' : 'No Staff Requirements Configured'}</div>
           <div style="font-size:.82rem;color:#78350f">
-            This service doesn't have staff requirements set up yet.
-            Go to <strong>Catalogue</strong> → find "${esc(booking?.service_name || 'this service')}" → add staff roles.
+            ${unlinked ? `
+              "${esc(booking?.service_name || 'This booking')}" is free text on this booking, not a catalogue service, so its
+              staff roles can't be looked up. In <strong>Quote Breakdown</strong> above, pick the matching service from the
+              <strong>+ From catalogue…</strong> dropdown and save.
+            ` : `
+              This service doesn't have staff requirements set up yet.
+              Go to <strong>Catalogue</strong> → find "${esc(booking?.service_name || 'this service')}" → add staff roles.
+            `}
           </div>
         </div>`;
       
@@ -4323,7 +4332,7 @@ function openRuleModal(rule) {
           ${r.trigger_event==='status_change'
             ? `<label class="form-label">Status</label>
                <select class="form-control" id="rule-status">
-                 ${['confirmed','cancelled','completed','pending'].map(s=>`<option value="${s}" ${r.trigger_status===s?'selected':''}>${s}</option>`).join('')}
+                 ${['confirmed','cancelled','completed','accepted'].map(s=>`<option value="${s}" ${r.trigger_status===s?'selected':''}>${s}</option>`).join('')}
                </select>`
             : r.trigger_event.startsWith('days_')
             ? `<label class="form-label">Days</label><input class="form-control" id="rule-days" type="number" min="0" value="${r.trigger_days||1}">`
@@ -4353,7 +4362,7 @@ function updateRuleTriggerUI() {
   const trigger = document.getElementById('rule-trigger').value;
   const det = document.getElementById('rule-trigger-detail');
   if (trigger === 'status_change') {
-    det.innerHTML = `<label class="form-label">Status</label><select class="form-control" id="rule-status">${['confirmed','cancelled','completed','pending'].map(s=>`<option value="${s}">${s}</option>`).join('')}</select>`;
+    det.innerHTML = `<label class="form-label">Status</label><select class="form-control" id="rule-status">${['confirmed','cancelled','completed','accepted'].map(s=>`<option value="${s}">${s}</option>`).join('')}</select>`;
   } else if (trigger.startsWith('days_')) {
     det.innerHTML = `<label class="form-label">Days</label><input class="form-control" id="rule-days" type="number" min="0" value="1">`;
   } else {

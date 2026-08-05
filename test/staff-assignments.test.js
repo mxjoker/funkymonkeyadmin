@@ -25,7 +25,7 @@ test('a quote the client has not accepted is never emailed about', () => {
 });
 
 test('committed work is emailed about', () => {
-  for (const s of ['pending', 'accepted', 'confirmed']) {
+  for (const s of ['accepted', 'confirmed']) {
     assert.strictEqual(isStaffable({ status: s }), true, `${s} should be staffable`);
   }
 });
@@ -34,6 +34,13 @@ test('dead bookings are never emailed about', () => {
   for (const s of ['draft', 'cancelled', 'completed']) {
     assert.strictEqual(isStaffable({ status: s }), false, `${s} must not be staffable`);
   }
+});
+
+// 'pending' was retired with the seven-status model and its last nine rows were
+// migrated to 'accepted' on 2026-08-05. Staffing off it again would silently
+// resurrect a status nothing else in the system renders.
+test('the retired pending status is not staffable', () => {
+  assert.strictEqual(isStaffable({ status: 'pending' }), false);
 });
 
 test('a missing or malformed booking is not staffable', () => {

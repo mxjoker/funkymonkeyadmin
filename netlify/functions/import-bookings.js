@@ -18,7 +18,10 @@ const STATUS_MAP = {
   'Confirmed': 'confirmed',
   'Confirmed+': 'confirmed',
   'Balance settled': 'completed',
-  'Processing': 'pending',
+  // PPM's "Processing" means the client agreed and the paperwork is in flight,
+  // which is exactly what 'accepted' means in the seven-status model. It used to
+  // map to the retired 'pending' — the last producer of that status.
+  'Processing': 'accepted',
   'Pending': 'review',
   'Unprocessed': 'review',
   'Cancelled': 'cancelled',
@@ -27,6 +30,10 @@ const STATUS_MAP = {
 };
 
 // Service name mapping (expand as needed)
+// Shared with scripts/backfill-service-ids.js so intake and backfill can never
+// disagree about which catalogue entry a legacy package name means.
+const { resolveServiceId } = require('./_service-map');
+
 const SERVICE_MAP = {
   'Deluxe Birthday Package': 'Deluxe Magic Birthday Show',
   'Basic Birthday Show': 'Magic Birthday Show',
@@ -121,6 +128,13 @@ function transformRow(row, headers) {
   const oldPackage = obj['Package'];
   const serviceName = SERVICE_MAP[oldPackage] || oldPackage || 'Custom Event';
 
+  // ...and link it to the catalogue. Without this the row lands with a name but
+  // no service_id, which joins to zero staff_slots — the booking then reports
+  // "no staff requirements" and notifies nobody. Resolves to '' for names too
+  // ambiguous to map ("Custom Event"); those get linked by hand in the admin's
+  // Quote Breakdown. Re-runnable via scripts/backfill-service-ids.js.
+  const serviceId = resolveServiceId(serviceName);
+
   // Determine event location
   let eventLocation = obj['Venue'] || '';
   if (!eventLocation) {
@@ -145,6 +159,7 @@ function transformRow(row, headers) {
     reference: obj['Ref.'] || null,
     status,
     brand,
+    service_id: serviceId,
     service_name: serviceName,
     service_price: parseDecimal(obj['Party price']),
     addon_total: parseDecimal(obj['Price of extras']),
@@ -264,7 +279,7 @@ exports.handler = async (event) => {
           if (!isDryRun) {
             await client.query(`
               INSERT INTO bookings (
-                reference, status, brand, service_name, service_price,
+                reference, status, brand, service_id, service_name, service_price,
                 addon_total, mileage_cost, total_price, deposit_amount,
                 balance_due, deposit_paid, event_date, event_time,
                 event_zip, event_location, event_type, guest_count,
@@ -272,10 +287,11 @@ exports.handler = async (event) => {
                 child_name, customer_type, referral_source, admin_notes
               ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+                $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
               )
             `, [
-              booking.reference, booking.status, booking.brand, booking.service_name,
+              booking.reference, booking.status, booking.brand, booking.service_id,
+              booking.service_name,
               booking.service_price, booking.addon_total, booking.mileage_cost,
               booking.total_price, booking.deposit_amount, booking.balance_due,
               booking.deposit_paid, booking.event_date, booking.event_time,

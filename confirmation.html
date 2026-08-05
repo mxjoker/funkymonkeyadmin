@@ -454,9 +454,14 @@
     }
 
     function formatStatus(status) {
+      // Mirrors my-booking.html's formatStatus. This map predated the
+      // seven-status model and was missing draft/quoted/accepted, so those fell
+      // through to the raw status string on a client-facing page.
       const labels = {
-        review: '📋 Under Review',
-        pending: '⏳ Pending Confirmation',
+        draft:     '📝 Being Prepared',
+        review:    '📋 Under Review',
+        quoted:    '💬 Quote Ready',
+        accepted:  '🤝 Accepted — Deposit Next',
         confirmed: '✅ Confirmed',
         completed: '🎉 Completed',
         cancelled: '❌ Cancelled'

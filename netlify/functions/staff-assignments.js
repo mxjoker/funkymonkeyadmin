@@ -24,7 +24,7 @@ const PORTAL = `${SITE}/staff-portal.html`;
 //   review  — raw inbound lead, not vetted, no gig to staff yet
 //   quoted  — client has not said yes
 //   pending/accepted/confirmed — real work that needs bodies
-const STAFFABLE_STATUSES = ['pending', 'accepted', 'confirmed'];
+const STAFFABLE_STATUSES = ['accepted', 'confirmed'];
 const isStaffable = (booking) => STAFFABLE_STATUSES.includes(booking && booking.status);
 
 // Slots are the only source of truth for who a gig needs. The previous fallback

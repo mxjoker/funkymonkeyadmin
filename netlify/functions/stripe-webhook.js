@@ -83,7 +83,7 @@ exports.handler = async (event) => {
         // 3. Last resort: match by client email + open status
         if (!booking && customerEmail) {
           const r = await c.query(
-            "SELECT * FROM bookings WHERE LOWER(client_email)=LOWER($1) AND status IN ('review','pending','confirmed','quoted','accepted') ORDER BY created_at DESC LIMIT 1",
+            "SELECT * FROM bookings WHERE LOWER(client_email)=LOWER($1) AND status IN ('review','confirmed','quoted','accepted') ORDER BY created_at DESC LIMIT 1",
             [customerEmail]
           );
           booking = r.rows[0] || null;
