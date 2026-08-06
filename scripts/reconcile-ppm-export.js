@@ -11,10 +11,13 @@
  *   MISSING  — in the export, not in the CRM. These are the in-flight bookings
  *              a cutover would lose. Remediate with import-bookings.js.
  *   DRIFTED  — in both, but event_date / status / total disagree. Each one is a
- *              human call. PPM leads on intake and quoting, but the CRM leads
- *              on anything IT collected: a deposit taken through the CRM leaves
- *              PPM stale, and "PPM wins" would revert a paid booking to unpaid.
- *              Verified 2026-08-05 on 26-286, whose event was the next day.
+ *              human call. PPM leads on intake and quoting, but the CRM leads on
+ *              payment state, because money arrives by routes PPM never sees:
+ *              Stripe deposits taken through the CRM, and GigSalad/Bark gigs the
+ *              owner marks paid by hand. "PPM wins" would revert those to unpaid.
+ *              Verified on 26-286 — paid through a third-party booking site,
+ *              marked paid in the CRM, still "Processing" in PPM, event the
+ *              next day.
  *   CRM-ONLY — in the CRM, not the export. Expected and fine: bookings taken
  *              through the CRM form, plus every historical row PPM has since
  *              archived. Reported as a count unless --verbose.
