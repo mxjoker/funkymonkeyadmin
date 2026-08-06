@@ -3,26 +3,10 @@ const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
 const { esc, wrap, sendEmail, fmtEventDate } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
+const { normaliseBrand } = require('./_brand');
 const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems, getItemsForBookings } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
-
-// The three brand tiers. FME is the company; JCM is Joe's premium service; FMMS
-// takes lower-paid magic work so it does not erode JCM's rates.
-//
-// This used to be `b.brand === 'jcm' ? 'jcm' : 'fme'` — a binary coercion that
-// turned every unrecognised value into 'fme' without a word, misattributing
-// revenue between tiers invisibly. It also pre-broke the third tier: 'fmms'
-// would have been swallowed the moment it existed. An unknown brand now throws
-// and the caller returns 400.
-const BRANDS = new Set(['fme', 'jcm', 'fmms']);
-
-function normaliseBrand(input) {
-  const b = String(input == null ? '' : input).trim().toLowerCase();
-  if (b === '') return 'fme'; // matches the column default and every legacy row
-  if (!BRANDS.has(b)) throw new Error(`unknown brand: ${b}`);
-  return b;
-}
 
 // Public field subset per API contract
 const PUBLIC_FIELDS = [
@@ -554,6 +538,3 @@ async function sendBookingEmails(booking) {
   ).catch(e => console.error('Client email error:', e.message));
 }
 
-// Exported for test/brand.test.js. The handler assignment above is the
-// function entry point; this is additive and does not replace it.
-module.exports.normaliseBrand = normaliseBrand;

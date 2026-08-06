@@ -12,6 +12,10 @@
 
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
+// Same brand rule as bookings.js and create-bookings.js. A lead's brand decides
+// which tier its revenue lands under once it converts, so a third private copy
+// of the rule here would misattribute it just as silently.
+const { normaliseBrand } = require('./_brand');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -131,6 +135,10 @@ exports.handler = async (event) => {
         const d = JSON.parse(event.body || '{}');
         if (!d.name) return json(400, { error: 'name required' });
 
+        // Reject an unknown brand rather than quietly filing the lead under FME.
+        let brand;
+        try { brand = normaliseBrand(d.brand); } catch (e) { return json(400, { error: e.message }); }
+
         const { rows } = await client.query(`
           INSERT INTO leads
             (name, org, role, phone, email, lead_type, stage, source, notes, last_contact_at, next_followup_at, brand, external_ref)
@@ -148,7 +156,7 @@ exports.handler = async (event) => {
             d.notes || null,
             d.last_contact_at || null,
             d.next_followup_at || null,
-            d.brand === 'jcm' ? 'jcm' : 'fme',
+            brand,
             d.external_ref || null,
           ]
         );
@@ -174,6 +182,13 @@ exports.handler = async (event) => {
           brand: 'brand',
           external_ref: 'external_ref',
         };
+
+        // PATCH wrote brand straight through with no validation at all, so an
+        // edit could put any string in the column that POST now rejects.
+        if ('brand' in d) {
+          try { d.brand = normaliseBrand(d.brand); }
+          catch (e) { return json(400, { error: e.message }); }
+        }
 
         const sets = [];
         const params = [];

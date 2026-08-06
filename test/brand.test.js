@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { normaliseBrand } = require('../netlify/functions/bookings');
+const { normaliseBrand } = require('../netlify/functions/_brand');
 
 // ── Why this is tested ──────────────────────────────────────────────────────
 // The business is one company (FME) with JCM as Joe's premium tier and FMMS
@@ -43,21 +43,29 @@ test('the thrown message names the offending value', () => {
   assert.throws(() => normaliseBrand('jmc'), /jmc/);
 });
 
-test('the old silent coercion is gone from the source', () => {
+test('no function decides brand for itself', () => {
   // Guards the specific line, not just the helper: re-introducing the ternary
   // anywhere in the insert path would restore the silent failure while every
   // test above still passed.
   const fs = require('node:fs');
   const path = require('node:path');
-  const src = fs.readFileSync(
-    path.join(__dirname, '..', 'netlify', 'functions', 'bookings.js'), 'utf8'
-  );
-  // Strip whole-line // comments before scanning: the fix's own comment quotes
-  // the old ternary to explain what it did, and a naive scan flags that prose
-  // as if it were live code.
-  const code = src.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  assert.doesNotMatch(
-    code, /brand\s*===\s*'jcm'\s*\?/,
-    "the 'jcm' ternary silently coerced every other brand to fme"
+  // Scans every function, not just bookings.js: the first pass at this fix
+  // missed create-bookings.js, which kept its own two-value BRANDS set and
+  // would have rejected 'fmms' while the public path swallowed it. One file's
+  // worth of scanning is how the second copy survives.
+  const dir = path.join(__dirname, '..', 'netlify', 'functions');
+  const offenders = [];
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.js'))) {
+    if (f === '_brand.js') continue; // the one place allowed to define the rule
+    const src = fs.readFileSync(path.join(dir, f), 'utf8');
+    // Strip whole-line // comments first: the fixes' own comments quote the old
+    // expressions to explain them, and a naive scan flags that prose as code.
+    const code = src.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+    if (/brand\s*===\s*'jcm'\s*\?/.test(code)) offenders.push(`${f} (jcm ternary)`);
+    if (/BRANDS\s*=\s*new Set/.test(code)) offenders.push(`${f} (private BRANDS set)`);
+  }
+  assert.deepStrictEqual(
+    offenders, [],
+    `these decide brand themselves instead of using _brand.js: ${offenders.join(', ')}`
   );
 });

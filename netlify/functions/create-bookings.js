@@ -21,7 +21,11 @@ const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body, null, 2) });
 
 const ALLOWED_STATUS = new Set(['draft', 'review', 'quoted', 'accepted', 'confirmed', 'completed', 'cancelled']);
-const BRANDS = new Set(['jcm', 'fme']);
+// Shared with bookings.js so the admin direct-entry path and the public form
+// cannot disagree about which brands exist. This file used to keep its own
+// two-value set, which would have rejected 'fmms' while the public path
+// silently swallowed it.
+const { normaliseBrand } = require('./_brand');
 
 // Clamp a numeric to [0, 100000]; blank/invalid -> 0.
 function num(v) {
@@ -36,7 +40,7 @@ function validate(b) {
   if (!str(b.client_name, 120)) errors.push('client_name required');
   if (!b.event_date || isNaN(Date.parse(String(b.event_date)))) errors.push('event_date must be a parseable date');
   if (!ALLOWED_STATUS.has(String(b.status || '').trim())) errors.push(`status must be one of ${[...ALLOWED_STATUS].join('/')}`);
-  if (b.brand !== undefined && !BRANDS.has(String(b.brand))) errors.push('brand must be jcm or fme');
+  try { normaliseBrand(b.brand); } catch (e) { errors.push(e.message); }
   return errors;
 }
 
@@ -92,7 +96,7 @@ exports.handler = async (event) => {
           $16,$17,$18,$19,$20, $21,$22,$23,$24,$25,$26
         ) RETURNING id, reference
       `, [
-        ref, String(b.status).trim(), BRANDS.has(String(b.brand)) ? b.brand : 'fme',
+        ref, String(b.status).trim(), normaliseBrand(b.brand),
         // Optional, and the only link to staffing: staff_slots are keyed on
         // service_id, so a booking created without one can never match a role
         // or notify anyone. Callers that know the catalogue id should send it.
