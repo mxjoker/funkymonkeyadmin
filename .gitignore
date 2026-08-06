@@ -15,7 +15,11 @@ netlify/.DS_Store
 
 # Lock files (optional — remove if you want to commit them)
 # package-lock.json
-# deno.lock
+
+# deno.lock is NOT one of those: it is not a dependency lock for this project,
+# it is a bootstrap artifact `netlify dev` writes for the Deno edge runtime.
+# This site deploys zero edge functions, so it is pure noise in the tree.
+deno.lock
 
 # Session/workflow artifacts
 MORNING_REPORT.md

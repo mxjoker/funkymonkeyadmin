@@ -1,5 +1,31 @@
 # Roadmap
 
+## Phase 4 — PPM cutover (staged 2026-08-06, not yet executed)
+
+Plan: `docs/superpowers/plans/2026-08-05-crm-takeover-phase-4.md`
+Runbook: `docs/CUTOVER.md`
+
+Code is committed and tested but **not deployed** — Phase 4 ships in one
+publish at cutover time. What is staged:
+
+- `_csv.js` — one CSV parser shared by `import-bookings.js` and the new
+  reconciler, so a reconciliation diff can never be a parser disagreement.
+- `scripts/reconcile-ppm-export.js` — read-only diff of a PPM export against
+  `bookings` on `reference`, in three buckets. Never writes; remediation stays
+  in `import-bookings.js`.
+- `_brand.js` — the single brand rule. Four writers previously decided brand
+  for themselves; `create-bookings.js` would have rejected `fmms` while
+  `bookings.js` silently coerced it to `fme`.
+- `booking-form.html` now declares `brand: 'fme'` instead of relying on a
+  column default, which is what made the cutover gate capable of failing.
+
+Two assumptions the first real run corrected, both recorded in the runbook:
+PPM's `Tot. price` is travel-inclusive (a raw column diff flags every travelled
+booking), and PPM does **not** win on payment state (money reaches the CRM by
+routes PPM never sees).
+
+Blocking nothing. Remaining work is executing the runbook.
+
 ## Phase 3 — booking_items and client quote accept (complete, 2026-08-02)
 
 `booking_items` is live: a child table making multi-service packages
