@@ -41,11 +41,21 @@ Stop taking new bookings there. Announce nothing publicly yet — the button has
 not moved, so nothing customer-facing has changed.
 
 ### 2. Final export
-PPM → export all bookings to CSV. Save as `ppm-final-export.csv`.
+PPM → export all bookings to CSV.
+
+Save it to the repo root as **`import-data.csv`**, overwriting the 29-row
+sample, and commit it. That exact filename and location matter: the importer
+reads `/var/task/import-data.csv` from its own deployed bundle (step 5), so a
+file named anything else, or left uncommitted, cannot be imported.
+
+```bash
+cp ~/Downloads/<ppm-export>.csv import-data.csv
+git add import-data.csv && git commit -m "chore: final PPM export for cutover"
+```
 
 ### 3. Reconcile
 ```bash
-node scripts/reconcile-ppm-export.js ppm-final-export.csv
+node scripts/reconcile-ppm-export.js import-data.csv
 ```
 
 Read all three buckets. **Do not proceed while MISSING > 0** — those are the
@@ -70,32 +80,60 @@ the travel fee; the CRM's `total_price` excludes it, per
 compensates. If you ever compare the columns by hand, add `mileage_cost` back
 first — otherwise every travelled booking looks drifted.
 
-### 4. Close the MISSING gap
+### 4. Deploy — BEFORE the import, not after
+
+**The importer is not a CLI.** `node netlify/functions/import-bookings.js` runs
+and exits silently having done nothing: the file only assigns `exports.handler`.
+It is an admin-only HTTP endpoint, and it reads the CSV from
+`/var/task/import-data.csv` — the copy **bundled into the deployed function**,
+not your working tree. So the final export has to be committed and deployed
+before it can be imported at all.
+
 ```bash
-node netlify/functions/import-bookings.js          # dry run first
+git checkout main && git merge feat/crm-takeover-phase-4 && git push
 ```
-Then apply. Re-run the reconciler until MISSING is 0.
 
-### 5. Link services
-```bash
-node scripts/backfill-service-ids.js               # dry run
-node scripts/backfill-service-ids.js --apply
-```
-Newly imported rows already carry a `service_id` — the importer writes it as of
-`b26083f`. This catches anything the map could not resolve and lists what needs
-a human. Ambiguous names ("Custom Event", "Magic Show", one-off titles) stay
-unlinked on purpose; link those by hand in the booking's Quote Breakdown.
+Then Netlify → **Trigger deploy**. `git push` does not deploy. This is Phase 4's
+single publish: it carries both the code and `import-data.csv`.
 
-### 6. Deploy
-Netlify → **Trigger deploy**. `git push` does not deploy. This is Phase 4's
-single publish.
+### 5. Verify the deploy actually published
 
-### 7. Verify the deploy actually published
-A green checkmark is not proof the new bytes are being served.
+A green checkmark is not proof the new bytes are being served, and step 6 depends
+on the new bundle carrying the new CSV.
 ```bash
 curl -s https://funkymonkeyadmin.netlify.app/booking-form.html | grep -c "brand"
 ```
 Expect ≥ 1.
+
+### 6. Close the MISSING gap
+
+Dry run first — the flag is a query parameter, and the endpoint needs an admin
+bearer token:
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  "https://funkymonkeyadmin.netlify.app/api/import-bookings?dryrun=true" | python3 -m json.tool
+```
+
+Then the same URL without `?dryrun=true` to apply.
+
+**Re-importing the whole export is safe.** The handler skips any row whose
+`reference` already exists (`results.skipped++`), so you commit the complete
+final export, not a hand-filtered delta of the MISSING rows. Trying to
+hand-build a delta is how a row gets missed.
+
+Re-run the reconciler until MISSING is 0.
+
+### 7. Link services
+```bash
+node scripts/backfill-service-ids.js               # dry run
+node scripts/backfill-service-ids.js --apply
+```
+This one *is* a real CLI and talks to the database directly, so it needs no
+deploy. Newly imported rows already carry a `service_id` — the importer writes
+it as of `b26083f`. This catches anything the map could not resolve and lists
+what needs a human. Ambiguous names ("Custom Event", "Magic Show", one-off
+titles) stay unlinked on purpose; link those by hand in the Quote Breakdown.
 
 ### 8. Run the gate
 See below. **All four conditions.** A failure here stops the cutover — the
