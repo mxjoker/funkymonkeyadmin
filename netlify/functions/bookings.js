@@ -7,6 +7,23 @@ const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems,
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
+// The three brand tiers. FME is the company; JCM is Joe's premium service; FMMS
+// takes lower-paid magic work so it does not erode JCM's rates.
+//
+// This used to be `b.brand === 'jcm' ? 'jcm' : 'fme'` — a binary coercion that
+// turned every unrecognised value into 'fme' without a word, misattributing
+// revenue between tiers invisibly. It also pre-broke the third tier: 'fmms'
+// would have been swallowed the moment it existed. An unknown brand now throws
+// and the caller returns 400.
+const BRANDS = new Set(['fme', 'jcm', 'fmms']);
+
+function normaliseBrand(input) {
+  const b = String(input == null ? '' : input).trim().toLowerCase();
+  if (b === '') return 'fme'; // matches the column default and every legacy row
+  if (!BRANDS.has(b)) throw new Error(`unknown brand: ${b}`);
+  return b;
+}
+
 // Public field subset per API contract
 const PUBLIC_FIELDS = [
   'reference', 'status', 'service_id', 'service_name', 'event_type',
@@ -296,6 +313,16 @@ exports.handler = async (event) => {
       return json(400, { error: 'service_id or service_name is required' });
     }
 
+    // normaliseBrand throws on an unknown value; an uncaught throw here would
+    // surface as an opaque 500, so translate it into a 400 that names the
+    // offending brand.
+    let brand;
+    try {
+      brand = normaliseBrand(b.brand);
+    } catch (e) {
+      return json(400, { error: e.message });
+    }
+
     // Clamp / sanitize numerics — reject NaN
     const rawGuestCount = b.guest_count !== undefined ? Number(b.guest_count) : 0;
     if (isNaN(rawGuestCount)) return json(400, { error: 'guest_count must be a number' });
@@ -409,7 +436,7 @@ exports.handler = async (event) => {
         clientEmail,
         cap255(b.referral_source),
         cap255(b.child_name),
-        b.brand === 'jcm' ? 'jcm' : 'fme',
+        brand,
         isDraft ? 'draft' : 'review',
         cap255(b.organisation_name),
         cap255(b.occasion),
@@ -526,3 +553,7 @@ async function sendBookingEmails(booking) {
     `)
   ).catch(e => console.error('Client email error:', e.message));
 }
+
+// Exported for test/brand.test.js. The handler assignment above is the
+// function entry point; this is additive and does not replace it.
+module.exports.normaliseBrand = normaliseBrand;

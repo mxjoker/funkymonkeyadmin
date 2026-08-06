@@ -1245,6 +1245,10 @@ async function submitBooking() {
     client_phone: document.getElementById('c-phone').value.trim(),
     client_email: document.getElementById('c-email').value.trim(),
     referral_source: document.getElementById('c-ref').value,
+    // funkymonkeyevents.com is the FME brand. Sent explicitly rather than
+    // leaning on the column default so the wire format states what it means,
+    // and so a future JCM or FMMS landing page is a one-line change here.
+    brand: 'fme',
   };
 
   try {
