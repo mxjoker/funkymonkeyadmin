@@ -33,6 +33,9 @@ const STATUS_MAP = {
 // Shared with scripts/backfill-service-ids.js so intake and backfill can never
 // disagree about which catalogue entry a legacy package name means.
 const { resolveServiceId } = require('./_service-map');
+// Shared with scripts/reconcile-ppm-export.js for the same reason: the cutover
+// reconciliation is only meaningful if it reads the export the way this does.
+const { parseCSVLine } = require('./_csv');
 
 const SERVICE_MAP = {
   'Deluxe Birthday Package': 'Deluxe Magic Birthday Show',
@@ -90,29 +93,6 @@ function parseIntVal(str) {
   if (!str || str.trim() === '') return 0;
   const num = Number(str);
   return isNaN(num) ? 0 : num;
-}
-
-// Parse CSV line (simple parser - handles quoted fields with commas)
-function parseCSVLine(line) {
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-
-    if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === ',' && !inQuotes) {
-      result.push(current.trim());
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-  result.push(current.trim());
-
-  return result;
 }
 
 // Transform old row to new booking format
