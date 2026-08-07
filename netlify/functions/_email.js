@@ -84,7 +84,7 @@ function render(template, booking, stripeLink) {
   const depositBtn = stripeLink
     ? `<div style="text-align:center;margin:20px 0">
         <a href="${stripeLink}" style="background-color:#10B981;color:#ffffff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">
-          💳 Pay Deposit — $${Number(booking.deposit_amount||100).toFixed(2)}
+          💳 Pay Deposit — $${Number(booking.deposit_amount||0).toFixed(2)}
         </a>
         <p style="color:#A78BCA;font-size:11px;margin-top:10px;line-height:1.5">Button not working? Copy this link into your browser:<br><a href="${stripeLink}" style="color:#06B6D4;word-break:break-all">${stripeLink}</a></p>
         <p style="color:#A78BCA;font-size:11px;margin-top:8px">Secure payment via Stripe · Cards, Apple Pay & Google Pay accepted</p>
@@ -106,7 +106,10 @@ function render(template, booking, stripeLink) {
     .replace(/{{event_time}}/g,        esc(booking.event_time    || ''))
     .replace(/{{event_zip}}/g,         esc(booking.event_zip     || ''))
     .replace(/{{total_price}}/g,       Number(booking.total_price   ||0).toFixed(2))
-    .replace(/{{deposit_amount}}/g,    Number(booking.deposit_amount||100).toFixed(2))
+    // NOT `|| 100`. A booking with the deposit deliberately set to 0 — schools,
+    // libraries, anyone who cannot pay one — would otherwise be emailed a
+    // demand for $100.00 that exists nowhere in the booking.
+    .replace(/{{deposit_amount}}/g,    Number(booking.deposit_amount||0).toFixed(2))
     .replace(/{{balance_due}}/g,       Number(booking.balance_due   ||0).toFixed(2))
     .replace(/{{reference}}/g,         booking.reference     || '')
     .replace(/{{deposit_link}}/g,      depositBtn);

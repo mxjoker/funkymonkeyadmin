@@ -1623,7 +1623,20 @@ function openBooking(id) {
         </select>
         <span style="margin-left:auto;font-weight:600" id="items-total-${b.id}"></span>
       </div>
-      <div class="q-row deposit-row"><span>Deposit ${b.deposit_paid?'✅ Paid':'⏳ Unpaid'}</span><span>$${Number(b.deposit_amount||100).toFixed(2)}</span></div>
+      <div class="q-row deposit-row">
+        <span>Deposit ${b.deposit_paid?'✅ Paid':'⏳ Unpaid'}</span>
+        <span style="display:flex;align-items:center;gap:4px">
+          $<input class="bk-edit" data-f="deposit_amount"
+                  data-orig="${esc(Number(b.deposit_amount || 0).toFixed(2))}"
+                  type="number" min="0" step="0.01"
+                  value="${Number(b.deposit_amount || 0).toFixed(2)}"
+                  title="Set to 0 for libraries, schools and anyone who can't pay a deposit — no Stripe link is created and no deposit is requested"
+                  style="max-width:90px;text-align:right">
+        </span>
+      </div>
+      <div class="q-row sub" style="margin-top:-4px">
+        <span style="font-size:.75rem;color:#6b7280;font-style:italic">Set to 0 for schools/libraries — no deposit link is created</span>
+      </div>
       <div class="q-row sub">
         <span>Deposit received</span>
         <input class="bk-edit" data-f="deposit_paid_at" data-orig="${esc((b.deposit_paid_at || '').slice(0, 10))}" type="date"

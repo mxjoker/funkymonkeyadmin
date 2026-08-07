@@ -385,3 +385,33 @@ test('no function builds email chrome from a CSS gradient', () => {
   assert.deepStrictEqual(offenders, [],
     'use background-color — Gmail drops gradients and these buttons go invisible');
 });
+
+// ── Zero deposit means zero, everywhere ─────────────────────────────────────
+// Libraries, schools and some corporate clients cannot pay a deposit at all.
+// Setting deposit_amount to 0 is how that is expressed, and booking.js:305
+// already skips Stripe link generation for it. Every renderer that read
+// `deposit_amount || 100` turned that deliberate 0 back into $100 — which for
+// {{deposit_amount}} meant emailing a school a demand for money the booking
+// does not ask for.
+test('a zero deposit renders as 0.00, not the 100 default', () => {
+  const { render } = loadEmail();
+  const out = render('Deposit: ${{deposit_amount}}', { deposit_amount: 0 }, null);
+  assert.match(out, /Deposit: \$0\.00/);
+  assert.doesNotMatch(out, /100\.00/, 'the || 100 fallback must not resurrect a deposit');
+});
+
+test('a zero deposit produces no pay button', () => {
+  // No stripeLink is passed because booking.js never creates one for a zero
+  // deposit; the button must collapse to nothing rather than render a dead CTA.
+  const { render } = loadEmail();
+  const out = render('{{deposit_link}}', { deposit_amount: 0 }, null);
+  assert.doesNotMatch(out, /Pay Deposit/);
+});
+
+test('a real deposit still renders its amount and button', () => {
+  const { render } = loadEmail();
+  const out = render('${{deposit_amount}} {{deposit_link}}',
+    { deposit_amount: 100 }, 'https://stripe.example/pay');
+  assert.match(out, /\$100\.00/);
+  assert.match(out, /Pay Deposit/);
+});
