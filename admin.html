@@ -303,7 +303,10 @@ input,select,textarea{font-family:inherit}
     <div class="page" id="page-dashboard">
       <div class="page-hdr">
         <h1>Dashboard</h1>
-        <span class="text-muted" id="dash-date"></span>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="text-muted" id="dash-date"></span>
+          <button class="btn btn-primary btn-sm" onclick="openBooking(null)" style="white-space:nowrap">+ Booking</button>
+        </div>
       </div>
 
       <div id="stale-leads-warning" style="display:none;background:#fef9c3;border:1px solid #fde047;border-radius:10px;padding:16px 20px;margin-bottom:20px">
@@ -451,6 +454,7 @@ input,select,textarea{font-family:inherit}
           <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">← Prev</button>
           <span class="cal-month-label" id="cal-month-label"></span>
           <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Next →</button>
+          <button class="btn btn-primary btn-sm" onclick="openBooking(null)" style="white-space:nowrap">+ Booking</button>
         </div>
       </div>
       <div class="card" style="margin-bottom:16px">
