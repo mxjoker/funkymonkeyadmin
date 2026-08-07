@@ -58,7 +58,15 @@ async function ensureTables(client) {
         trigger_event: 'status_change', trigger_status: 'confirmed',
         recipient: 'client', sort_order: 1,
         subject: 'Your booking is CONFIRMED! 🎊 — Funky Monkey Events',
-        body_html: '<p>Hi {{client_first_name}}! Your event is confirmed. Please pay your deposit to lock in your date.</p><p><strong>Service:</strong> {{service_name}}<br><strong>Date:</strong> {{event_date}}<br><strong>Deposit:</strong> ${{deposit_amount}}</p>{{deposit_link}}'
+        // Deposit-neutral on purpose. Schools and libraries book with
+        // deposit_amount = 0, and the old copy ("Please pay your deposit to
+        // lock in your date" plus a "Deposit: ${{deposit_amount}}" line) asked
+        // them for money the booking does not want. {{deposit_link}} already
+        // carries the amount inside the pay button and renders as nothing when
+        // there is no deposit, so it is the only place the ask belongs.
+        // {{total_price}} is deliberately NOT shown here: it excludes travel,
+        // so it would understate the price on any booking with mileage.
+        body_html: "<p>Hi {{client_first_name}}! Your event is confirmed.</p><p><strong>Service:</strong> {{service_name}}<br><strong>Date:</strong> {{event_date}}</p>{{deposit_link}}<p>Questions? Just reply to this email and we'll take care of it.</p>"
       },
       {
         name: 'Pre-Event Reminder (3 days before)',
