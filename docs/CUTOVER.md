@@ -34,133 +34,183 @@ Known as of 2026-08-06, verified rather than assumed:
 
 ---
 
+## The ordering rule that governs everything below
+
+**Moving the website links IS the freeze.** There is no separate "stop taking
+PPM bookings" action — PPM receives bookings because 11 buttons on
+funkymonkeyevents.com point at it, and it stops the moment they don't.
+
+That forces the order. An earlier draft of this runbook said "freeze PPM" first
+and "move the button" last, which is incoherent: either the links are down (and
+the site has no booking path at all for the whole cutover) or they are up (and
+PPM keeps taking bookings after you export it, silently losing them).
+
+So: **prove the CRM first, move the links second, export third.** Nothing can
+arrive in PPM after an export taken from a system nothing points at any more.
+
+The cost is two deploys rather than one. Worth it — the alternative risks losing
+a real booking.
+
+---
+
+## The 11 links
+
+Every booking button on the site points at the same URL:
+
+```
+https://partypromanager.com/contact-provider?providerId=a8eb97a7-96b9-4cd2-86e2-9b8cfe6f0b83
+```
+
+| Page | Buttons |
+|---|---|
+| `/entertainment` | 5 |
+| `/foam-party` | 3 |
+| `/joecoover-magic` | 2 |
+| `/contact` | 1 |
+
+All 11 get the same replacement:
+
+```
+https://funkymonkeyadmin.netlify.app/booking-form.html
+```
+
+Verified by crawling all 13 pages on 2026-08-10. `/`, `/camps`, `/snow`,
+`/faqs`, `/foam-faqs`, `/blog` and the three venue pages contain **no** booking
+link at all — worth revisiting after the cutover, but not part of it.
+
+---
+
 ## Order of operations
 
-### 1. Freeze PPM
-Stop taking new bookings there. Announce nothing publicly yet — the button has
-not moved, so nothing customer-facing has changed.
-
-### 2. Final export
-PPM → export all bookings to CSV.
-
-Save it to the repo root as **`import-data.csv`**, overwriting the 29-row
-sample, and commit it. That exact filename and location matter: the importer
-reads `/var/task/import-data.csv` from its own deployed bundle (step 5), so a
-file named anything else, or left uncommitted, cannot be imported.
-
-```bash
-cp ~/Downloads/<ppm-export>.csv import-data.csv
-git add import-data.csv && git commit -m "chore: final PPM export for cutover"
-```
-
-### 3. Reconcile
-```bash
-node scripts/reconcile-ppm-export.js import-data.csv
-```
-
-Read all three buckets. **Do not proceed while MISSING > 0** — those are the
-in-flight bookings a cutover loses.
-
-**On DRIFTED rows, do not apply a blanket rule.** The obvious instinct — "PPM is
-source of truth until the button moves" — is wrong, and following it would have
-caused a real incident on 2026-08-05:
-
-- **PPM leads** on intake and quoting. It owned the booking form until today.
-- **The CRM leads on payment state.** Money reaches the CRM by routes PPM never
-  sees: Stripe deposits taken through the CRM, and GigSalad/Bark gigs marked
-  paid by hand. `26-286` was paid through a third-party site and marked paid in
-  the CRM while PPM still read `Processing` — with the event the next day.
-  "PPM wins" would have reverted a paid booking to unpaid.
-
-Each drifted row is a judgement call. There will not be many.
-
-**A price difference is not automatically drift.** PPM's `Tot. price` includes
-the travel fee; the CRM's `total_price` excludes it, per
-`balance_due = total_price + mileage_cost - deposit_amount`. The script already
-compensates. If you ever compare the columns by hand, add `mileage_cost` back
-first — otherwise every travelled booking looks drifted.
-
-### 4. Deploy — BEFORE the import, not after
-
-**The importer is not a CLI.** `node netlify/functions/import-bookings.js` runs
-and exits silently having done nothing: the file only assigns `exports.handler`.
-It is an admin-only HTTP endpoint, and it reads the CSV from
-`/var/task/import-data.csv` — the copy **bundled into the deployed function**,
-not your working tree. So the final export has to be committed and deployed
-before it can be imported at all.
+### 1. Merge and deploy the Phase 4 code — CLAUDE does the merge, JOE deploys
 
 ```bash
 git checkout main && git merge feat/crm-takeover-phase-4 && git push
 ```
 
-Then Netlify → **Trigger deploy**. `git push` does not deploy. This is Phase 4's
-single publish: it carries both the code and `import-data.csv`.
+Then Netlify → **Trigger deploy**. `git push` does not deploy.
 
-### 5. Verify the deploy actually published
+This publish carries: brand validation, the editable deposit, the `+ Booking`
+buttons, the shared CSV parser. It does **not** carry the final export — that
+ships in step 6.
 
-A green checkmark is not proof the new bytes are being served, and step 6 depends
-on the new bundle carrying the new CSV.
+### 2. Verify the deploy actually published — CLAUDE
+
+A green checkmark is not proof the new bytes are being served.
+
 ```bash
 curl -s https://funkymonkeyadmin.netlify.app/booking-form.html | grep -c "brand"
 ```
-Expect ≥ 1.
 
-### 6. Close the MISSING gap
+### 3. Run the gate on the CRM form directly — JOE
 
-Dry run first — the flag is a query parameter, and the endpoint needs an admin
-bearer token:
+**Before any link moves.** Go straight to
+`https://funkymonkeyadmin.netlify.app/booking-form.html` and place a real
+booking, then take it through to a paid $1 deposit. All four conditions in the
+Gate section below.
+
+This is the go/no-go. If it fails, nothing has changed for any customer — the
+site still points at PPM and you have lost nothing.
+
+### 4. Move all 11 links — JOE
+
+In the Wix editor, in **one sitting**. A half-moved site sends some customers to
+the CRM and some to PPM, and the export in step 5 will miss whatever PPM took in
+between.
+
+Work page by page: `/entertainment` (5), `/foam-party` (3),
+`/joecoover-magic` (2), `/contact` (1). Publish the Wix site.
+
+Then tell Claude, who will re-crawl all 13 pages and confirm zero
+`partypromanager.com` references remain. **Do not proceed on the assumption that
+you got them all** — that is precisely what the re-crawl is for.
+
+### 5. Export PPM — JOE
+
+Only now, with nothing on the internet pointing at PPM.
+
+Export **all** bookings to CSV and save it to the repo root as
+`import-data.csv`, replacing the 29-row sample. Do not commit — Claude will.
+
+### 6. Reconcile, then deploy the export — CLAUDE commits and reconciles, JOE deploys
+
+```bash
+node scripts/reconcile-ppm-export.js import-data.csv
+```
+
+Read all three buckets. **MISSING must reach 0 before the cutover is done.**
+
+On DRIFTED rows, do not apply a blanket rule:
+
+- **PPM leads** on intake and quoting — it owned the booking form until step 4.
+- **The CRM leads on payment state.** Money reaches the CRM by routes PPM never
+  sees: Stripe deposits, and GigSalad/Bark gigs marked paid by hand. `26-286`
+  was paid through a third-party site and marked paid in the CRM while PPM still
+  read `Processing`, with the event the next day. "PPM wins" would have reverted
+  a paid booking to unpaid.
+
+**A price difference is not automatically drift.** PPM's `Tot. price` includes
+travel; the CRM's `total_price` excludes it. The script compensates; a
+by-hand comparison must add `mileage_cost` back first.
+
+Then commit the CSV and **Trigger deploy** — the importer reads the CSV from its
+own deployed bundle, so it cannot see a file that has not shipped.
+
+### 7. Import the missing bookings — JOE runs it (needs an admin token)
+
+Dry run first:
 
 ```bash
 curl -s -X POST -H "Authorization: Bearer $TOKEN" \
   "https://funkymonkeyadmin.netlify.app/api/import-bookings?dryrun=true" | python3 -m json.tool
 ```
 
-Then the same URL without `?dryrun=true` to apply.
+Then the same URL without `?dryrun=true`.
 
-**Re-importing the whole export is safe.** The handler skips any row whose
-`reference` already exists (`results.skipped++`), so you commit the complete
-final export, not a hand-filtered delta of the MISSING rows. Trying to
-hand-build a delta is how a row gets missed.
+**Re-importing the whole export is safe** — the handler skips any row whose
+`reference` already exists. Import the complete export, never a hand-built delta
+of the MISSING rows; hand-building one is how a booking gets missed.
 
-Re-run the reconciler until MISSING is 0.
+### 8. Re-reconcile until MISSING is 0 — CLAUDE
 
-### 7. Link services
 ```bash
-node scripts/backfill-service-ids.js               # dry run
+node scripts/reconcile-ppm-export.js import-data.csv
+```
+
+### 9. Link services — CLAUDE
+
+```bash
+node scripts/backfill-service-ids.js          # dry run
 node scripts/backfill-service-ids.js --apply
 ```
-This one *is* a real CLI and talks to the database directly, so it needs no
-deploy. Newly imported rows already carry a `service_id` — the importer writes
-it as of `b26083f`. This catches anything the map could not resolve and lists
-what needs a human. Ambiguous names ("Custom Event", "Magic Show", one-off
-titles) stay unlinked on purpose; link those by hand in the Quote Breakdown.
 
-### 8. Run the gate
-See below. **All four conditions.** A failure here stops the cutover — the
-button has not moved, so nothing is lost.
+A real CLI talking to the database directly, so no deploy needed. Newly imported
+rows already carry a `service_id`. Ambiguous names ("Custom Event", "Magic
+Show", one-off titles) stay unlinked on purpose — link those by hand in the
+booking's Quote Breakdown.
 
-### 9. Move the button
-Wix → the Book Now button → retarget to:
-```
-https://funkymonkeyadmin.netlify.app/booking-form.html
-```
+### 10. Repeat the gate through the live site — JOE
 
-### 10. Repeat the gate through the live Wix path
-The button is the only thing that changed; prove the whole chain through it.
+Book through a real button on funkymonkeyevents.com, end to end. The links are
+the only thing that changed since step 3; this proves the customer's actual
+path.
 
-### 11. PPM read-only
+### 11. PPM read-only — JOE
+
 Leave the account live for historical lookup. **Do not cancel the subscription**
 until one full booking cycle has run through the CRM.
 
-### 12. Revoke the old Resend key
-Only now, with a real send proven. Also delete the unused "Local FM test" key
-once Resend's Logs page shows no sends from it in 30 days.
+### 12. Revoke the old Resend key — JOE
+
+Also delete the unused "Local FM test" key once Resend's Logs page shows no
+sends from it in 30 days.
 
 ---
 
 ## Gate
 
-A real test booking placed through the live Wix button that:
+A real test booking — placed on the CRM form directly at step 3, and again
+through a real site button at step 10 — that:
 
 1. Lands in the CRM with `brand = 'fme'`
 2. Generates a working Stripe deposit link
@@ -182,7 +232,7 @@ Condition 1 is only meaningful as of `e8e8def`/`7faa51e`: before those,
 
 | What | How |
 |---|---|
-| **The button** | Repoint at PPM. Two minutes. The only one-way door. |
+| **The links** | Repoint all 11 back at PPM. The only one-way door, and it is 11 edits, not two minutes. Budget for that. |
 | **Code** | `git revert <phase-4 commits>`, then Trigger deploy. |
 | **Imported rows** | Identify by `reference` from the reconciler's MISSING list. **Never bulk-delete** — 668 rows are real customers. |
 | **Service links** | `scripts/backfill-service-ids.js` only fills blanks, so re-running is safe and there is nothing to undo. |
