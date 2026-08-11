@@ -6,27 +6,34 @@ Open items, newest first. Nothing here is blocking.
 
 ### Added 2026-08-11 — the next three projects
 
-**1. Back up `~/BookingHQ`. Do this first.**
-Measured 2026-08-11: **no git remote**, 10 commits, last one 2026-07-05,
-**244 uncommitted files**, 35 MB. It holds `brain/` (23 files incl. `clients/`),
-`bsleads/`, `leads/`, `queue/` and `integrations/` (fme, imessage, mago) — the
-lead pipeline and the deduped client base. One disk failure from gone, and
-nothing about it is reconstructible from the CRM.
-- [ ] Create a **private** remote (it carries client PII — never public)
-- [ ] Decide what is committed vs ignored; 244 dirty files is partly real churn
-      (Otto writes leads continuously), so a blanket `git add -A` is wrong
-- [ ] Automate it — a scheduled commit+push, not a habit to remember
+**1. Back up `~/BookingHQ` — DONE 2026-08-11.**
+Was: no remote, 10 commits, last 2026-07-05, 244 uncommitted files, 35 MB of
+lead pipeline and client base, none of it reconstructible from the CRM.
+- [x] Private remote — `github.com/mxjoker/bookinghq`
+- [x] Ignore rules decided: `.backups/`, `.tmp/`, `.playwright-mcp/`,
+      `.claude/worktrees/`, `_index/locks/`, `_index/edit-backup-*`, and the
+      generated `brain-health.json` files. Kept `_index/index.json`,
+      `correlations.json` and `files/` — no rebuild script, so not regenerable.
+      All 1036 committed files scanned for live credentials first.
+- [x] Automated — `scripts/backup-push.sh`, LaunchAgent
+      `com.joecoover.bookinghq-backup`, daily 19:00. Verified by watching the
+      agent commit and push on its own.
 
-**2. One memory contract across every system.**
-Right now each system has its own idea of how to read and write the brain, and
-the Obsidian vault's role is undefined. No `.obsidian` directory was found in
-the top 4 levels of `$HOME` on 2026-08-11, so step one is locating it.
-- [ ] Find the vault; make the revive-or-retire call the CRM spec flagged
-- [ ] Write down the contract: which system owns which file, who may write,
-      what format, how conflicts resolve
-- [ ] Bring the consumers onto it — BookingHQ, Otto, the website hooks, the FME
-      CRM's agent queue, Claude memory (currently split across 10 project dirs)
-- [ ] The contract is the deliverable. Code changes follow from it, not before.
+**2. One memory contract across every system — MOSTLY DONE 2026-08-11.**
+- [x] Vault found (iCloud, 248 notes) and **revived rather than retired**. It had
+      the best structure of the three brains and was the dead one — untouched
+      2026-04-15 to 2026-08-11. Structure does not keep a brain alive; a writer
+      does.
+- [x] Contract written: `~/.claude/CLAUDE.md`, loaded in every session, every
+      project. States which brain owns what and how to choose.
+- [x] `Entities/` in the vault is the cross-project layer, registered on
+      `00-DASHBOARD.md`. Claude memory is siloed across 10 project dirs that
+      cannot see each other; entity pages are the shared home.
+- [x] The librarian: `BookingHQ/scripts/brain-lint.mjs`, weekly via
+      `com.joecoover.brainlint`, surfaced in The Booth. Reports, never edits.
+- [ ] **Still open — the other consumers.** Otto and the website hooks do not
+      know the contract exists; they still write where they always wrote. This
+      is the "all systems on the same page" half and it is real work.
 
 **3. Whole-system review for improvements and efficiencies.**
 Three repos, three deploy stories, several integrations that grew separately.
@@ -74,7 +81,6 @@ Three repos, three deploy stories, several integrations that grew separately.
 - [ ] Phase 5 — the `fmms` brand tier. `_brand.js` already accepts it; what
       remains is admin UI and tier-separated reporting.
 - [ ] `admin.html` is ~300 KB in one file
-- [ ] Memory consolidation; `~/BookingHQ` has commits but **no git remote**
 - [ ] Repo and deploy cleanup — `docs/archive/` holds dead handoff documents
 
 ## Phase 4 — PPM cutover (COMPLETE, executed 2026-08-10/11)
