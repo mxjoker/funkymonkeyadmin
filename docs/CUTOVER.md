@@ -239,14 +239,63 @@ Condition 1 is only meaningful as of `e8e8def`/`7faa51e`: before those,
 
 ---
 
-## Outcome
+## Outcome — executed 2026-08-10/11
 
-Filled in after execution.
+**The CRM is the system of record.** funkymonkeyevents.com feeds it, PPM has
+been captured and drained, and PPM now receives nothing.
 
-```
-Date:
-Test booking reference:
-Stripe charge id:
-Refunded:
-Anything that surprised us:
-```
+| | |
+|---|---|
+| Website booking links moved | 18, across 4 pages, all crawl-verified |
+| PPM export | 702 bookings |
+| Imported | 37 (27, then 10 organisation rows) |
+| MISSING at close | **0** |
+| Bookings in CRM | 708 |
+
+### What the cutover found that had nothing to do with the cutover
+
+- **The CSV parser could not read the real export.** PPM puts newlines inside
+  quoted fields; the line-based parser turned 1070 lines into 1007 fragments, of
+  which only 702 had a reference. `import-bookings.js` shared the defect
+  independently and would have written the shrapnel to the bookings table. Fixed
+  before anything was imported.
+- **The import dry run could not fail.** Its duplicate check sat inside
+  `if (!isDryRun)`, so it reported "692 rows ready to import" when 665 already
+  existed and 27 were new. Fixed; the corrected dry run predicted 27/665/10 and
+  the apply matched exactly.
+- **$42,315.90 of revenue that never happened.** 126 bookings PPM records as
+  cancelled were `completed` in the CRM — 114 updated inside the same two
+  minutes on 2026-06-16, none with a Stripe session. A blanket "past event means
+  completed" sweep. 125 restored to cancelled; completed revenue went
+  $227,035.97 to $186,025.07. One row (26-245) refused because it carries
+  `deposit_paid` — a cancelled gig that took money is a refund question.
+- **Organisation bookings were unimportable.** PPM leaves Client name empty and
+  fills Organisation; the validator rejected every one. Ten real bookings at The
+  MAC were being dropped, and schools, libraries and venues all book this way.
+- **Brand attribution could not fail.** `booking-form.html` sent no brand and the
+  server coerced everything to `fme`. Four writers each kept their own broken
+  copy of the rule.
+
+### Deliberately not done
+
+- **The end-to-end gate through a live website button.** Skipped on the owner's
+  call, 2026-08-11. Every component was proven separately — form to CRM with
+  correct brand and catalogue link, deposit link, webhook, payment, email — and
+  all 18 links were crawl-verified to the exact destination. What remains
+  unproven is only a human click-through.
+- **~32 residual status drifts and 103 price differences.** Benign. 234 of the
+  original 329 are PPM `confirmed` vs CRM `completed`, which is the CRM being
+  correctly ahead on past gigs; the price ones are the legacy mileage-inclusive
+  rows.
+
+### Still open
+
+- Refund the two $1 test charges (`FM-U8UD7BQZ` and the earlier gate booking).
+- `26-245` Meagan Lytton — cancelled in PPM but `deposit_paid` in the CRM.
+  Refund it, or keep it as a cancellation fee, and record which.
+- Revoke the old Resend key, and the unused "Local FM test" key once its Logs
+  page shows 30 days without a send.
+- Leave PPM read-only. **Do not cancel the subscription** until one full booking
+  cycle has run through the CRM.
+- Phase 5: the `fmms` brand tier. `_brand.js` already accepts it; what remains is
+  admin UI and tier-separated reporting.
