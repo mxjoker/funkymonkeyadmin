@@ -5477,19 +5477,45 @@ async function loadOtto() {
   const briefEl = document.getElementById('otto-briefing');
   const statusEl = document.getElementById('otto-status');
   if (!gatesEl) return;
+// Did Otto actually receive what you decided?
+//
+// A gate's life is: open → approved/rejected (you) → done (Otto acted on it).
+// Nothing else marks the handover, so a decision still sitting at
+// approved/rejected after Otto's next run did NOT reach him — and neither did
+// any note you attached to it. Worth saying out loud rather than leaving as a
+// question only a database query can answer.
+function ackLine(awaiting, lastRun) {
+  if (!awaiting.length) return ' · <span style="color:#16a34a;font-weight:600">✓ Otto is up to date</span>';
+  const withNotes = awaiting.filter(g => (g.note || '').trim()).length;
+  // Decided BEFORE the last run and still not done means it was skipped, not
+  // merely waiting for the next wake.
+  const stale = lastRun ? awaiting.filter(g => g.decided_at && new Date(g.decided_at) < lastRun).length : 0;
+  const noteBit = withNotes ? ` (${withNotes} with a note)` : '';
+  return stale
+    ? ` · <span style="color:#ef4444;font-weight:600">⚠️ ${awaiting.length} decision${awaiting.length > 1 ? 's' : ''} not picked up${noteBit} — ${stale} predate the last run</span>`
+    : ` · <span style="color:#d97706;font-weight:600">${awaiting.length} decision${awaiting.length > 1 ? 's' : ''} awaiting Otto's next run${noteBit}</span>`;
+}
+
   gatesEl.innerHTML = '<div style="color:#94a3b8;padding:20px">Loading…</div>';
 
   try {
-    const [gateData, briefData, runData] = await Promise.all([
+    const [gateData, briefData, runData, ackApproved, ackRejected] = await Promise.all([
       leadsApi('agent-queue?kind=gate&status=open'),
       // status=open so a cancelled or superseded briefing can't masquerade as the latest
       leadsApi('agent-queue?kind=briefing&status=open&limit=1'),
       leadsApi('agent-queue?kind=run&status=open'),
+      // A gate you decided stays approved/rejected until Otto acts on it and
+      // flips it to 'done'. That transition is the only proof your decision —
+      // and any note attached to it — actually reached him, so it is shown
+      // rather than left as something you have to ask about.
+      leadsApi('agent-queue?kind=gate&status=approved'),
+      leadsApi('agent-queue?kind=gate&status=rejected'),
     ]);
 
     const gates = gateData.items || [];
     const briefing = (briefData.items || [])[0];
     const pendingRun = (runData.items || [])[0];
+    const awaitingOtto = [...(ackApproved.items || []), ...(ackRejected.items || [])];
 
     // Status strip — last briefing tells you whether Otto actually ran.
     const last = briefing ? new Date(briefing.created_at) : null;
@@ -5499,6 +5525,7 @@ async function loadOtto() {
         + ` · ${gates.length} waiting on you`
         + (pendingRun ? ' · <span style="color:#7c3aed;font-weight:600">sweep requested</span>' : '')
         + (staleHrs > 30 ? ' · <span style="color:#ef4444;font-weight:600">⚠️ no run in over a day</span>' : '')
+        + ackLine(awaitingOtto, last)
       : 'No briefing yet. Otto pushes one at the end of each run.';
 
     // Nav badge so open items are visible from any page.
