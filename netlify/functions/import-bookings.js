@@ -35,7 +35,7 @@ const STATUS_MAP = {
 const { resolveServiceId } = require('./_service-map');
 // Shared with scripts/reconcile-ppm-export.js for the same reason: the cutover
 // reconciliation is only meaningful if it reads the export the way this does.
-const { parseCSVLine } = require('./_csv');
+const { parseRows } = require('./_csv');
 
 const SERVICE_MAP = {
   'Deluxe Birthday Package': 'Deluxe Magic Birthday Show',
@@ -216,25 +216,30 @@ exports.handler = async (event) => {
       }
 
       const csvContent = fs.readFileSync(csvPath, 'utf-8');
-      const lines = csvContent.split('\n').filter(l => l.trim());
 
-      // Parse header
-      const headers = parseCSVLine(lines[0]);
+      // parseRows(), NOT split('\n'). PPM puts newlines inside quoted fields —
+      // addresses and enquiry notes run across several lines — so splitting on
+      // newlines first tears one booking into fragments and writes the shrapnel
+      // to the bookings table. The 2026-08-10 export split into 1007 "rows" of
+      // which only 702 had a reference; parsed properly it is 702 records.
+      const allRows = parseRows(csvContent);
+      const headers = allRows[0] || [];
       console.log('CSV Headers:', headers.slice(0, 10).join(', '), '...');
 
-      results.total = lines.length - 1; // Exclude header
+      const dataRows = allRows.slice(1);
+      results.total = dataRows.length;
 
       // Process rows
-      for (let i = 1; i < lines.length; i++) {
+      for (let i = 0; i < dataRows.length; i++) {
         try {
-          const row = parseCSVLine(lines[i]);
+          const row = dataRows[i];
           const booking = transformRow(row, headers);
           const validation = validateBooking(booking);
 
           if (!validation.valid) {
             results.errors++;
             results.errorDetails.push({
-              row: i,
+              row: i + 2, // +2: 0-indexed data rows, plus the header line
               reference: booking.reference,
               errors: validation.errors
             });
@@ -293,7 +298,7 @@ exports.handler = async (event) => {
         } catch (rowError) {
           results.errors++;
           results.errorDetails.push({
-            row: i,
+            row: i + 2, // +2: 0-indexed data rows, plus the header line
             error: 'Row processing failed'
           });
           console.error(`Row ${i} error:`, rowError.message);
