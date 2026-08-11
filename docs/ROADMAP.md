@@ -45,12 +45,10 @@ Three repos, three deploy stories, several integrations that grew separately.
 
 **Housekeeping from the cutover** — closed 2026-08-11 unless noted
 - [x] $1 test charges — one refunded, the other left to settle into the account
-- [x] `26-245` Meagan Lytton — **fee kept**, recorded as a cancellation fee
-      transferable to a future booking. Status set to `cancelled`, decision in
-      `payment_ref` and the changelog.
-      **Still open:** neither the CRM nor the PPM export records the AMOUNT, so
-      the credit cannot actually be applied. Find it in Stripe (2026-05-14,
-      Corporate Magic Show) and set `deposit_amount`.
+- [x] `26-245` Meagan Lytton — **no deposit was ever collected.** Owner checked
+      the details 2026-08-11. The `deposit_paid` flag was simply wrong, which is
+      why `fix-cancelled-not-completed.js` refused the row. Now `cancelled`,
+      `deposit_paid=false`, no money involved. Nothing outstanding.
 - [x] Resend keys rotated and the old ones cleared
 - [x] Stripe restricted key in `_config/stripe.local.json` — **decided not to
       rotate** 2026-08-11. Only a partial key was ever exposed, and it was never
