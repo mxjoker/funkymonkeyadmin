@@ -1,30 +1,62 @@
 # Roadmap
 
-## Phase 4 — PPM cutover (staged 2026-08-06, not yet executed)
+## Backlog
+
+Open items, newest first. Nothing here is blocking.
+
+**Housekeeping from the cutover**
+- [ ] Refund the two $1 test charges (`FM-U8UD7BQZ`, and the earlier gate booking)
+- [ ] `26-245` Meagan Lytton — cancelled in PPM but `deposit_paid` in the CRM.
+      Refund or cancellation fee, and record which
+- [ ] Revoke the old Resend key, and "Local FM test" once its Logs show 30 quiet days
+- [ ] **Do not cancel the PPM subscription** until a full booking cycle has run
+      through the CRM
+
+**Known gaps, each with a reason it was left**
+- [ ] **No booking link on the homepage**, `/camps`, `/snow`, `/faqs`,
+      `/foam-faqs`, `/blog` or the three venue pages. Traffic with no path to
+      book. Cheapest revenue available.
+- [ ] **178 bookings unlinked to a catalogue service** — "Custom Event" (161),
+      "Magic Show" (11) and one-off titles. Genuinely ambiguous; link by hand in
+      the Quote Breakdown. Never guess these into `_service-map.js`.
+- [ ] **Multi-service bookings only staff their first line item.**
+      `rollupItems()` takes `services[0]`, so a foam party + face painting
+      resolves staff for the foam party alone. Lives in the staffing subsystem,
+      which Connecteam has already won.
+- [ ] **Public form bookings carry no line items** until their quote is first
+      edited. Reads fall back to legacy columns, so nothing breaks; Phase 3's
+      machinery just starts on first edit.
+- [ ] **`/api/health` has no UI.** Phase 1 built the endpoint; checking it still
+      means curl or the browser console.
+- [ ] ~32 residual status drifts and 103 price differences vs the final PPM
+      export. Benign — see `docs/CUTOVER.md`.
+
+**Separate sub-projects, specced but not started**
+- [ ] Phase 5 — the `fmms` brand tier. `_brand.js` already accepts it; what
+      remains is admin UI and tier-separated reporting.
+- [ ] `admin.html` is ~300 KB in one file
+- [ ] Memory consolidation; `~/BookingHQ` has commits but **no git remote**
+- [ ] Repo and deploy cleanup — `docs/archive/` holds dead handoff documents
+
+## Phase 4 — PPM cutover (COMPLETE, executed 2026-08-10/11)
 
 Plan: `docs/superpowers/plans/2026-08-05-crm-takeover-phase-4.md`
-Runbook: `docs/CUTOVER.md`
+Runbook and outcome: `docs/CUTOVER.md`
 
-Code is committed and tested but **not deployed** — Phase 4 ships in one
-publish at cutover time. What is staged:
+**The CRM is the system of record.** 18 website booking links moved off
+`partypromanager.com`, the 702-row final export reconciled to MISSING=0, and the
+CRM holds 708 bookings.
 
-- `_csv.js` — one CSV parser shared by `import-bookings.js` and the new
-  reconciler, so a reconciliation diff can never be a parser disagreement.
-- `scripts/reconcile-ppm-export.js` — read-only diff of a PPM export against
-  `bookings` on `reference`, in three buckets. Never writes; remediation stays
-  in `import-bookings.js`.
-- `_brand.js` — the single brand rule. Four writers previously decided brand
-  for themselves; `create-bookings.js` would have rejected `fmms` while
-  `bookings.js` silently coerced it to `fme`.
-- `booking-form.html` now declares `brand: 'fme'` instead of relying on a
-  column default, which is what made the cutover gate capable of failing.
+What shipped: `_csv.js` (one parser, shared with the reconciler);
+`scripts/reconcile-ppm-export.js` (read-only three-bucket diff);
+`_brand.js` (one brand rule, replacing four private copies);
+`booking-form.html` declaring its brand; an editable deposit where `$0` genuinely
+means no deposit; `+ Booking` on the calendar and dashboard.
 
-Two assumptions the first real run corrected, both recorded in the runbook:
-PPM's `Tot. price` is travel-inclusive (a raw column diff flags every travelled
-booking), and PPM does **not** win on payment state (money reaches the CRM by
-routes PPM never sees).
-
-Blocking nothing. Remaining work is executing the runbook.
+Four defects surfaced only when real data went through the real path — a CSV
+parser that fragmented 702 records into 1007, a dry run that could not fail,
+$42,315.90 of revenue from cancelled gigs, and organisation bookings that could
+not be imported at all. All four are written up in `docs/CUTOVER.md`.
 
 ## Phase 3 — booking_items and client quote accept (complete, 2026-08-02)
 
