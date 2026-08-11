@@ -36,11 +36,18 @@ Three repos, three deploy stories, several integrations that grew separately.
       CSV parsers that disagreed
 - [ ] Deliverable is a ranked list with a cost estimate per item, not a rewrite
 
-**Housekeeping from the cutover**
-- [ ] Refund the two $1 test charges (`FM-U8UD7BQZ`, and the earlier gate booking)
-- [ ] `26-245` Meagan Lytton — cancelled in PPM but `deposit_paid` in the CRM.
-      Refund or cancellation fee, and record which
-- [ ] Revoke the old Resend key, and "Local FM test" once its Logs show 30 quiet days
+**Housekeeping from the cutover** — closed 2026-08-11 unless noted
+- [x] $1 test charges — one refunded, the other left to settle into the account
+- [x] `26-245` Meagan Lytton — **fee kept**, recorded as a cancellation fee
+      transferable to a future booking. Status set to `cancelled`, decision in
+      `payment_ref` and the changelog.
+      **Still open:** neither the CRM nor the PPM export records the AMOUNT, so
+      the credit cannot actually be applied. Find it in Stripe (2026-05-14,
+      Corporate Magic Show) and set `deposit_amount`.
+- [x] Resend keys rotated and the old ones cleared
+- [x] Stripe restricted key in `_config/stripe.local.json` — **decided not to
+      rotate** 2026-08-11. Only a partial key was ever exposed, and it was never
+      committed. Recorded so it is not raised again.
 - [ ] **Do not cancel the PPM subscription** until a full booking cycle has run
       through the CRM
 
