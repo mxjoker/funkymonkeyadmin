@@ -4,6 +4,38 @@
 
 Open items, newest first. Nothing here is blocking.
 
+### Added 2026-08-11 — the next three projects
+
+**1. Back up `~/BookingHQ`. Do this first.**
+Measured 2026-08-11: **no git remote**, 10 commits, last one 2026-07-05,
+**244 uncommitted files**, 35 MB. It holds `brain/` (23 files incl. `clients/`),
+`bsleads/`, `leads/`, `queue/` and `integrations/` (fme, imessage, mago) — the
+lead pipeline and the deduped client base. One disk failure from gone, and
+nothing about it is reconstructible from the CRM.
+- [ ] Create a **private** remote (it carries client PII — never public)
+- [ ] Decide what is committed vs ignored; 244 dirty files is partly real churn
+      (Otto writes leads continuously), so a blanket `git add -A` is wrong
+- [ ] Automate it — a scheduled commit+push, not a habit to remember
+
+**2. One memory contract across every system.**
+Right now each system has its own idea of how to read and write the brain, and
+the Obsidian vault's role is undefined. No `.obsidian` directory was found in
+the top 4 levels of `$HOME` on 2026-08-11, so step one is locating it.
+- [ ] Find the vault; make the revive-or-retire call the CRM spec flagged
+- [ ] Write down the contract: which system owns which file, who may write,
+      what format, how conflicts resolve
+- [ ] Bring the consumers onto it — BookingHQ, Otto, the website hooks, the FME
+      CRM's agent queue, Claude memory (currently split across 10 project dirs)
+- [ ] The contract is the deliverable. Code changes follow from it, not before.
+
+**3. Whole-system review for improvements and efficiencies.**
+Three repos, three deploy stories, several integrations that grew separately.
+- [ ] Map what talks to what, and where the same job is done twice
+- [ ] Look for the duplication pattern this codebase keeps producing — one rule
+      implemented in four places (see [[brand-rule-lives-in-one-place]]) and two
+      CSV parsers that disagreed
+- [ ] Deliverable is a ranked list with a cost estimate per item, not a rewrite
+
 **Housekeeping from the cutover**
 - [ ] Refund the two $1 test charges (`FM-U8UD7BQZ`, and the earlier gate booking)
 - [ ] `26-245` Meagan Lytton — cancelled in PPM but `deposit_paid` in the CRM.
