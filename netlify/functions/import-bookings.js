@@ -154,7 +154,14 @@ function transformRow(row, headers) {
     event_type: obj['Celebration'] || '',
     guest_count: parseIntVal(obj['No. children']),
     notes: obj['Enq. text'] || '',
-    client_name: obj['Client name'] || '',
+    // An organisation booking has no individual client — PPM puts the name in
+    // Organisation and leaves Client name empty. Ten real bookings at The MAC
+    // (a confirmed 5-day camp, July 2025, plus a cancelled June week) were
+    // rejected by the "Missing client name" validator for exactly this reason,
+    // and schools, libraries and venues all book this way. The organisation IS
+    // the client.
+    client_name: obj['Client name'] || obj['Organisation'] || '',
+    organisation_name: obj['Organisation'] || '',
     client_phone: cleanPhone(obj['Phone number']),
     client_email: obj['Email'] || '',
     child_name: obj['Child name 1'] || '',
@@ -273,10 +280,12 @@ exports.handler = async (event) => {
                 balance_due, deposit_paid, event_date, event_time,
                 event_zip, event_location, event_type, guest_count,
                 notes, client_name, client_phone, client_email,
-                child_name, customer_type, referral_source, admin_notes
+                child_name, customer_type, referral_source, admin_notes,
+                organisation_name
               ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
+                $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
+                $27
               )
             `, [
               booking.reference, booking.status, booking.brand, booking.service_id,
@@ -287,7 +296,8 @@ exports.handler = async (event) => {
               booking.event_zip, booking.event_location, booking.event_type,
               booking.guest_count, booking.notes, booking.client_name,
               booking.client_phone, booking.client_email, booking.child_name,
-              booking.customer_type, booking.referral_source, booking.admin_notes
+              booking.customer_type, booking.referral_source, booking.admin_notes,
+              booking.organisation_name
             ]);
 
             results.imported++;
