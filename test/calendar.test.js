@@ -132,3 +132,43 @@ test('a booking with no travel shows a plain total', () => {
   assert.match(ics, /Total \$500\.00 ·/);
   assert.doesNotMatch(ics, /incl\. travel/);
 });
+
+// ── Address completeness ────────────────────────────────────────────────────
+// The calendar entry is the only thing you have standing in a car park. If
+// LOCATION says "KinderCare" it is decoration; if it says the street, town and
+// zip it is directions. The 2026-05-07 import kept Venue and threw the street
+// address away, leaving 17 of 19 upcoming bookings unnavigable.
+const { fullAddress } = require('../netlify/functions/_address');
+
+test('a full address is built from PPM parts, venue first', () => {
+  assert.strictEqual(
+    fullAddress({ 'Venue': 'KinderCare', 'Addr. line 1': '1812 North Eastern Ave', 'Town': 'Moore', 'County': 'Oklahoma' }),
+    'KinderCare, 1812 North Eastern Ave, Moore, Oklahoma'
+  );
+});
+
+test('the postcode is left out — it lives in event_zip and would print twice', () => {
+  const a = fullAddress({ 'Addr. line 1': '1 High St', 'Town': 'Moore', 'Postcode': '73160' });
+  assert.doesNotMatch(a, /73160/);
+});
+
+test('repeated parts are collapsed', () => {
+  // PPM stores Venue "Home" with Town "Home", and Town/County both "Oklahoma".
+  assert.strictEqual(fullAddress({ 'Venue': 'Home', 'Town': 'Home' }), 'Home');
+  assert.strictEqual(fullAddress({ 'Town': 'Oklahoma', 'County': 'Oklahoma' }), 'Oklahoma');
+});
+
+test('an empty row yields an empty string, not a pile of commas', () => {
+  assert.strictEqual(fullAddress({}), '');
+  assert.strictEqual(fullAddress(null), '');
+});
+
+test('the calendar LOCATION carries street and zip together', () => {
+  const ics = buildEvent(
+    { ...base, event_location: 'KinderCare, 1812 North Eastern Ave, Moore, Oklahoma', event_zip: '73160' },
+    [], NOW
+  ).join('\r\n');
+  // Folding may split the line, so unfold before asserting.
+  const unfolded = ics.replace(/\r\n /g, '');
+  assert.match(unfolded, /LOCATION:KinderCare\\, 1812 North Eastern Ave\\, Moore\\, Oklahoma\\, 73160/);
+});

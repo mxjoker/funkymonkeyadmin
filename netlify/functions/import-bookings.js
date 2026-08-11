@@ -36,6 +36,8 @@ const { resolveServiceId } = require('./_service-map');
 // Shared with scripts/reconcile-ppm-export.js for the same reason: the cutover
 // reconciliation is only meaningful if it reads the export the way this does.
 const { parseRows } = require('./_csv');
+// One place builds the address line, shared with scripts/backfill-addresses.js.
+const { fullAddress } = require('./_address');
 
 const SERVICE_MAP = {
   'Deluxe Birthday Package': 'Deluxe Magic Birthday Show',
@@ -115,11 +117,11 @@ function transformRow(row, headers) {
   // Quote Breakdown. Re-runnable via scripts/backfill-service-ids.js.
   const serviceId = resolveServiceId(serviceName);
 
-  // Determine event location
-  let eventLocation = obj['Venue'] || '';
-  if (!eventLocation) {
-    eventLocation = obj['Addr. line 1'] || '';
-  }
+  // Full address, not just the venue. This used to take Venue and fall back to
+  // Addr. line 1, so a gig at KinderCare stored "KinderCare" and discarded
+  // "1812 North Eastern Ave, Moore" — invisible in the admin, useless on a
+  // phone where the calendar entry has to be tappable for directions.
+  const eventLocation = fullAddress(obj);
 
   // Determine ZIP
   let eventZip = obj['Postcode'] || '';
