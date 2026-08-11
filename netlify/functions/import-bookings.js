@@ -246,18 +246,22 @@ exports.handler = async (event) => {
             continue;
           }
 
-          // Check for existing reference
-          if (!isDryRun) {
-            const existing = await client.query(
-              'SELECT id FROM bookings WHERE reference = $1',
-              [booking.reference]
-            );
+          // Check for existing reference — in BOTH modes, deliberately.
+          //
+          // This used to sit inside `if (!isDryRun)`, so a dry run never looked
+          // for duplicates and counted every valid row as importable. Against
+          // the 2026-08-10 export it reported "692 rows ready to import" when
+          // 665 of them already existed and only 27 were new. A preview that
+          // cannot distinguish those two outcomes is not a preview.
+          const existing = await client.query(
+            'SELECT id FROM bookings WHERE reference = $1',
+            [booking.reference]
+          );
 
-            if (existing.rows.length > 0) {
-              results.skipped++;
-              console.log(`Skip: ${booking.reference} (already exists)`);
-              continue;
-            }
+          if (existing.rows.length > 0) {
+            results.skipped++;
+            if (!isDryRun) console.log(`Skip: ${booking.reference} (already exists)`);
+            continue;
           }
 
           // Import booking

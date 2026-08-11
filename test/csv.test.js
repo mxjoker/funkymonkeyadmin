@@ -114,3 +114,29 @@ test('the real export parses to one row per reference', () => {
   assert.strictEqual(withRef.length, rows.length,
     'every parsed row must carry a reference — a row without one is a fragment');
 });
+
+// ── The dry run must actually be a dry run ──────────────────────────────────
+// import-bookings.js checked for an existing reference inside
+// `if (!isDryRun)`, so a dry run skipped nobody and reported every valid row
+// as importable: "692 rows ready to import" when 665 already existed and only
+// 27 were new. The duplicate lookup must run in both modes or the preview
+// cannot tell the operator what applying would do — the same can't-fail
+// pattern this codebase keeps producing.
+test('the importer checks for duplicates in dry-run mode too', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'netlify', 'functions', 'import-bookings.js'), 'utf8'
+  );
+
+  const lookup = src.indexOf('SELECT id FROM bookings WHERE reference');
+  assert.ok(lookup > 0, 'the duplicate lookup must still exist');
+
+  // Walk back to the nearest enclosing statement and confirm the lookup is not
+  // gated on isDryRun.
+  const preceding = src.slice(Math.max(0, lookup - 400), lookup);
+  assert.doesNotMatch(
+    preceding, /if \(!isDryRun\) \{[^}]*$/,
+    'the duplicate lookup must not be wrapped in `if (!isDryRun)`'
+  );
+});
