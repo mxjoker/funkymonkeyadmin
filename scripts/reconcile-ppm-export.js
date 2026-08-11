@@ -72,6 +72,10 @@ function ppmDate(s) {
 }
 
 const money = (s) => Number(String(s || '0').replace(/[^0-9.-]/g, '')) || 0;
+// Names and emails are compared loosely; a phone by its digits only, since the
+// two systems format them differently ("405-962-8375" vs "4059628375").
+const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9@.]/g, '');
+const digits = (s) => String(s || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
 
 async function main() {
   if (!csvPath) {
@@ -100,6 +104,7 @@ async function main() {
     // five "price drifts" in the sample export were exactly this.
     const { rows: crmRows } = await pool.query(
       `SELECT reference, status, event_date::text AS event_date,
+              client_name, client_phone, client_email,
               total_price::float8 AS total_price, mileage_cost::float8 AS mileage_cost
        FROM bookings WHERE COALESCE(reference,'') <> ''`
     );
@@ -136,6 +141,24 @@ async function main() {
       }
       if (ppmStatus !== found.status) {
         deltas.push(`status      PPM=${ppmStatus}  CRM=${found.status}`);
+      }
+
+      // Identity. Comparing only status/date/total meant a booking whose CONTACT
+      // had changed looked identical — on 2026-08-11 three bookings read as
+      // present when the CRM held an entirely different person, and one of them
+      // was a foam party that never reached the calendar. A reference alone does
+      // not prove two rows are the same booking.
+      const ppmName = String(row['Client name'] || row['Organisation'] || '');
+      if (norm(ppmName) && norm(found.client_name) && norm(ppmName) !== norm(found.client_name)) {
+        deltas.push(`CONTACT     PPM="${ppmName}"  CRM="${found.client_name}"  ← different person on the same reference`);
+      }
+      const ppmEmail = String(row['Email'] || '');
+      if (norm(ppmEmail) && norm(found.client_email) && norm(ppmEmail) !== norm(found.client_email)) {
+        deltas.push(`email       PPM=${ppmEmail}  CRM=${found.client_email}`);
+      }
+      const ppmPhone = digits(row['Phone number']);
+      if (ppmPhone && digits(found.client_phone) && ppmPhone !== digits(found.client_phone)) {
+        deltas.push(`phone       PPM=${row['Phone number']}  CRM=${found.client_phone}`);
       }
       // Compare like with like: PPM's total is travel-inclusive, so add the
       // CRM's travel back before diffing. Cent-level tolerance because both
