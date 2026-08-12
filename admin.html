@@ -5477,23 +5477,24 @@ async function loadOtto() {
   const briefEl = document.getElementById('otto-briefing');
   const statusEl = document.getElementById('otto-status');
   if (!gatesEl) return;
-// Did Otto actually receive what you decided?
+// Decisions Otto has not yet closed out.
 //
-// A gate's life is: open → approved/rejected (you) → done (Otto acted on it).
-// Nothing else marks the handover, so a decision still sitting at
-// approved/rejected after Otto's next run did NOT reach him — and neither did
-// any note you attached to it. Worth saying out loud rather than leaving as a
-// question only a database query can answer.
+// NOT a delivery warning. Verified 2026-08-11 against Otto's own briefing:
+// he reads every decision and every note on his next run and folds them into
+// the briefing text, but only flips a gate to 'done' when he actually
+// completes work on it. Treating "not done" as "not received" produced a red
+// alert while the loop was working perfectly — the briefing that night read
+// "FME dashboard inbox: all 50 items already decided, nothing pending."
+//
+// So this counts, and points at the briefing, which is where Otto confirms.
 function ackLine(awaiting, lastRun) {
-  if (!awaiting.length) return ' · <span style="color:#16a34a;font-weight:600">✓ Otto is up to date</span>';
+  if (!awaiting.length) return '';
   const withNotes = awaiting.filter(g => (g.note || '').trim()).length;
-  // Decided BEFORE the last run and still not done means it was skipped, not
-  // merely waiting for the next wake.
-  const stale = lastRun ? awaiting.filter(g => g.decided_at && new Date(g.decided_at) < lastRun).length : 0;
-  const noteBit = withNotes ? ` (${withNotes} with a note)` : '';
-  return stale
-    ? ` · <span style="color:#ef4444;font-weight:600">⚠️ ${awaiting.length} decision${awaiting.length > 1 ? 's' : ''} not picked up${noteBit} — ${stale} predate the last run</span>`
-    : ` · <span style="color:#d97706;font-weight:600">${awaiting.length} decision${awaiting.length > 1 ? 's' : ''} awaiting Otto's next run${noteBit}</span>`;
+  const fresh = lastRun ? awaiting.filter(g => g.decided_at && new Date(g.decided_at) > lastRun).length : awaiting.length;
+  const noteBit = withNotes ? `, ${withNotes} with a note` : '';
+  return fresh
+    ? ` · <span style="color:#64748b">${fresh} decision${fresh > 1 ? 's' : ''} since his last run${noteBit} — he picks them up next run</span>`
+    : ` · <span style="color:#64748b">${awaiting.length} decided${noteBit} · Otto confirms in the briefing</span>`;
 }
 
   gatesEl.innerHTML = '<div style="color:#94a3b8;padding:20px">Loading…</div>';
