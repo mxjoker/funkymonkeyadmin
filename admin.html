@@ -1829,32 +1829,47 @@ function openBooking(id) {
 
     <!-- Record payment -->
     <div class="payment-block">
-      <span class="section-label">💵 Record Payment</span>
+      ${(() => {
+        // A payment already recorded must be visible and correctable. These
+        // inputs used to render blank every time, so a mistyped amount was
+        // written once and then invisible — nothing on this screen showed what
+        // had been recorded, and nothing could change it.
+        const recorded = Number(b.payment_amount) > 0 || !!b.deposit_paid;
+        const viaStripe = !!b.stripe_payment_intent_id;
+        if (!recorded) return `<span class="section-label">💵 Record Payment</span>`;
+        return `<span class="section-label">💵 Payment Recorded</span>
+        <div style="font-size:.78rem;color:${viaStripe ? '#6b7280' : '#b45309'};margin:-4px 0 10px">
+          ${viaStripe
+            ? `Paid through Stripe${Number(b.payment_amount) > 0 ? ` — $${Number(b.payment_amount).toFixed(2)}` : ''}. Money actually moved, so this cannot be cleared here — use Process Refund below.`
+            : `Recorded manually${Number(b.payment_amount) > 0 ? ` — $${Number(b.payment_amount).toFixed(2)}` : ''}. Edit the fields and save to correct it, or clear it if it was logged by mistake.`}
+        </div>`;
+      })()}
       <div class="pay-row">
         <div class="pay-field">
           <label>Amount ($)</label>
-          <input type="number" id="pay-amt-${b.id}" placeholder="0.00" step="0.01" style="width:100px"/>
+          <input type="number" id="pay-amt-${b.id}" placeholder="0.00" step="0.01" style="width:100px"
+                 value="${Number(b.payment_amount) > 0 ? Number(b.payment_amount).toFixed(2) : ''}"/>
         </div>
         <div class="pay-field">
           <label>Method</label>
           <select id="pay-meth-${b.id}">
-            <option value="cash">Cash</option>
-            <option value="stripe">Stripe</option>
-            <option value="venmo">Venmo</option>
-            <option value="paypal">PayPal</option>
-            <option value="check">Check</option>
-            <option value="zelle">Zelle</option>
+            ${['cash','stripe','venmo','paypal','check','zelle'].map(m =>
+              `<option value="${m}" ${String(b.payment_method||'').toLowerCase() === m ? 'selected' : ''}>${m[0].toUpperCase()+m.slice(1)}</option>`
+            ).join('')}
           </select>
         </div>
         <div class="pay-field" style="flex:1;min-width:120px">
           <label>Note (optional)</label>
-          <input type="text" id="pay-note-${b.id}" placeholder="e.g. deposit, balance…" style="width:100%"/>
+          <input type="text" id="pay-note-${b.id}" value="${esc(b.payment_note||'')}" placeholder="e.g. deposit, balance…" style="width:100%"/>
         </div>
         <div class="pay-field" style="min-width:120px">
           <label>Payment Ref</label>
           <input type="text" id="pay-ref-${b.id}" value="${esc(b.payment_ref||'')}" placeholder="Check #, Venmo ID…" style="width:100%"/>
         </div>
-        <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordClientPayment('${b.id}')">Save Payment</button>
+        <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordClientPayment('${b.id}')">${Number(b.payment_amount) > 0 || b.deposit_paid ? 'Update Payment' : 'Save Payment'}</button>
+        ${(Number(b.payment_amount) > 0 || b.deposit_paid) && !b.stripe_payment_intent_id ? `
+        <button id="pay-clear-${b.id}" class="btn btn-outline btn-sm" onclick="clearClientPayment('${b.id}')"
+                style="color:#dc2626;border-color:#dc2626" title="Marks the deposit unpaid and wipes the recorded amount, method, note and ref">Clear Payment</button>` : ''}
         <span class="save-flash" id="pay-flash-${b.id}">✓ Saved</span>
       </div>
       ${isNew ? '' : `
@@ -2710,6 +2725,48 @@ async function recordClientPayment(id) {
   } catch(e) {
     alert('Error saving payment: ' + e.message);
     btn.disabled = false; btn.textContent = 'Save Payment';
+  }
+}
+
+// ── Undo a manually recorded payment ─────────────────────────────────────────
+// Marking a payment used to be one-way: deposit_paid went TRUE and nothing on
+// the screen could put it back. This clears the manual record.
+//
+// Refuses outright on a Stripe-paid booking. There the money genuinely moved,
+// and quietly flipping deposit_paid to FALSE would leave the row disagreeing
+// with Stripe while the customer is still out of pocket — that is what Process
+// Refund is for.
+//
+// deposit_amount and balance_due are deliberately untouched: they are the
+// QUOTE (what was asked for), not the payment (what arrived). Only Stripe and
+// the quote builder move those, and clearing a mis-keyed payment must not
+// silently re-price the booking.
+async function clearClientPayment(id) {
+  const b = allBookings.find(x => String(x.id) === String(id));
+  if (!b) return;
+  if (b.stripe_payment_intent_id) {
+    alert('This deposit was paid through Stripe, so it cannot be cleared here.\n\nUse "Process Refund" if the money needs to go back.');
+    return;
+  }
+  const amt = Number(b.payment_amount) > 0 ? `$${Number(b.payment_amount).toFixed(2)}` : 'the recorded payment';
+  if (!confirm(`Clear ${amt} for ${b.client_name || 'this booking'}?\n\nThe deposit goes back to unpaid and the amount, method, note and ref are wiped. The quote and balance due are not changed.`)) return;
+
+  const btn = document.getElementById('pay-clear-' + id);
+  if (btn) { btn.disabled = true; btn.textContent = 'Clearing…'; }
+  try {
+    await patch(id, {
+      deposit_paid: false,
+      payment_amount: null,
+      payment_method: '',
+      payment_note: '',
+      payment_ref: '',
+      deposit_paid_at: '',   // booking.js:100 turns '' into NULL for this column
+    });
+    await loadBookings();
+    openBooking(id);
+  } catch (e) {
+    alert('Error clearing payment: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Clear Payment'; }
   }
 }
 

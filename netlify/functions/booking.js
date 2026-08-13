@@ -49,6 +49,32 @@ const createStripeLink = async (booking) => {
 
 
 // ── Handler ───────────────────────────────────────────────────────────────────
+// What the activity log should say about a payment edit, or null when this
+// PATCH is not one.
+//
+// Recording a payment and CLEARING a mis-keyed one arrive in the same shape —
+// both send payment_amount and payment_method — so they are told apart by the
+// values, not by the keys. Without this, clearing logged "Payment recorded
+// $0.00", which reads as a real payment of nothing against a booking whose
+// deposit just went back to unpaid. The previous amount is carried into the
+// detail so the trail records what was undone, not merely that something was.
+function paymentLogEntry(u, prev = {}) {
+  if (u.payment_amount === undefined || u.payment_method === undefined) return null;
+
+  if (!(Number(u.payment_amount) > 0) && !u.payment_method) {
+    const had = Number(prev.payment_amount || 0) > 0
+      ? `was $${Number(prev.payment_amount).toFixed(2)}${prev.payment_method ? ' ' + prev.payment_method : ''}`
+      : 'no amount was recorded';
+    return { action: 'Payment cleared', detail: had };
+  }
+
+  const ref = u.payment_ref ? ` — Ref: ${u.payment_ref}` : '';
+  return {
+    action: 'Payment recorded',
+    detail: `$${Number(u.payment_amount).toFixed(2)} ${u.payment_method}${ref}`,
+  };
+}
+
 exports.handler = async (event) => {
   const pre = preflight(event);
   if (pre) return pre;
@@ -334,11 +360,8 @@ exports.handler = async (event) => {
         if (u.status && prevStatus !== u.status) {
           await logChange(c, parseInt(id), 'Status changed', `${prevStatus} → ${u.status}`);
         }
-        if (u.payment_amount !== undefined && u.payment_method !== undefined) {
-          const amt = `$${Number(u.payment_amount).toFixed(2)} ${u.payment_method}`;
-          const ref = u.payment_ref ? ` — Ref: ${u.payment_ref}` : '';
-          await logChange(c, parseInt(id), 'Payment recorded', amt + ref);
-        }
+        const payLog = paymentLogEntry(u, prev);
+        if (payLog) await logChange(c, parseInt(id), payLog.action, payLog.detail);
         if (u.contract_signed !== undefined || u.contractSigned !== undefined) {
           const signed = u.contract_signed ?? u.contractSigned;
           await logChange(c, parseInt(id), signed ? 'Contract signed' : 'Contract unsigned', '');
@@ -393,3 +416,5 @@ exports.handler = async (event) => {
     }
   });
 };
+
+module.exports.paymentLogEntry = paymentLogEntry;
