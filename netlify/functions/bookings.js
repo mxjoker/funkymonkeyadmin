@@ -8,12 +8,20 @@ const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems,
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
-// Public field subset per API contract
+// Public field subset per API contract.
+//
+// Every name here must be a real bookings column: pickPublicFields does
+// `row[f] ?? null`, so a name that is not one serialises as null forever
+// without erroring. start_time, end_time, venue_name and event_address were
+// exactly that until 2026-08-12 — four nulls in every public response, no
+// column, no writer, no reader. The live columns are `event_location` (the
+// address, already listed) and `venue` (the venue name, deliberately not
+// exposed publicly).
 const PUBLIC_FIELDS = [
   'reference', 'status', 'service_id', 'service_name', 'event_type',
   'event_date', 'event_time', 'event_zip', 'event_location',
-  'start_time', 'end_time', 'guest_count', 'venue_name',
-  'event_address', 'client_name', 'client_email', 'addons', 'total_price', 'mileage_cost',
+  'guest_count',
+  'client_name', 'client_email', 'addons', 'total_price', 'mileage_cost',
   'deposit_amount', 'deposit_paid', 'balance_due', 'payment_amount', 'created_at',
   'items',
 ];

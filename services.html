@@ -249,13 +249,9 @@
       <button class="filter-btn" data-price="high" onclick="filterByPrice('high')">$500+</button>
     </div>
 
-    <!-- Category Tabs -->
-    <div class="tabs">
+    <!-- Category Tabs — rendered from the catalogue's categories table -->
+    <div class="tabs" id="category-tabs">
       <button class="tab active" onclick="filterByCategory('all')">All Services</button>
-      <button class="tab" onclick="filterByCategory('shows')">🎭 Shows</button>
-      <button class="tab" onclick="filterByCategory('performers')">🎪 Performers</button>
-      <button class="tab" onclick="filterByCategory('experiences')">🎉 Experiences</button>
-      <button class="tab" onclick="filterByCategory('library')">📚 Library</button>
     </div>
 
     <!-- Services Grid -->
@@ -285,6 +281,7 @@
         const res = await fetch('/api/services');
         const data = await res.json();
         allServices = data.services.filter(s => s.active);
+        renderCategoryTabs(data.categories);
         renderServices();
       } catch(e) {
         document.getElementById('services-grid').innerHTML = `
@@ -293,6 +290,24 @@
             <p>Failed to load services. Please try again.</p>
           </div>`;
       }
+    }
+
+    // A tab per live category, after the fixed "All Services". Only categories
+    // that actually have a visible service get one — an empty tab leads to a
+    // "no results" screen and looks broken.
+    function renderCategoryTabs(categories) {
+      const used = new Set(allServices.map(s => s.category));
+      const tabs = (categories || [])
+        .filter(c => c && c.category_id && c.active !== false && used.has(c.category_id))
+        // The id goes into a single-quoted onclick argument and esc() does not
+        // escape single quotes. Ids are generated id-safe, so anything else is
+        // hand-edited data: drop the tab rather than emit a broken or unsafe
+        // one. Sanitising in place would silently filter on the wrong id.
+        .filter(c => /^[a-zA-Z0-9_-]+$/.test(c.category_id))
+        .map(c => `<button class="tab" onclick="filterByCategory('${c.category_id}')">${esc(c.icon || '')} ${esc(c.label)}</button>`)
+        .join('');
+      document.getElementById('category-tabs').innerHTML =
+        `<button class="tab active" onclick="filterByCategory('all')">All Services</button>${tabs}`;
     }
 
     function renderServices() {

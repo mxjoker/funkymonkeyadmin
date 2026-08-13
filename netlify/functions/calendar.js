@@ -94,6 +94,21 @@ const VTIMEZONE = [
   'END:VTIMEZONE',
 ];
 
+// The calendar title uses the service's internal short_name ("Foam 45min
+// Single Cannon") in place of the customer-facing name ("Foam Party — Single
+// Cannon"), which says nothing about length.
+//
+// One catch: service_name is a ' + ' join of EVERY service on the booking
+// (_items.js rollupItems), while short_name names only the first. Dropping to
+// short_name alone would silently hide the extras, so the count comes along.
+// A booking with no service_id — a custom quote — has no short_name and keeps
+// the stored service_name.
+function summaryName(b) {
+  if (!b.short_name) return b.service_name || 'Event';
+  const extra = String(b.service_name || '').split(' + ').length - 1;
+  return extra > 0 ? `${b.short_name} +${extra}` : b.short_name;
+}
+
 function buildEvent(b, staff, now) {
   const uid = `booking-${b.id}@funkymonkeyadmin`;
   const time = parseTime(b.event_time);
@@ -114,7 +129,7 @@ function buildEvent(b, staff, now) {
   }
 
   const who = b.client_name || 'Unnamed';
-  lines.push(`SUMMARY:${esc(`${b.service_name || 'Event'} — ${who}`)}`);
+  lines.push(`SUMMARY:${esc(`${summaryName(b)} — ${who}`)}`);
 
   const loc = [b.event_location, b.event_zip].filter(Boolean).join(', ');
   if (loc) lines.push(`LOCATION:${esc(loc)}`);
@@ -163,7 +178,7 @@ async function buildFeed(client) {
             b.guest_count, b.notes, b.deposit_paid,
             b.total_price::float8 AS total_price, b.balance_due::float8 AS balance_due,
             b.mileage_cost::float8 AS mileage_cost,
-            s.duration_minutes
+            s.duration_minutes, s.short_name
        FROM bookings b
        LEFT JOIN services s ON s.service_id = b.service_id
       WHERE b.event_date IS NOT NULL

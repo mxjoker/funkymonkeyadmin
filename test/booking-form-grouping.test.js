@@ -17,7 +17,11 @@ function loadHelpers() {
   vm.createContext(ctx);
   vm.runInContext(
     HTML.slice(a, b) +
-    '\nout = { groupByCategory, shouldSection, CATEGORY_ORDER, resolveAddon, step2Subtotal, sectionKeyToOpen };',
+    // CATEGORY_ORDER/META are reassigned by setCategories, so they are exposed
+    // through getters — a plain snapshot would freeze the fallback values and
+    // hide whatever setCategories actually did.
+    '\nout = { groupByCategory, shouldSection, CATEGORY_ORDER, resolveAddon, step2Subtotal, sectionKeyToOpen,' +
+    '\n        setCategories, get order() { return CATEGORY_ORDER }, get meta() { return CATEGORY_META } };',
     ctx
   );
   return ctx.out;
@@ -223,4 +227,74 @@ test('sectionKeyToOpen falls back to the first section when svcId matches no sec
 
 test('sectionKeyToOpen returns null for an empty sections array', () => {
   assert.strictEqual(sectionKeyToOpen([], 'anything'), null);
+});
+
+// ── Categories now come from the DB (the `categories` table) ─────────────────
+// Each of these loads its OWN helper context: setCategories reassigns
+// module-level state, so sharing one context would leak between tests.
+
+test('DB categories replace the hardcoded fallback, order and all', () => {
+  const h = loadHelpers();
+  h.setCategories([
+    { category_id: 'most_popular', label: 'Most Popular',       icon: '⭐', active: true },
+    { category_id: 'magic',        label: 'Magic',              icon: '🎩', active: true },
+    { category_id: 'foam',         label: 'Foam Parties',       icon: '🫧', active: true },
+    { category_id: 'other',        label: 'Other Entertainment', icon: '✨', active: true },
+  ]);
+  assert.deepStrictEqual(plain(h.order), ['most_popular', 'magic', 'foam', 'other']);
+
+  const catOf2 = (id) => ({ a: 'magic', b: 'foam', c: 'most_popular' })[id];
+  const sections = h.groupByCategory(['a', 'b', 'c'], catOf2);
+  // Rendered in the categories' sort order, not the order the ids arrived in.
+  assert.deepStrictEqual(plain(sections.map(s => s.key)),   ['most_popular', 'magic', 'foam']);
+  assert.deepStrictEqual(plain(sections.map(s => s.label)), ['Most Popular', 'Magic', 'Foam Parties']);
+  assert.deepStrictEqual(plain(sections.map(s => s.icon)),  ['⭐', '🎩', '🫧']);
+});
+
+test('an empty or missing categories payload keeps the fallback', () => {
+  // A stale function or a failed fetch must not collapse every service into
+  // one "More Options" heap on a live customer-facing form.
+  for (const payload of [undefined, null, [], [{ label: 'no id' }]]) {
+    const h = loadHelpers();
+    h.setCategories(payload);
+    assert.deepStrictEqual(plain(h.order), ['shows', 'performers', 'experiences', 'library']);
+  }
+});
+
+test('a deactivated category stops being a section', () => {
+  const h = loadHelpers();
+  h.setCategories([
+    { category_id: 'magic', label: 'Magic',        icon: '🎩', active: true  },
+    { category_id: 'foam',  label: 'Foam Parties', icon: '🫧', active: false },
+  ]);
+  assert.deepStrictEqual(plain(h.order), ['magic']);
+});
+
+test('services in a deactivated category still render, under More Options', () => {
+  // This is the whole safety net: switching a category off in admin must never
+  // make its services vanish from the booking form.
+  const h = loadHelpers();
+  h.setCategories([
+    { category_id: 'magic', label: 'Magic',        icon: '🎩', active: true  },
+    { category_id: 'foam',  label: 'Foam Parties', icon: '🫧', active: false },
+  ]);
+  const sections = h.groupByCategory(['m1', 'f1', 'f2'], (id) => id[0] === 'm' ? 'magic' : 'foam');
+  assert.deepStrictEqual(plain(sections.map(s => s.key)), ['magic', 'other']);
+  assert.deepStrictEqual(plain(sections.find(s => s.key === 'other').ids), ['f1', 'f2']);
+  assert.strictEqual(sections.find(s => s.key === 'other').label, 'More Options');
+});
+
+test('a category id absent from the table falls through, it does not disappear', () => {
+  const h = loadHelpers();
+  h.setCategories([{ category_id: 'magic', label: 'Magic', icon: '🎩', active: true }]);
+  const sections = h.groupByCategory(['x'], () => 'deleted_category');
+  assert.deepStrictEqual(plain(sections.map(s => s.key)), ['other']);
+  assert.deepStrictEqual(plain(sections[0].ids), ['x']);
+});
+
+test('a category with no label falls back to its id rather than an empty heading', () => {
+  const h = loadHelpers();
+  h.setCategories([{ category_id: 'magic', label: '', icon: '', active: true }]);
+  assert.strictEqual(h.meta.magic.label, 'magic');
+  assert.strictEqual(h.meta.magic.icon, '✨');
 });

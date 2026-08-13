@@ -409,15 +409,6 @@ input,select,textarea{font-family:inherit}
               <option value="unpaid">Unpaid</option>
             </select>
             
-            <select id="sort-by" onchange="renderBookingsTable()" style="min-width:160px">
-              <option value="created_desc">Sort: Newest Inquiry</option>
-              <option value="created_asc">Sort: Oldest Inquiry</option>
-              <option value="event_desc">Sort: Event (Latest)</option>
-              <option value="event_asc">Sort: Event (Soonest)</option>
-              <option value="name_asc">Sort: Client A-Z</option>
-              <option value="price_desc">Sort: Price (High-Low)</option>
-              <option value="price_asc">Sort: Price (Low-High)</option>
-            </select>
           </div>
           
           <!-- Row 2: Quick Toggle Filters -->
@@ -440,7 +431,7 @@ input,select,textarea{font-family:inherit}
       
       <div class="card">
         <table class="bk-table">
-          <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th><th></th></tr></thead>
+          <thead id="bookings-thead"></thead>
           <tbody id="bookings-tbody"></tbody>
         </table>
       </div>
@@ -1151,7 +1142,17 @@ function renderActionNeeded() {
     return assigned < required;
   }).sort((a,b) => new Date(a.event_date) - new Date(b.event_date));
 
-  const allClear = reviewList.length === 0 && depositList.length === 0 && staffingList.length === 0;
+  // Catch-all. Every other list here keys off STATUS, so a lead that arrived
+  // without a service, or priced at $0, is invisible until someone happens to
+  // open it — Kristal Rohrbaugh's fundraiser sat `confirmed` at $0 and matched
+  // none of the panels above. This one keys off missing DATA instead, so a
+  // booking that does not map to the catalogue still surfaces rather than
+  // quietly aging out.
+  const incompleteList = allBookings.filter(b => incompleteReasons(b).length)
+    .sort((a, b) => String(a.event_date || '').localeCompare(String(b.event_date || '')));
+
+  const allClear = reviewList.length === 0 && depositList.length === 0
+    && staffingList.length === 0 && incompleteList.length === 0;
 
   // ── Badge helper ─────────────────────────────────────────────────────────
   function badge(type, count, label) {
@@ -1159,8 +1160,9 @@ function renderActionNeeded() {
     const active = activeActionBadge === type;
     const arrow = active ? '▲' : '→';
     const styles = {
-      review:  'background:#fef3c7;border:1px solid #f59e0b;color:#92400e',
-      deposit: 'background:#fee2e2;border:1px solid #ef4444;color:#991b1b',
+      review:     'background:#fef3c7;border:1px solid #f59e0b;color:#92400e',
+      deposit:    'background:#fee2e2;border:1px solid #ef4444;color:#991b1b',
+      incomplete: 'background:#ede9fe;border:1px solid #7c3aed;color:#5b21b6',
     };
     const activeStyle = active ? 'box-shadow:0 2px 6px rgba(245,158,11,.3);font-weight:900;' : '';
     return `<div onclick="toggleActionBadge('${type}')" style="cursor:pointer;border-radius:6px;padding:6px 12px;font-size:.75rem;font-weight:700;${styles[type]};${activeStyle}">
@@ -1209,6 +1211,28 @@ function renderActionNeeded() {
       <div style="font-size:.68rem;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">No Deposit Link — click any row to open</div>
       ${miniTable(depositList, true)}
     </div>`;
+  } else if (activeActionBadge === 'incomplete' && incompleteList.length) {
+    expandedHTML = `<div style="border-top:2px solid #7c3aed;margin-top:10px;padding-top:10px">
+      <div style="font-size:.68rem;font-weight:700;color:#5b21b6;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Incomplete — click any row to open</div>
+      <table style="width:100%;border-collapse:collapse;font-size:.78rem">
+        <thead><tr style="border-bottom:1px solid #f3f4f6">
+          <th style="text-align:left;padding:4px 6px;color:#9ca3af;font-size:.68rem;font-weight:600">Ref</th>
+          <th style="text-align:left;padding:4px 6px;color:#9ca3af;font-size:.68rem;font-weight:600">Client</th>
+          <th style="text-align:left;padding:4px 6px;color:#9ca3af;font-size:.68rem;font-weight:600">Date</th>
+          <th style="text-align:left;padding:4px 6px;color:#9ca3af;font-size:.68rem;font-weight:600">Status</th>
+          <th style="text-align:left;padding:4px 6px;color:#9ca3af;font-size:.68rem;font-weight:600">Missing</th>
+        </tr></thead>
+        <tbody>${incompleteList.map(b => `
+          <tr style="cursor:pointer;border-bottom:1px solid #fafafa" onclick="openBooking('${b.id}')">
+            <td style="padding:4px 6px"><code style="font-size:.72rem;color:#7c3aed">${esc(b.reference||'—')}</code></td>
+            <td style="padding:4px 6px;font-weight:600">${esc(b.client_name||'—')}</td>
+            <td style="padding:4px 6px;color:#6b7280">${b.event_date ? fmtDate(b.event_date) : '—'}</td>
+            <td style="padding:4px 6px"><span class="badge badge-${b.status||'review'}">${b.status||'review'}</span></td>
+            <td style="padding:4px 6px;color:#b45309;font-weight:600">${incompleteReasons(b).join(' · ')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
   }
 
   // ── Staffing detail (always visible when items exist) ─────────────────────
@@ -1232,8 +1256,9 @@ function renderActionNeeded() {
   el.innerHTML = `<div style="padding:14px 16px">
     <div style="font-size:.7rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">⚡ Action Needed</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      ${badge('review',  reviewList.length,  'Needs Review')}
-      ${badge('deposit', depositList.length, 'No Deposit Link')}
+      ${badge('review',     reviewList.length,     'Needs Review')}
+      ${badge('deposit',    depositList.length,    'No Deposit Link')}
+      ${badge('incomplete', incompleteList.length, 'Incomplete')}
       ${staffingList.length > 0 ? `<div style="border-radius:6px;padding:6px 12px;font-size:.75rem;font-weight:700;background:#fef3c7;border:1px solid #f59e0b;color:#92400e">${staffingList.length} Unstaffed ↓</div>` : ''}
     </div>
     ${expandedHTML}
@@ -1333,7 +1358,7 @@ function exportBookingsCSV() {
     ['Event Type',     b => b.event_type],
     ['Guest Count',    b => b.guest_count],
     ['ZIP',            b => b.event_zip],
-    ['Location',       b => b.event_location],
+    ['Address',        b => b.event_location],
     ['Child Name',     b => b.child_name || ''],
     ['Total Price',    b => Number(b.total_price||0).toFixed(2)],
     ['Deposit',        b => Number(b.deposit_amount||0).toFixed(2)],
@@ -1358,13 +1383,109 @@ function exportBookingsCSV() {
   URL.revokeObjectURL(url);
 }
 
+// ══ PURE HELPERS — extracted verbatim by test/bookings-sort.test.js ══
+// Nothing in this block may touch the DOM or page state. It is evaluated in a
+// bare vm context by the tests.
+
+// Clickable column headers for the bookings table. One row per column: the
+// header label and how to read the field off a booking. Adding a sortable
+// column is one entry here, nothing else.
+const BOOKING_COLUMNS = [
+  { key: 'reference', label: 'Ref',        get: b => b.reference || '' },
+  { key: 'client',    label: 'Client',     get: b => (b.client_name  || '').toLowerCase() },
+  { key: 'service',   label: 'Service',    get: b => (b.service_name || '').toLowerCase() },
+  { key: 'event',     label: 'Event Date', get: b => b.event_date || '' },
+  { key: 'total',     label: 'Total',      get: b => Number(b.total_price) || 0 },
+  { key: 'status',    label: 'Status',     get: b => b.status || '' },
+];
+
+// created_at has no column of its own — it is the default order only.
+const CREATED_COL = { key: 'created', get: b => b.created_at || '' };
+
+// Clicking the active column flips direction. A fresh column starts ascending
+// — soonest event, A-Z client — except Total, where the useful first look is
+// the biggest number.
+function nextSort(current, key) {
+  if (current.key === key) return { key, dir: current.dir === 'asc' ? 'desc' : 'asc' };
+  return { key, dir: key === 'total' ? 'desc' : 'asc' };
+}
+
+// What a booking is missing before it can actually be worked. Empty array
+// means nothing is wrong. Order matters — the first reason is the headline
+// shown on the row.
+//
+// Deliberately status-blind: an import that guessed wrong lands in whatever
+// status PPM had, not always 'review', so filtering by status misses them.
+function incompleteReasons(b) {
+  const status = b.status || 'review';
+  if (status === 'cancelled' || status === 'completed' || status === 'draft') return [];
+  // Past events are somebody else's problem — this panel is about work still
+  // to come. Undated bookings count: no date is itself the thing to fix.
+  const today = new Date().toISOString().slice(0, 10);
+  if (b.event_date && String(b.event_date).slice(0, 10) < today) return [];
+
+  const reasons = [];
+  if (!b.service_id) reasons.push('no service');
+  if (!(Number(b.total_price) > 0)) reasons.push('not priced');
+  if (!b.event_date) reasons.push('no date');
+  if (!b.event_time) reasons.push('no time');
+  if (!b.event_zip) reasons.push('no ZIP');
+  return reasons;
+}
+
+function sortBookings(list, { key, dir }) {
+  const col = BOOKING_COLUMNS.find(c => c.key === key) || CREATED_COL;
+  const mul = dir === 'asc' ? 1 : -1;
+  return list.sort((a, b) => {
+    const x = col.get(a), y = col.get(b);
+    // A booking with no date or no client name sorts to the bottom whichever
+    // way the arrow points — blanks are missing data, not "earliest".
+    if (x === '' || y === '') return x === y ? 0 : (x === '' ? 1 : -1);
+    const cmp = typeof x === 'number' ? x - y : String(x).localeCompare(String(y));
+    return cmp * mul;
+  });
+}
+
+// "13:07" -> "13:00", "13:08" -> "13:15". Also accepts the "14:30:00" that
+// Postgres time columns hand back. Empty stays empty so clearing still clears.
+function roundTo15(value) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(value || ''));
+  if (!m) return '';
+  let h = Math.min(23, Number(m[1]));
+  let slot = Math.round(Math.min(59, Number(m[2])) / 15) * 15;
+  if (slot === 60) { slot = 0; h += 1; }
+  // 23:53 would round up to 24:00, which no time input can hold — and an event
+  // must not jump to the next day because of rounding. Clamp to 23:45.
+  if (h > 23) { h = 23; slot = 45; }
+  return `${String(h).padStart(2, '0')}:${String(slot).padStart(2, '0')}`;
+}
+
+// ══ END PURE HELPERS ══
+
+// Default matches the old "Newest Inquiry" dropdown default, so the view the
+// dashboard opens on is unchanged.
+let bookingSort = { key: 'created', dir: 'desc' };
+
+function sortBookingsBy(key) {
+  bookingSort = nextSort(bookingSort, key);
+  renderBookingsTable();
+}
+
+function renderBookingsHead() {
+  const cells = BOOKING_COLUMNS.map(c => {
+    const arrow = bookingSort.key !== c.key ? '' : (bookingSort.dir === 'asc' ? ' ▲' : ' ▼');
+    return `<th onclick="sortBookingsBy('${c.key}')" style="cursor:pointer;user-select:none"
+                title="Sort by ${c.label}">${c.label}${arrow}</th>`;
+  }).join('');
+  document.getElementById('bookings-thead').innerHTML = `<tr>${cells}<th></th></tr>`;
+}
+
 function renderBookingsTable() {
   // Get all filter values
   const statusFilter = document.getElementById('filter-status').value;
   const search = (document.getElementById('filter-search').value || '').toLowerCase().trim();
   const dateRange = document.getElementById('filter-date-range').value;
   const depositFilter = document.getElementById('filter-deposit').value;
-  const sortBy = document.getElementById('sort-by').value;
   const hidePast = document.getElementById('filter-hide-past').checked;
   const hideCancelled = document.getElementById('filter-hide-cancelled').checked;
   const hideCompleted = document.getElementById('filter-hide-completed').checked;
@@ -1375,7 +1496,9 @@ function renderBookingsTable() {
   const nextMonthStart = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString().split('T')[0];
   const nextMonthEnd = new Date(new Date().getFullYear(), new Date().getMonth() + 2, 0).toISOString().split('T')[0];
 
-  let list = allBookings;
+  // Copy: sortBookings sorts in place, and with no filters active `list` would
+  // otherwise be allBookings itself.
+  let list = [...allBookings];
 
   // Apply filters
   if (statusFilter) {
@@ -1419,24 +1542,10 @@ function renderBookingsTable() {
     list = list.filter(b => b.status !== 'completed');
   }
 
-  // Apply sorting
-  if (sortBy === 'created_desc') {
-    list.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
-  } else if (sortBy === 'created_asc') {
-    list.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
-  } else if (sortBy === 'event_desc') {
-    list.sort((a, b) => (b.event_date || '').localeCompare(a.event_date || ''));
-  } else if (sortBy === 'event_asc') {
-    list.sort((a, b) => (a.event_date || '').localeCompare(b.event_date || ''));
-  } else if (sortBy === 'name_asc') {
-    list.sort((a, b) => (a.client_name || '').localeCompare(b.client_name || ''));
-  } else if (sortBy === 'price_desc') {
-    list.sort((a, b) => (Number(b.total_price) || 0) - (Number(a.total_price) || 0));
-  } else if (sortBy === 'price_asc') {
-    list.sort((a, b) => (Number(a.total_price) || 0) - (Number(b.total_price) || 0));
-  }
+  sortBookings(list, bookingSort);
 
   // Render results
+  renderBookingsHead();
   document.getElementById('bookings-tbody').innerHTML = list.length
     ? list.map(b => bookingRow(b, true)).join('')
     : `<tr><td colspan="7" class="table-empty">No bookings match your filters</td></tr>`;
@@ -1474,6 +1583,25 @@ function upcomingGigRow(b) {
 // Renders one editable cell in the booking detail grid. `name` must be a key
 // the PATCH allowlist accepts (booking.js colMap) — anything else is silently
 // dropped by the API.
+// Same seven options the customer picks from at booking-form.html:286. Typed
+// free-hand here they fragment the Analytics "Source" breakdown, which groups
+// on the raw string.
+const REFERRAL_SOURCES = [
+  'Google Search', 'Facebook', 'Instagram',
+  'Friend / Word of Mouth', 'Nextdoor', 'Repeat Customer', 'Other',
+];
+
+// The eight EVENT_TYPES labels from booking-form.html:514. The public form
+// sends the label, not the id, so these must stay the labels verbatim.
+const EVENT_TYPE_LABELS = [
+  'Kids Birthday Party', 'Family Gathering', 'School Assembly', 'School Fundraiser',
+  'Corporate Event', 'Community Event', 'Wedding', 'Library Summer Reading',
+];
+
+const CUSTOMER_TYPES = ['Individual', 'Corporate', 'Venue / Planner', 'School / PTA', 'Library', 'Non-profit'];
+
+const DEPOSIT_METHODS = ['Stripe', 'Cash', 'Venmo', 'Check', 'Card (manual)', 'Invoice', 'Waived'];
+
 function bookingField(label, name, value, type = 'text', opts = null) {
   const v = value === null || value === undefined ? '' : String(value);
   // A stored value that matches none of the presets (e.g. legacy lowercase
@@ -1486,7 +1614,10 @@ function bookingField(label, name, value, type = 'text', opts = null) {
          ${unmatched ? `<option value="${esc(v)}" selected>${esc(v)}</option>` : ''}
          ${opts.map(o => `<option value="${esc(o)}" ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}
        </select>`
-    : `<input class="bk-edit" data-f="${name}" data-orig="${esc(v)}" type="${type}" value="${esc(v)}">`;
+    : `<input class="bk-edit" data-f="${name}" data-orig="${esc(v)}" type="${type}" value="${esc(v)}"${
+        // Times snap to :00/:15/:30/:45. step alone only drives the spinner —
+        // a typed 12:07 still sticks — so the value is rounded on change too.
+        type === 'time' ? ' step="900" onchange="this.value=roundTo15(this.value)"' : ''}>`;
   return `<div class="detail-field"><label>${label}</label>${input}</div>`;
 }
 
@@ -1587,17 +1718,17 @@ function openBooking(id) {
       ${bookingField('Organisation', 'organisation_name', b.organisation_name)}
       ${bookingField('Phone', 'client_phone', b.client_phone, 'tel')}
       ${bookingField('Email', 'client_email', b.client_email, 'email')}
-      ${bookingField('Referral', 'referral_source', b.referral_source)}
-      ${bookingField('Customer Type', 'customer_type', b.customer_type)}
+      ${bookingField('Referral', 'referral_source', b.referral_source, 'text', REFERRAL_SOURCES)}
+      ${bookingField('Customer Type', 'customer_type', b.customer_type, 'text', CUSTOMER_TYPES)}
       ${bookingField('Event Date', 'event_date', (b.event_date || '').slice(0, 10), 'date')}
       ${bookingField('Event Time', 'event_time', b.event_time, 'time')}
       ${bookingField('Occasion', 'occasion', b.occasion, 'text',
         ['Birthday','Fun day / Carnival','Wedding','Corporate','Community','School','Library','Other'])}
-      ${bookingField('Event Type', 'event_type', b.event_type)}
+      ${bookingField('Event Type', 'event_type', b.event_type, 'text', EVENT_TYPE_LABELS)}
       ${bookingField('Guests', 'guest_count', b.guest_count, 'number')}
       ${bookingField('ZIP', 'event_zip', b.event_zip)}
-      ${bookingField('Location', 'event_location', b.event_location)}
-      ${bookingField('Venue', 'venue', b.venue)}
+      ${bookingField('Address', 'event_location', b.event_location)}
+      ${bookingField('Venue Name', 'venue', b.venue)}
       ${bookingField('Surface', 'surface_type', b.surface_type, 'text',
         ['Grass','Concrete','Asphalt','Indoor — hard floor','Indoor — carpet','Turf','Other'])}
       ${bookingField('🎂 Birthday Person', 'child_name', b.child_name)}
@@ -1645,7 +1776,11 @@ function openBooking(id) {
       <div class="q-row sub">
         <span>Deposit method / ref</span>
         <span style="display:flex;gap:6px">
-          <input class="bk-edit" data-f="deposit_method" data-orig="${esc(b.deposit_method || '')}" value="${esc(b.deposit_method || '')}" placeholder="Stripe / cash / Venmo" style="max-width:150px">
+          <select class="bk-edit" data-f="deposit_method" data-orig="${esc(b.deposit_method || '')}" style="max-width:150px">
+            <option value=""></option>
+            ${DEPOSIT_METHODS.includes(b.deposit_method || '') || !b.deposit_method ? '' : `<option value="${esc(b.deposit_method)}" selected>${esc(b.deposit_method)}</option>`}
+            ${DEPOSIT_METHODS.map(m => `<option value="${esc(m)}" ${m === (b.deposit_method || '') ? 'selected' : ''}>${esc(m)}</option>`).join('')}
+          </select>
           <input class="bk-edit" data-f="deposit_ref" data-orig="${esc(b.deposit_ref || '')}" value="${esc(b.deposit_ref || '')}" placeholder="ref" style="max-width:110px">
         </span>
       </div>
@@ -3773,6 +3908,7 @@ async function saveStaffPreferences() {
 // ══════════════════════════════════════════════════
 // CATALOGUE
 // ══════════════════════════════════════════════════
+let catCategories = []; // editable catalogue categories, from /api/services
 let catSlots = []; // service staff slot definitions
 let catSkillTags = []; // all known skill tags (loaded from DB or fallback)
 let catServiceAddons = {}; // { service_id: [addon_id, ...] }
@@ -3789,8 +3925,9 @@ async function loadCatalogue() {
       apiFetch('/api/staff-assignments?time_templates=true')
     ]);
     const data = await svcRes.json();
-    catServices = data.services || [];
-    catAddons   = data.addons   || [];
+    catServices   = data.services   || [];
+    catAddons     = data.addons     || [];
+    catCategories = data.categories || [];
     catSlots    = (await slotsRes.json()).slots || [];
     catTimeTemplates = {};
     ((await tmplRes.json()).templates || []).forEach(t => { catTimeTemplates[t.service_id] = t; });
@@ -3804,9 +3941,79 @@ async function loadCatalogue() {
   }
 }
 
+// Category ids a service can currently be filed under. Inactive categories are
+// excluded — you can move a service out of one, never into one.
+function activeCategories() {
+  return catCategories.filter(c => c.active !== false);
+}
+
+// Every category that needs a section, in display order: the live ones, plus
+// any id still referenced by a service but no longer in the table (deactivated,
+// or legacy data). Without the second half those services would vanish from
+// this screen entirely and there would be no way to file them anywhere.
+function catalogueSections() {
+  const known = new Set(catCategories.map(c => c.category_id));
+  const orphans = [...new Set(catServices.map(s => s.category).filter(c => c && !known.has(c)))];
+  return [
+    ...catCategories,
+    ...orphans.map(id => ({ category_id: id, label: id, icon: '⚠️', active: false, orphan: true })),
+  ];
+}
+
+// Categories are edited in the same save cycle as services and add-ons: rows
+// carry data-category-id, saveCatalogue() posts them, and it posts them FIRST
+// so a service moved into a brand-new category has something to point at.
+function renderCategoriesEditor() {
+  const counts = {};
+  catServices.forEach(s => { counts[s.category] = (counts[s.category] || 0) + 1; });
+
+  const rows = catCategories.map(c => `
+    <tr data-category-id="${esc(c.category_id)}">
+      <td><input type="text" value="${esc(c.icon || '✨')}" style="width:40px;text-align:center" data-cfield="icon"/></td>
+      <td><input type="text" value="${esc(c.label)}" data-cfield="label" style="width:100%"/></td>
+      <td><code style="font-size:.72rem;color:#6b7280">${esc(c.category_id)}</code></td>
+      <td style="text-align:center"><input type="number" value="${Number(c.sort_order) || 0}" data-cfield="sort_order" style="width:56px;text-align:center"/></td>
+      <td style="text-align:center;font-size:.8rem;color:#6b7280">${counts[c.category_id] || 0}</td>
+      <td style="text-align:center"><input type="checkbox" ${c.active !== false ? 'checked' : ''} data-cfield="active"/></td>
+    </tr>`).join('');
+
+  return `<div class="cat-section">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <h3>🗂 Categories</h3>
+      <button class="btn btn-outline btn-sm" onclick="addNewCategory()">+ Add Category</button>
+    </div>
+    <p class="text-muted" style="margin-bottom:12px;font-size:.82rem">
+      These are the sections customers see on the booking form, in <strong>Order</strong> order.
+      Untick <strong>Shown</strong> to hide a section without deleting it — its services stay put and
+      keep working, they just move to "More Options" on the form until you re-file them.
+    </p>
+    <table class="cat-table">
+      <thead><tr>
+        <th style="width:46px">Icon</th><th>Label</th>
+        <th style="width:150px">ID</th>
+        <th style="width:70px;text-align:center">Order</th>
+        <th style="width:70px;text-align:center">Services</th>
+        <th style="width:60px;text-align:center">Shown</th>
+      </tr></thead>
+      <tbody id="categories-tbody">${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+function addNewCategory() {
+  const label = (prompt('New category name (e.g. "Foam Parties")') || '').trim();
+  if (!label) return;
+  // The id is what services store, so it must be stable and URL-ish. Derived
+  // once from the label here; renaming the label later never changes it.
+  const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 60) || 'category';
+  let id = base, n = 2;
+  while (catCategories.some(c => c.category_id === id)) id = `${base}_${n++}`;
+  const maxOrder = catCategories.reduce((m, c) => Math.max(m, Number(c.sort_order) || 0), 0);
+  catCategories.push({ category_id: id, label, icon: '✨', active: true, sort_order: maxOrder + 1 });
+  renderCatalogue();
+}
+
 function renderCatalogue() {
-  const catOrder  = ['shows','performers','experiences','library'];
-  const catLabels = { shows:'🎭 Shows', performers:'🤹 Performers', experiences:'🎊 Experiences', library:'📚 Library Programs' };
 
   // Build slot map by service_id
   const slotMap = {};
@@ -3828,18 +4035,27 @@ function renderCatalogue() {
         style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.9rem;padding:0 2px;line-height:1">×</button>
     </div>`;
 
-  let html = '';
-  catOrder.forEach(cat => {
-    const svcs = catServices.filter(s => s.category === cat);
-    if (!svcs.length) return;
+  const categoryOptions = (current) => activeCategories()
+    .map(c => `<option value="${esc(c.category_id)}" ${c.category_id === current ? 'selected' : ''}>${esc(c.icon || '')} ${esc(c.label)}</option>`)
+    .join('');
+
+  let html = renderCategoriesEditor();
+  catalogueSections().forEach(cat => {
+    const svcs = catServices.filter(s => s.category === cat.category_id);
+    // A live category renders even with no services — otherwise a category you
+    // just created has no section, and so no "+ Add Service" button to put the
+    // first one in. Empty hidden/orphan sections stay collapsed.
+    if (!svcs.length && cat.active === false) return;
     html += `<div class="cat-section">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <h3>${catLabels[cat]||cat}</h3>
-        <button class="btn btn-outline btn-sm" onclick="addNewService('${cat}')">+ Add Service</button>
+        <h3>${esc(cat.icon || '')} ${esc(cat.label)}${cat.orphan ? ' <span style="font-size:.7rem;font-weight:600;color:#b45309">— category no longer exists, re-file these</span>' : cat.active === false ? ' <span style="font-size:.7rem;font-weight:600;color:#b45309">— hidden from the booking form</span>' : ''}</h3>
+        ${cat.active === false ? '' : `<button class="btn btn-outline btn-sm" onclick="addNewService('${encUriAttr(cat.category_id)}')">+ Add Service</button>`}
       </div>
       <table class="cat-table">
         <thead><tr>
           <th style="width:46px">Icon</th><th>Name</th>
+          <th style="width:180px">Short Name<br><span style="font-weight:400;font-size:.7rem;color:#6b7280">calendar &amp; staff only</span></th>
+          <th style="width:150px">Category</th>
           <th style="width:80px">Price $</th><th style="width:70px">Mins</th>
           <th>Guest Note</th>
           <th style="width:160px">Staff Requirements</th>
@@ -3847,13 +4063,20 @@ function renderCatalogue() {
           <th style="width:160px">Shown For</th>
           <th style="width:50px;text-align:center">Active</th>
         </tr></thead>
-        <tbody>`;
+        <tbody data-category="${esc(cat.category_id)}">`;
     svcs.forEach(s => {
       const svcSlots = slotMap[s.service_id] || [];
       const slotRows = svcSlots.map((sl, i) => slotRowHtml(s.service_id, sl, i)).join('');
       html += `<tr data-service-id="${s.service_id}" data-category="${s.category}">
         <td><input type="text" value="${esc(s.icon||'🎪')}" style="width:40px;text-align:center" data-field="icon"/></td>
         <td><input type="text" value="${esc(s.name)}" data-field="name" style="width:100%"/></td>
+        <td><input type="text" value="${esc(s.short_name||'')}" data-field="short_name" maxlength="120"
+                   placeholder="e.g. Foam 45min Single Cannon" style="width:100%"/></td>
+        <td><select data-field="category" style="width:100%">
+          ${s.category && !activeCategories().some(c => c.category_id === s.category)
+            ? `<option value="${esc(s.category)}" selected>⚠️ ${esc(s.category)}</option>` : ''}
+          ${categoryOptions(s.category)}
+        </select></td>
         <td><input type="number" value="${Number(s.price).toFixed(0)}" data-field="price"/></td>
         <td><input type="number" value="${s.duration_minutes||120}" data-field="duration_minutes"/></td>
         <td><input type="text" value="${esc(s.guest_suggestion||'')}" data-field="guest_suggestion" style="width:100%"/></td>
@@ -4008,9 +4231,13 @@ function addSlotRowInline(btn) {
 }
 
 function addNewService(category) {
+  // The button's onclick passes the id through encUriAttr — decode first, the
+  // same way openClient does with an email.
+  category = decodeURIComponent(category);
   const serviceId = 'svc_' + Date.now();
-  const tbody = document.querySelector(`.cat-section [data-category="${category}"]`)?.closest('table')?.querySelector('tbody')
-    || document.querySelector(`.cat-section table tbody`);
+  // tbody carries data-category so this still resolves for a category with no
+  // services in it yet.
+  const tbody = document.querySelector(`.cat-section tbody[data-category="${category}"]`);
   if (!tbody) return;
   const row = document.createElement('tr');
   row.dataset.serviceId = serviceId;
@@ -4018,11 +4245,19 @@ function addNewService(category) {
   row.innerHTML = `
     <td><input type="text" value="🎪" style="width:40px;text-align:center" data-field="icon"/></td>
     <td><input type="text" value="New Service" data-field="name" style="width:100%"/></td>
+    <td><input type="text" value="" data-field="short_name" maxlength="120" placeholder="e.g. Foam 45min Single Cannon" style="width:100%"/></td>
+    <td><select data-field="category" style="width:100%">
+      ${activeCategories().map(c => `<option value="${esc(c.category_id)}" ${c.category_id === category ? 'selected' : ''}>${esc(c.icon || '')} ${esc(c.label)}</option>`).join('')}
+    </select></td>
     <td><input type="number" value="0" data-field="price"/></td>
     <td><input type="number" value="60" data-field="duration_minutes"/></td>
     <td><input type="text" value="" data-field="guest_suggestion" style="width:100%"/></td>
     <td><div class="slot-container" data-svc="${serviceId}"></div>
         <button onclick="addSlotRowInline(this)" style="font-size:.7rem;color:#7c3aed;background:none;border:none;cursor:pointer;font-weight:700;padding:2px 0">+ Add Role</button></td>
+    <td><div class="svc-addon-container" data-svc="${serviceId}" style="display:flex;flex-wrap:wrap;gap:3px;min-height:20px"></div>
+        <button onclick="openAddonPicker('${serviceId}',this)" style="font-size:.7rem;color:#7c3aed;background:none;border:none;cursor:pointer;font-weight:700;padding:2px 0;margin-top:2px">+ Add Add-on</button></td>
+    <td><div class="svc-et-container" data-svc="${serviceId}" style="display:flex;flex-wrap:wrap;gap:3px;min-height:20px"></div>
+        <button onclick="openEtPicker('${serviceId}',this)" style="font-size:.7rem;color:#1d4ed8;background:none;border:none;cursor:pointer;font-weight:700;padding:2px 0;margin-top:2px">+ Add Event Type</button></td>
     <td style="text-align:center"><input type="checkbox" checked data-field="active"/></td>`;
   tbody.appendChild(row);
   row.querySelector('[data-field="name"]').focus();
@@ -4185,8 +4420,23 @@ async function saveCatalogue() {
   btn.disabled = true; btn.textContent = 'Saving…';
 
   try {
+    // Categories first: a service moved into a category created in this same
+    // editing session needs that category to exist before it is referenced.
+    for (const row of document.querySelectorAll('#cat-content tr[data-category-id]')) {
+      const payload = { type: 'category', category_id: row.dataset.categoryId };
+      row.querySelectorAll('[data-cfield]').forEach(f => {
+        const field = f.dataset.cfield;
+        if (f.type === 'checkbox') payload[field] = f.checked;
+        else if (field === 'sort_order') payload[field] = Number(f.value);
+        else payload[field] = f.value;
+      });
+      await apiFetch('/api/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    }
+
     // Save services
     for (const row of document.querySelectorAll('#cat-content tr[data-service-id]')) {
+      // The category select is a data-field like any other, so it lands in the
+      // payload below. data-category is only the section the row rendered in.
       const payload = { service_id: row.dataset.serviceId, category: row.dataset.category };
       row.querySelectorAll('[data-field]').forEach(f => {
         const field = f.dataset.field;

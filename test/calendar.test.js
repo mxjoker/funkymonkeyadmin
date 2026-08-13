@@ -172,3 +172,44 @@ test('the calendar LOCATION carries street and zip together', () => {
   const unfolded = ics.replace(/\r\n /g, '');
   assert.match(unfolded, /LOCATION:KinderCare\\, 1812 North Eastern Ave\\, Moore\\, Oklahoma\\, 73160/);
 });
+
+// ── Calendar titles use the internal short name ──────────────────────────────
+// The customer-facing name says nothing about how long a gig runs. The
+// calendar is read on a phone at 8am, so it gets the ops name instead.
+
+test('the summary prefers the service short name over the customer name', () => {
+  const ics = buildEvent({ ...base, short_name: 'Foam 45min Single Cannon' }, [], NOW).join('\r\n');
+  assert.match(ics, /SUMMARY:Foam 45min Single Cannon — Jane Doe/);
+});
+
+test('a booking with no short name keeps the customer-facing name', () => {
+  // Custom quotes carry no service_id, so nothing to look a short name up by.
+  for (const v of ['', null, undefined]) {
+    const ics = buildEvent({ ...base, short_name: v }, [], NOW).join('\r\n');
+    assert.match(ics, /SUMMARY:Foam Party — Jane Doe/, `short_name ${JSON.stringify(v)}`);
+  }
+});
+
+test('extra services on a booking are counted, not silently dropped', () => {
+  // service_name is a ' + ' join of every service (_items.js rollupItems) but
+  // short_name names only the first. Losing the rest would understate the gig.
+  const ics = buildEvent({
+    ...base,
+    service_name: 'Foam Party — Single Cannon + Face Painting + Live Spun Cotton Candy',
+    short_name: 'Foam 45min Single Cannon',
+  }, [], NOW).join('\r\n');
+  assert.match(ics, /SUMMARY:Foam 45min Single Cannon \+2 — Jane Doe/);
+});
+
+test('a single-service booking gets no +0 suffix', () => {
+  const ics = buildEvent({
+    ...base, service_name: 'Foam Party — Single Cannon', short_name: 'Foam 45min Single Cannon',
+  }, [], NOW).join('\r\n');
+  assert.match(ics, /SUMMARY:Foam 45min Single Cannon — Jane Doe/);
+  assert.ok(!/\+0/.test(ics), 'must not emit a +0 count');
+});
+
+test('a booking with neither name still produces a valid summary', () => {
+  const ics = buildEvent({ ...base, service_name: null, short_name: null }, [], NOW).join('\r\n');
+  assert.match(ics, /SUMMARY:Event — Jane Doe/);
+});

@@ -253,8 +253,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#7c3aed}
         </div>
       </div>
       <div class="form-row">
-        <label>Venue / Address <span style="font-weight:400;color:#aaa">(optional)</span></label>
-        <input type="text" id="ev-loc" placeholder="Backyard, park, venue name…"/>
+        <label>Event Address <span style="font-weight:400;color:#aaa">(optional)</span></label>
+        <input type="text" id="ev-loc" placeholder="123 Main St, Edmond OK — or venue name"/>
       </div>
       <div class="form-row">
         <label>Additional Notes <span style="font-weight:400;color:#aaa">(optional)</span></label>
@@ -536,13 +536,31 @@ const ALL_SVC_IDS = Object.keys(SERVICES);
 // Nothing in this block may touch the DOM, network, or page state. It is
 // evaluated in a bare vm context by the tests.
 
-const CATEGORY_ORDER = ['shows', 'performers', 'experiences', 'library'];
-const CATEGORY_META = {
+// Sections come from the `categories` table via /api/services — renaming,
+// reordering or adding one is an admin edit, not a deploy. These four are only
+// the fallback for a response that carries no categories at all (a stale
+// function, a failed fetch); setCategories() replaces them wholesale when the
+// API answers. Without a fallback every service would land in "More Options".
+let CATEGORY_ORDER = ['shows', 'performers', 'experiences', 'library'];
+let CATEGORY_META = {
   shows:       { label: 'Main Shows',          icon: '🎩' },
   performers:  { label: 'Add-On Entertainers', icon: '🎨' },
   experiences: { label: 'Party Experiences',   icon: '🎊' },
   library:     { label: 'Library Programs',    icon: '📚' },
 };
+
+// Inactive categories are dropped here rather than server-side, so a category
+// switched off in admin stops being a section while its services keep working
+// — they fall through to OTHER_CATEGORY below instead of disappearing.
+function setCategories(rows) {
+  const live = (rows || []).filter(c => c && c.category_id && c.active !== false);
+  if (!live.length) return;  // keep the fallback rather than blanking the form
+  CATEGORY_ORDER = live.map(c => c.category_id);
+  CATEGORY_META = {};
+  for (const c of live) {
+    CATEGORY_META[c.category_id] = { label: c.label || c.category_id, icon: c.icon || '✨' };
+  }
+}
 // A category added in Catalogue later must still render. Without this bucket
 // those services would silently disappear from the customer-facing form.
 const OTHER_CATEGORY = { key: 'other', label: 'More Options', icon: '✨' };
@@ -651,6 +669,7 @@ async function loadAddonsFromDB() {
     const data = await res.json();
     dbAddons = data.addons || [];
     dbServiceAddons = data.service_addons || {};
+    setCategories(data.categories);
     // The catalogue already carries the grouping the form needs; it was being
     // discarded. Read it rather than duplicating 27 rows into SERVICES.
     for (const s of (data.services || [])) {
