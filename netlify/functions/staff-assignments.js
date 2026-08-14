@@ -483,14 +483,8 @@ exports.handler = async (event) => {
             staff_id = auth.staffId;
           }
 
-          const { rows } = await client.query(
-            `INSERT INTO staff_assignments (booking_id, staff_id, tag_filled, status)
-             VALUES ($1,$2,$3,$4)
-             ON CONFLICT (booking_id, staff_id, tag_filled) DO UPDATE SET status=$4, updated_at=NOW()
-             RETURNING *`,
-            [parseInt(booking_id), parseInt(staff_id), tag_filled, status || 'interested']
-          );
-          return json(200, rows[0]);
+          const row = await expressInterest(client, { booking_id, staff_id, tag_filled, status });
+          return json(200, row);
         }
 
         if (action === 'update_checklist') {
@@ -983,6 +977,24 @@ async function notifyStaffForBooking(client, booking) {
   return { notified: eligible.length, configured: true, tags, eligible: eligible.length };
 }
 
+// The one interest insert. Was inline inside the POST handler; the SMS webhook
+// is a second caller, and two copies of an upsert is how they drift.
+//
+// Staff express interest, Joe assigns — so there is no race and no atomic claim
+// here on purpose. Interest is not exclusive: two people wanting a one-slot role
+// is normal and harmless. The ON CONFLICT is what makes a Twilio webhook retry
+// idempotent: a replayed "ab" updates two rows rather than creating four.
+async function expressInterest(client, { booking_id, staff_id, tag_filled, status }) {
+  const { rows } = await client.query(
+    `INSERT INTO staff_assignments (booking_id, staff_id, tag_filled, status)
+     VALUES ($1,$2,$3,$4)
+     ON CONFLICT (booking_id, staff_id, tag_filled) DO UPDATE SET status=$4, updated_at=NOW()
+     RETURNING *`,
+    [parseInt(booking_id), parseInt(staff_id), tag_filled, status || 'interested']
+  );
+  return rows[0];
+}
+
 // Exported for use by bookings.js / booking.js — fires automatically on a new
 // or newly-confirmed booking.
 exports.notifyMatchingStaff = async function notifyMatchingStaff(booking) {
@@ -1008,3 +1020,5 @@ exports.wantsSms = wantsSms;
 exports.wantsEmail = wantsEmail;
 exports.buildOfferMap = buildOfferMap;
 exports.offerText = offerText;
+exports.expressInterest = expressInterest;
+exports.ensureTables = ensureTables;
