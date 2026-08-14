@@ -116,7 +116,7 @@ exports.handler = async () => {
       // must not cost the others their run, and a scheduled function that
       // fails quietly is how the original problem stayed invisible for months.
       const held = await flushHeldSms(client, now).catch(e => { console.error('flushHeldSms FAILED:', e.message); return { sent: 0, expired: 0, optedOut: 0, blocked: 0 }; });
-      const sent = await runScheduledAutomations(client);
+      const sent = await runScheduledAutomations(client).catch(e => { console.error('runScheduledAutomations FAILED:', e.message); return 0; });
       const dayOf = await staffDayOfReminders(client, now).catch(e => { console.error('staffDayOfReminders FAILED:', e.message); return 0; });
       const alerts = await unstaffedAlerts(client, now).catch(e => { console.error('unstaffedAlerts FAILED:', e.message); return 0; });
       return { held, sent, dayOf, alerts };

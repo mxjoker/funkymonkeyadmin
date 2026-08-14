@@ -15,6 +15,7 @@ const { withClient } = require('./_db');
 const { ensureSmsTables, sendSms, logSms, normalisePhone, parseLetters } = require('./_sms');
 const { verifyTwilio, parseForm } = require('./_twilio-sig');
 const { expressInterest, isStaffable, ensureTables: ensureStaffTables } = require('./staff-assignments');
+const { fmtEventDate } = require('./_email');
 
 // Twilio handles these at carrier level too, but a message that arrives here
 // must never reach gig logic. Keyword-only, so "can't stop thinking about it"
@@ -31,10 +32,31 @@ function classifyInbound(text) {
   return 'message';
 }
 
-function replyForLetters(picked, unknown, offerMap, closed = []) {
+// Role names repeat across gigs ("Foam Operator" on three different bookings
+// confirmed the same afternoon), so a reply that names only the role can read
+// correctly while interest landed on the wrong one. Naming the gig — service
+// + compact date — makes a mis-target visible instead of silent. `booking` is
+// the row for the offer's (single) booking_id, or null when nothing in the
+// offer resolved to a live booking (e.g. every letter was closed).
+function gigLabel(booking) {
+  if (!booking || !booking.service_name) return '';
+  const when = fmtEventDate(booking.event_date, { weekday: 'short', month: 'numeric', day: 'numeric', year: undefined });
+  return ` for ${booking.service_name}${when ? ' on ' + when : ''}`;
+}
+
+function replyForLetters(picked, unknown, offerMap, closed = [], alreadyAssigned = [], booking = null) {
   const parts = [];
+  const label = gigLabel(booking);
   if (picked.length) {
-    parts.push(`Got it — you're down as interested in ${picked.map(l => offerMap[l].tag_filled).join(' and ')}. Joe will confirm.`);
+    parts.push(`Got it — you're down as interested in ${picked.map(l => offerMap[l].tag_filled).join(' and ')}${label}. Joe will confirm.`);
+  }
+  // A late reply to a stale offer can resolve against a role the sender was
+  // already assigned to (expressInterest refuses to downgrade 'assigned'
+  // rows, but it still tells the truth about what happened). Confirming
+  // "interested" here would be a lie — they are already booked.
+  if (alreadyAssigned.length) {
+    const roles = alreadyAssigned.map(l => offerMap[l].tag_filled).join(' and ');
+    parts.push(`${roles} — you're already booked${label}, no action needed.`);
   }
   if (unknown.length) {
     parts.push(`Didn't recognise ${unknown.map(l => `'${l}'`).join(', ')} — that offer had ${Object.keys(offerMap).join(', ')}.`);
@@ -127,22 +149,35 @@ exports.handler = async (event) => {
         const { picked, unknown, freeform } = parseLetters(text, map);
         if (!freeform) {
           await ensureStaffTables(client);
-          const registered = [], closed = [];
+          const registered = [], closed = [], alreadyAssigned = [];
+          // All letters in one offer_map share the same booking_id (built by
+          // buildOfferMap from a single booking), so the first row fetched is
+          // the row for the whole reply — kept for gigLabel().
+          let bookingInfo = null;
           for (const letter of picked) {
-            const { rows: [bk] } = await client.query('SELECT status FROM bookings WHERE id=$1', [map[letter].booking_id]);
+            const { rows: [bk] } = await client.query(
+              'SELECT status, service_name, event_date FROM bookings WHERE id=$1',
+              [map[letter].booking_id]
+            );
             // The offer_map is a frozen snapshot on purpose — it is what makes
             // "b" mean the same thing an hour later. But frozen also means it
             // can outlive the gig, so the booking's CURRENT status decides
             // whether interest expressed now still means anything.
             if (!bk || !isStaffable(bk)) { closed.push(letter); continue; }
-            await expressInterest(client, {
+            bookingInfo = bookingInfo || bk;
+            // expressInterest never downgrades an 'assigned' row — a stale
+            // offer letter replied to after Joe already assigned this person
+            // must not read as a fresh "interested". Its returned row says
+            // which happened.
+            const row = await expressInterest(client, {
               booking_id: map[letter].booking_id,
               staff_id: offer.staff_id,
               tag_filled: map[letter].tag_filled
             });
-            registered.push(letter);
+            if (row && row.status === 'assigned') alreadyAssigned.push(letter);
+            else registered.push(letter);
           }
-          return replyForLetters(registered, unknown, map, closed);
+          return replyForLetters(registered, unknown, map, closed, alreadyAssigned, bookingInfo);
         }
       }
 

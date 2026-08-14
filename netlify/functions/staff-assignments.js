@@ -986,9 +986,21 @@ async function notifyStaffForBooking(client, booking) {
 // idempotent: a replayed "ab" updates two rows rather than creating four.
 async function expressInterest(client, { booking_id, staff_id, tag_filled, status }) {
   const { rows } = await client.query(
+    // 'assigned' is a stronger state than interest and must never be downgraded
+    // by this upsert. A staff member can text a stale offer letter (one that
+    // sat on their phone since before Joe assigned them) long after the 'assign'
+    // action already wrote status='assigned' for the same
+    // (booking_id, staff_id, tag_filled) row — that late reply must not flip
+    // them back to 'interested' and drop them off the day-of reminder / onto
+    // the unstaffed-alert list. Only demotion path is the admin 'unassign'
+    // action, which updates the row directly and does not go through here.
     `INSERT INTO staff_assignments (booking_id, staff_id, tag_filled, status)
      VALUES ($1,$2,$3,$4)
-     ON CONFLICT (booking_id, staff_id, tag_filled) DO UPDATE SET status=$4, updated_at=NOW()
+     ON CONFLICT (booking_id, staff_id, tag_filled) DO UPDATE
+       SET status = CASE WHEN staff_assignments.status = 'assigned'
+                         THEN staff_assignments.status
+                         ELSE EXCLUDED.status END,
+           updated_at = NOW()
      RETURNING *`,
     [parseInt(booking_id), parseInt(staff_id), tag_filled, status || 'interested']
   );

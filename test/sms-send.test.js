@@ -63,6 +63,25 @@ test('a good number reaches Twilio with the right payload', async () => {
   assert.strictEqual(res.sid, 'SM_test_123');
 });
 
+// GSM-7 normalisation (toGsm7) is applied inside sendSms so every template is
+// covered, but nothing in test/ exercised it at the point it's actually
+// applied — every existing Body assertion above uses pure ASCII. This pins
+// the real catalogue name from test/booking-items.test.js: its em dash is
+// what pushes a real staff message (e.g. "You're booked: Foam Party — Single
+// Cannon, ...") from 2 SMS segments to 3 when left un-normalised.
+test('sendSms normalises smart punctuation before it reaches Twilio', async () => {
+  withCreds();
+  const calls = stubFetch({ ok: true });
+  const c = fakeClient();
+  const { sendSms } = loadSms();
+
+  await sendSms(c, '4055417953', 'Foam Party — Single Cannon', { now: DAYTIME });
+
+  const body = calls[0].params.get('Body');
+  assert.ok(body.includes('Foam Party - Single Cannon'), 'em dash must become a plain hyphen');
+  assert.ok(!body.includes('—'), 'the raw em dash must never reach Twilio');
+});
+
 // The core invariant of the whole feature.
 test('a 201 from Twilio is logged as queued, never as delivered or sent', async () => {
   withCreds();
