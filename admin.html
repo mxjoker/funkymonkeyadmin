@@ -4752,7 +4752,16 @@ async function saveRule(ruleId) {
 }
 
 async function toggleRule(ruleId, active) {
-  await apiFetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'save_rule', rule:{ id:ruleId, active } }) });
+  try {
+    const res = await apiFetch('/api/automations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'save_rule', rule:{ id:ruleId, active } }) });
+    if (!res.ok) throw new Error((await res.json()).error || `HTTP ${res.status}`);
+    await loadAutomations();
+  } catch(e) {
+    // Reload so the checkbox reflects what the database actually says rather
+    // than what the click optimistically showed.
+    alert('Could not change that rule: ' + e.message);
+    await loadAutomations();
+  }
 }
 
 async function deleteRule(ruleId) {

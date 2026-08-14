@@ -1,7 +1,7 @@
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
 const { wrap, render, esc, sendEmail, logStatus, logEmail, ensureEmailLog } = require('./_email');
-const { sendSms, renderSms, ensureSmsTables, normalisePhone } = require('./_sms');
+const { sendSms, renderSms, ensureSmsTables } = require('./_sms');
 
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 
