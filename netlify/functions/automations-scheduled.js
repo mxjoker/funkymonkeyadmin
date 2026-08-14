@@ -74,8 +74,16 @@ async function unstaffedAlerts(client, now) {
     WHERE b.status IN ('accepted','confirmed')
       AND b.event_date::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + 3)
       AND NOT EXISTS (SELECT 1 FROM staff_assignments sa WHERE sa.booking_id = b.id AND sa.status = 'assigned')
+      -- Dedupe is per DAY, not per booking. A lifetime-once guard means a gig
+      -- alerts on day 1, stays unstaffed, and goes silent for the rest of the
+      -- window — quiet exactly as the risk peaks. The staff_assignments
+      -- NOT EXISTS above is what actually stops the noise: once someone is
+      -- assigned the booking drops out of this result set entirely.
       AND NOT EXISTS (
-        SELECT 1 FROM sms_log l WHERE l.booking_id = b.id AND l.trigger_label = 'Unstaffed alert'
+        SELECT 1 FROM sms_log l
+        WHERE l.booking_id = b.id
+          AND l.trigger_label = 'Unstaffed alert'
+          AND l.created_at::date = CURRENT_DATE
       )
     ORDER BY b.event_date
   `);
@@ -107,14 +115,14 @@ exports.handler = async () => {
       // Each of the three jobs is guarded independently — one failing query
       // must not cost the others their run, and a scheduled function that
       // fails quietly is how the original problem stayed invisible for months.
-      const held = await flushHeldSms(client, now).catch(e => { console.error('flushHeldSms FAILED:', e.message); return { sent: 0, expired: 0, optedOut: 0 }; });
+      const held = await flushHeldSms(client, now).catch(e => { console.error('flushHeldSms FAILED:', e.message); return { sent: 0, expired: 0, optedOut: 0, blocked: 0 }; });
       const sent = await runScheduledAutomations(client);
       const dayOf = await staffDayOfReminders(client, now).catch(e => { console.error('staffDayOfReminders FAILED:', e.message); return 0; });
       const alerts = await unstaffedAlerts(client, now).catch(e => { console.error('unstaffedAlerts FAILED:', e.message); return 0; });
       return { held, sent, dayOf, alerts };
     });
 
-    console.log(`Scheduled automations complete — ${result.sent} rule message(s), ${result.held.sent} held SMS flushed, ${result.held.expired} expired, ${result.held.optedOut} opted out, ${result.dayOf} day-of reminder(s), ${result.alerts} unstaffed alert(s)`);
+    console.log(`Scheduled automations complete — ${result.sent} rule message(s), ${result.held.sent} held SMS flushed, ${result.held.expired} expired, ${result.held.optedOut} opted out, ${result.held.blocked} blocked (no Twilio creds), ${result.dayOf} day-of reminder(s), ${result.alerts} unstaffed alert(s)`);
     return { statusCode: 200, body: JSON.stringify({ ok: true, ...result, startedAt }) };
   } catch (e) {
     console.error('Scheduled automations FAILED:', e.message);

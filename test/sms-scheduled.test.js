@@ -114,3 +114,47 @@ test('a held message to a number that opted out in the meantime is never sent', 
   assert.strictEqual(res.optedOut, 1);
   assert.ok(c.updates().some(q => q.params.includes('opted_out')), 'the opt-out is recorded, not silently dropped');
 });
+
+// A misconfigured Twilio must not read like "there was nothing to flush" —
+// {sent:0, expired:0, optedOut:0} is exactly what a quiet morning also
+// returns. `blocked` is what tells the two apart.
+test('a misconfigured Twilio blocks the whole flush loudly instead of silently sending nothing', async () => {
+  delete process.env.TWILIO_ACCOUNT_SID;
+  delete process.env.TWILIO_AUTH_TOKEN;
+  delete process.env.TWILIO_PHONE_NUMBER;
+  const calls = stubFetch();
+  const c = fakeClient([
+    { id: 3, phone: '+14055417953', body: 'a', created_at: new Date('2026-08-15T03:00:00Z') },
+    { id: 4, phone: '+14055417954', body: 'b', created_at: new Date('2026-08-15T03:00:00Z') },
+  ]);
+  const { flushHeldSms } = loadSms();
+
+  const res = await flushHeldSms(c, NINE_AM);
+
+  assert.strictEqual(calls.length, 0, 'fetch must never be called when Twilio is not configured');
+  assert.strictEqual(res.blocked, 2, 'every held row is reported as blocked, not silently dropped');
+  assert.strictEqual(c.updates().length, 0, 'nothing is marked sent, expired or opted-out — it was never actually processed');
+});
+
+// No live database in this test suite, so this cannot prove the guard filters
+// rows correctly at runtime — that needs Postgres to actually evaluate
+// NOT EXISTS. What it can prove, honestly, is that the SQL sent to the driver
+// carries a per-day dedupe key rather than a per-booking one: a lifetime-once
+// guard alerts on day 1, stays unstaffed, and goes silent for the rest of the
+// window — quiet exactly as the risk peaks.
+test('the unstaffed-alert dedupe query is scoped to today, not the booking\'s lifetime', async () => {
+  process.env.NOTIFY_SMS = '+14055550199';
+  const queries = [];
+  const c = { query: async (sql, params) => { queries.push(sql); return { rows: [] }; } };
+  const { unstaffedAlerts } = require('../netlify/functions/automations-scheduled.js');
+
+  await unstaffedAlerts(c, new Date());
+
+  const sql = queries.find(q => /FROM bookings/i.test(q));
+  assert.ok(sql, 'unstaffedAlerts must query bookings');
+  assert.ok(
+    /l\.created_at::date\s*=\s*CURRENT_DATE/i.test(sql),
+    'the dedupe must be scoped to today — a bare "trigger_label = \'Unstaffed alert\'" with no date component ' +
+    'means the first alert ever sent for a booking suppresses every later one, forever'
+  );
+});

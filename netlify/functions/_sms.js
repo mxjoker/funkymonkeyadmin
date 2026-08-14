@@ -306,7 +306,7 @@ const HELD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 async function flushHeldSms(client, now = new Date()) {
   // Never flush inside quiet hours: it would re-hold everything it just picked
   // up and make no progress.
-  if (isQuietHours(now)) return { sent: 0, expired: 0, optedOut: 0 };
+  if (isQuietHours(now)) return { sent: 0, expired: 0, optedOut: 0, blocked: 0 };
 
   const { rows } = await client.query(
     `SELECT * FROM sms_log WHERE status='held' ORDER BY created_at LIMIT 200`
@@ -315,6 +315,18 @@ async function flushHeldSms(client, now = new Date()) {
   const token = process.env.TWILIO_AUTH_TOKEN;
   const from = process.env.TWILIO_PHONE_NUMBER;
   const site = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
+
+  // Hoisted out of the loop: credentials cannot change between rows, and a
+  // per-row `if (!sid...) continue` silently produces the same
+  // {sent:0, expired:0, optedOut:0} as "there was nothing to hold" — this
+  // codebase's signature bug class (a check that reports a believable value
+  // instead of an error). sendSms's equivalent path logs and marks the row
+  // 'no_credentials'; this must be at least as loud.
+  if (rows.length && (!sid || !token || !from)) {
+    console.error(`flushHeldSms: ${rows.length} message(s) held and Twilio is not configured — NONE were sent`);
+    return { sent: 0, expired: 0, optedOut: 0, blocked: rows.length };
+  }
+
   let sent = 0, expired = 0, optedOut = 0;
 
   for (const row of rows) {
@@ -336,7 +348,6 @@ async function flushHeldSms(client, now = new Date()) {
       optedOut++;
       continue;
     }
-    if (!sid || !token || !from) continue;
     try {
       const auth = Buffer.from(`${sid}:${token}`).toString('base64');
       const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
@@ -359,7 +370,7 @@ async function flushHeldSms(client, now = new Date()) {
       console.error('flushHeldSms error:', row.phone, '|', e.message);
     }
   }
-  return { sent, expired, optedOut };
+  return { sent, expired, optedOut, blocked: 0 };
 }
 
 module.exports = { normalisePhone, isQuietHours, renderSms, parseLetters, ensureSmsTables, isOptedOut, logSms, sendSms, toGsm7, smsSegments, flushHeldSms };
