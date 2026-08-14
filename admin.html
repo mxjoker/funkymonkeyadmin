@@ -1600,7 +1600,9 @@ const EVENT_TYPE_LABELS = [
 
 const CUSTOMER_TYPES = ['Individual', 'Corporate', 'Venue / Planner', 'School / PTA', 'Library', 'Non-profit'];
 
-const DEPOSIT_METHODS = ['Stripe', 'Cash', 'Venmo', 'Check', 'Card (manual)', 'Invoice', 'Waived'];
+// Square is the processor most of these actually run through — it was missing
+// from both method lists, so a Square payment could not be labelled as one.
+const DEPOSIT_METHODS = ['Square', 'Stripe', 'Cash', 'Venmo', 'Check', 'Card (manual)', 'Invoice', 'Waived'];
 
 function bookingField(label, name, value, type = 'text', opts = null) {
   const v = value === null || value === undefined ? '' : String(value);
@@ -1853,7 +1855,7 @@ function openBooking(id) {
         <div class="pay-field">
           <label>Method</label>
           <select id="pay-meth-${b.id}">
-            ${['cash','stripe','venmo','paypal','check','zelle'].map(m =>
+            ${['cash','square','stripe','venmo','paypal','check','zelle'].map(m =>
               `<option value="${m}" ${String(b.payment_method||'').toLowerCase() === m ? 'selected' : ''}>${m[0].toUpperCase()+m.slice(1)}</option>`
             ).join('')}
           </select>
