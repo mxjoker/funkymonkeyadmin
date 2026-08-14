@@ -291,4 +291,75 @@ async function sendSms(client, to, body, meta = {}) {
   }
 }
 
-module.exports = { normalisePhone, isQuietHours, renderSms, parseLetters, ensureSmsTables, isOptedOut, logSms, sendSms, toGsm7, smsSegments };
+// ── The morning flush ────────────────────────────────────────────────────────
+// Quiet hours hold a message rather than dropping it, and this is where held
+// messages go out. There is no queue and no per-message scheduler in this
+// system — the 9am Central cron is the only recurring thing — so "held" is a
+// status on the row and this is the flush.
+//
+// Sends directly rather than via sendSms() so the held row is updated in place:
+// routing it back through sendSms would write a second log row for the same
+// message and leave the first stuck at 'held' forever. Body is NOT re-run
+// through toGsm7 — sendSms already normalised it before the row was written.
+const HELD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+async function flushHeldSms(client, now = new Date()) {
+  // Never flush inside quiet hours: it would re-hold everything it just picked
+  // up and make no progress.
+  if (isQuietHours(now)) return { sent: 0, expired: 0, optedOut: 0 };
+
+  const { rows } = await client.query(
+    `SELECT * FROM sms_log WHERE status='held' ORDER BY created_at LIMIT 200`
+  );
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_PHONE_NUMBER;
+  const site = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
+  let sent = 0, expired = 0, optedOut = 0;
+
+  for (const row of rows) {
+    // A day-before reminder that surfaces three days late is misinformation.
+    if (now - new Date(row.created_at) > HELD_MAX_AGE_MS) {
+      await client.query("UPDATE sms_log SET status=$1, error_detail=$2, updated_at=NOW() WHERE id=$3",
+        ['expired', 'held longer than 24h', row.id]);
+      console.error('flushHeldSms: expired held message', row.id, '→', row.phone);
+      expired++;
+      continue;
+    }
+    // The recipient may have texted STOP after the message was held (e.g. held
+    // at 11pm, opted out at 2am). sendSms enforces this on every other path;
+    // flushHeldSms bypasses sendSms for the in-place-update reason above, so
+    // this is the one place it has to check for itself.
+    if (await isOptedOut(client, row.phone)) {
+      await client.query("UPDATE sms_log SET status=$1, updated_at=NOW() WHERE id=$2", ['opted_out', row.id]);
+      console.error('flushHeldSms: recipient opted out since held', row.id, '→', row.phone);
+      optedOut++;
+      continue;
+    }
+    if (!sid || !token || !from) continue;
+    try {
+      const auth = Buffer.from(`${sid}:${token}`).toString('base64');
+      const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+        method: 'POST',
+        headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ To: row.phone, From: from, Body: row.body, StatusCallback: `${site}/api/sms-status` }).toString()
+      });
+      const data = await res.json();
+      if (!res.ok || data.code) {
+        const reason = `${data.code || res.status}: ${data.message || 'Twilio send failed'}`;
+        await client.query("UPDATE sms_log SET status='failed', error_detail=$1, updated_at=NOW() WHERE id=$2", [reason, row.id]);
+        console.error('flushHeldSms failed:', row.phone, '|', reason);
+        continue;
+      }
+      await client.query("UPDATE sms_log SET status=$1, provider_sid=$2, updated_at=NOW() WHERE id=$3",
+        ['queued', data.sid, row.id]);
+      sent++;
+    } catch (e) {
+      await client.query("UPDATE sms_log SET status='failed', error_detail=$1, updated_at=NOW() WHERE id=$2", [e.message, row.id]);
+      console.error('flushHeldSms error:', row.phone, '|', e.message);
+    }
+  }
+  return { sent, expired, optedOut };
+}
+
+module.exports = { normalisePhone, isQuietHours, renderSms, parseLetters, ensureSmsTables, isOptedOut, logSms, sendSms, toGsm7, smsSegments, flushHeldSms };
