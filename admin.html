@@ -835,6 +835,18 @@ input,select,textarea{font-family:inherit}
 </div>
 
 <script>
+// Checkbox pair -> the stored comms_preference value. Returns null when
+// neither is ticked, so the caller can refuse to save rather than write a
+// staff member into a state where nothing ever reaches them.
+function commsPreferenceFrom(emailId, smsId) {
+  const email = document.getElementById(emailId).checked;
+  const sms   = document.getElementById(smsId).checked;
+  if (email && sms) return 'both';
+  if (email) return 'email';
+  if (sms) return 'sms';
+  return null;
+}
+
 // ══════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════
@@ -3115,7 +3127,7 @@ async function renderStaff() {
         <div><a href="mailto:${s.email||''}" style="color:#7c3aed;text-decoration:none">✉️ ${esc(s.email||'—')}</a></div>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>${s.has_access_code ? '🔑 Access Code: <code style="background:#d1fae5;padding:1px 6px;border-radius:4px">set ✓</code>' : '🔑 Access Code: <code style="background:#fee2e2;padding:1px 6px;border-radius:4px">not set</code>'}</span>
-          <span style="color:#9ca3af;font-size:.72rem">${s.comms_preference||'email'}</span>
+          <span style="color:#9ca3af;font-size:.72rem">${s.comms_preference==='both'?'Email + SMS':s.comms_preference==='sms'?'SMS':'Email'}</span>
         </div>
       </div>
       <div class="skills-wrap" style="margin-bottom:6px">${tags||'<span style="color:#bbb;font-size:.75rem">No skills yet</span>'}</div>
@@ -3354,13 +3366,15 @@ function openStaffModal(id) {
         <span style="font-size:.72rem;color:#9ca3af">An access code can be generated after saving this new staff member.</span>
       </div>`}
       <div class="detail-field">
-        <label>Comms Preference</label>
-        <select id="sf-comms" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem">
-          <option value="email" ${(s?.comms_preference||'email')==='email'?'selected':''}>Email</option>
-          <option value="sms"   ${s?.comms_preference==='sms'  ?'selected':''}>SMS</option>
-          <option value="both"  ${s?.comms_preference==='both' ?'selected':''}>Email + SMS</option>
-          <option value="call"  ${s?.comms_preference==='call' ?'selected':''}>Phone Call</option>
-        </select>
+        <label>Notifications &amp; reminders</label>
+        <div style="display:flex;gap:16px;padding:9px 0">
+          <label style="display:flex;align-items:center;gap:6px;font-size:.875rem;font-weight:400">
+            <input type="checkbox" id="sf-comms-email" ${s?.comms_preference !== 'sms' ? 'checked' : ''}> Email
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:.875rem;font-weight:400">
+            <input type="checkbox" id="sf-comms-sms" ${['sms','both'].includes(s?.comms_preference) ? 'checked' : ''}> SMS
+          </label>
+        </div>
       </div>
     </div>
     <div style="margin-bottom:14px">
@@ -3424,6 +3438,8 @@ async function saveStaffModal(id) {
   if (!name)  { alert('Name is required.'); return; }
   if (!phone) { alert('Phone number is required.'); return; }
   if (!email) { alert('Email is required.'); return; }
+  const comms = commsPreferenceFrom('sf-comms-email', 'sf-comms-sms');
+  if (!comms) { alert('Pick at least one way to reach them — email, SMS, or both.'); return; }
   const payload = {
     name,
     preferred_name:   document.getElementById('sf-pname').value.trim() || name,
@@ -3431,7 +3447,7 @@ async function saveStaffModal(id) {
     role:             document.getElementById('sf-role').value.trim() || 'Performer',
     color:            document.getElementById('sf-color').value,
     phone, email,
-    comms_preference: document.getElementById('sf-comms').value,
+    comms_preference: comms,
     admin_notes:      document.getElementById('sf-anotes').value.trim(),
     shared_notes:     document.getElementById('sf-shared-notes').value.trim(),
   };
@@ -3924,13 +3940,15 @@ function openStaffPreferences() {
           style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem"/>
       </div>
       <div class="detail-field" style="grid-column:1/-1">
-        <label>Communication Preference</label>
-        <select id="pref-comms" style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.875rem">
-          <option value="email" ${(s.comms_preference||'email')==='email'?'selected':''}>Email</option>
-          <option value="sms"   ${s.comms_preference==='sms'  ?'selected':''}>SMS</option>
-          <option value="both"  ${s.comms_preference==='both' ?'selected':''}>Email + SMS</option>
-          <option value="call"  ${s.comms_preference==='call' ?'selected':''}>Phone Call</option>
-        </select>
+        <label>Notifications &amp; reminders</label>
+        <div style="display:flex;gap:16px;padding:9px 0">
+          <label style="display:flex;align-items:center;gap:6px;font-size:.875rem;font-weight:400">
+            <input type="checkbox" id="pref-comms-email" ${s.comms_preference !== 'sms' ? 'checked' : ''}> Email
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:.875rem;font-weight:400">
+            <input type="checkbox" id="pref-comms-sms" ${['sms','both'].includes(s.comms_preference) ? 'checked' : ''}> SMS
+          </label>
+        </div>
       </div>
     </div>
     <div style="margin-bottom:16px">
@@ -3949,11 +3967,13 @@ async function saveStaffPreferences() {
   const phone = document.getElementById('pref-phone').value.trim();
   const email = document.getElementById('pref-email').value.trim();
   if (!phone || !email) { alert('Phone and email are required.'); return; }
+  const comms = commsPreferenceFrom('pref-comms-email', 'pref-comms-sms');
+  if (!comms) { alert('Pick at least one way to reach them — email, SMS, or both.'); return; }
   const payload = {
     preferred_name:   document.getElementById('pref-name').value.trim(),
     pronouns:         document.getElementById('pref-pronouns').value.trim(),
     phone, email,
-    comms_preference: document.getElementById('pref-comms').value,
+    comms_preference: comms,
     staff_notes:      document.getElementById('pref-notes').value.trim(),
   };
   try {

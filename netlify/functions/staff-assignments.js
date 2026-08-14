@@ -11,15 +11,27 @@ const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stri
 // address must never fail the assignment/claim/survey it accompanies, nor stop
 // the loop that notifies the remaining staff. Guarded here so all four call
 // sites (and any future one) are covered by one catch.
-const notify = ({ to_email, subject, html }) =>
-  sendEmail(to_email, subject, html)
+// A staff member who unchecked Email does not get one. Guarded at the one
+// door so a future call site cannot forget. Calls with no `staff` (the
+// owner-notification at the survey path) always send.
+const notify = ({ to_email, subject, html, staff }) => {
+  if (staff && !wantsEmail(staff)) return Promise.resolve();
+  return sendEmail(to_email, subject, html)
     .catch(e => console.error('staff notify failed:', to_email, '|', e.message));
+};
 
 // Staff SMS rides on comms_preference, the column that has been on the staff
 // table — with an "SMS (coming soon)" option in both UIs — since before this
 // feature existed. A second opt-in mechanism would mean two places to check and
 // one of them eventually being missed.
 const wantsSms = (s) => ['sms', 'both'].includes(s && s.comms_preference);
+
+// Only an explicit SMS-only choice suppresses email. Anything else — 'email',
+// 'both', the legacy 'call', null, '' — still gets one. Defaulting the unknown
+// cases to "send it" is deliberate: this codebase's signature bug is the
+// silent non-delivery, and a staff member who quietly stops being told about
+// gigs is exactly that shape.
+const wantsEmail = (s) => (s && s.comms_preference) !== 'sms';
 
 // Fire-and-forget, same contract as notify() above: a Twilio outage must never
 // fail the assignment it accompanies. sendSms does not throw, but ensureSmsTables
@@ -763,6 +775,7 @@ exports.handler = async (event) => {
             await notify({
               to_email: s.email,
               to_name: s.preferred_name || s.name,
+              staff: s,
               subject: `✅ You're booked! ${b.service_name} on ${dateStr}`,
               html: wrap(`
                 <p style="font-size:16px;margin-bottom:16px">Hi <strong>${s.preferred_name || s.name}</strong>! 🎉</p>
@@ -919,6 +932,7 @@ async function notifyStaffForBooking(client, booking) {
     await notify({
       to_email: staff.email,
       to_name: staff.preferred_name || staff.name,
+      staff,
       subject: `🎪 Gig Available — ${booking.service_name} on ${dateStr}`,
       html: wrap(`
         <p style="font-size:16px;margin-bottom:16px">Hi <strong>${staff.preferred_name || staff.name}</strong>! 👋</p>
@@ -963,3 +977,4 @@ exports.isStaffable = isStaffable;
 exports.slotTags = slotTags;
 exports.eligibleStaff = eligibleStaff;
 exports.wantsSms = wantsSms;
+exports.wantsEmail = wantsEmail;
