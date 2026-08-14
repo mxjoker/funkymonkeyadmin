@@ -34,3 +34,29 @@ test('email goes out unless SMS-only was explicitly chosen', () => {
   assert.strictEqual(wantsEmail({ comms_preference: '' }), true);
   assert.strictEqual(wantsEmail(null), true);
 });
+
+const { buildOfferMap, offerText } = require('../netlify/functions/staff-assignments.js');
+
+// The letter→role map is stored on the outbound sms_log row so a reply resolves
+// against what was actually offered, not against the open-gig list at reply
+// time. Slots change; "b" must not mean something different two hours later.
+test('an offer map keys each letter to a booking and a role', () => {
+  const map = buildOfferMap(['Foam Operator', 'Setup'], 42);
+  assert.deepStrictEqual(map, {
+    a: { booking_id: 42, tag_filled: 'Foam Operator' },
+    b: { booking_id: 42, tag_filled: 'Setup' }
+  });
+});
+
+test('a single matching role still gets a letter', () => {
+  assert.deepStrictEqual(buildOfferMap(['Driver'], 7), { a: { booking_id: 7, tag_filled: 'Driver' } });
+});
+
+test('the offer text lists every letter and the STOP notice', () => {
+  const map = buildOfferMap(['Foam Operator', 'Setup'], 42);
+  const txt = offerText({ service_name: 'Foam Party', event_zip: '73013', event_time: '6:00 PM' }, 'Sun, 8/23/2026', map);
+  assert.match(txt, /a\) Foam Operator/);
+  assert.match(txt, /b\) Setup/);
+  assert.match(txt, /Reply STOP to opt out/);
+  assert.ok(txt.length <= 320, `offer must fit two segments, was ${txt.length}`);
+});

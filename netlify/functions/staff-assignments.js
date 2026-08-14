@@ -892,6 +892,27 @@ exports.handler = async (event) => {
   }
 };
 
+// ── Letter-mapped offers ─────────────────────────────────────────────────────
+const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+
+// One letter per role this staff member matched on this booking. The value is
+// {booking_id, tag_filled} rather than a bare booking id because the interest
+// insert is keyed on (booking_id, staff_id, tag_filled) — someone who matches
+// two roles on one gig is two distinct rows, not one.
+function buildOfferMap(matchedTags, bookingId) {
+  const map = {};
+  matchedTags.forEach((tag, i) => { map[LETTERS[i]] = { booking_id: bookingId, tag_filled: tag }; });
+  return map;
+}
+
+// Written for the medium: two segments (320 chars) is the budget, and a
+// reformatted email blows it four times over.
+function offerText(booking, dateStr, offerMap) {
+  const lines = Object.entries(offerMap).map(([ltr, v]) => `${ltr}) ${v.tag_filled}`).join('\n');
+  const when = `${dateStr}${booking.event_time ? ' ' + booking.event_time : ''}`;
+  return `Gig available: ${booking.service_name}\n${when} · ${booking.event_zip || 'OKC'}\n${lines}\nReply with any combination (a, ab) if you're interested. Reply STOP to opt out.`;
+}
+
 // ── The one gig-available notifier ───────────────────────────────────────────
 // Both the manual "Notify Staff" button and the automatic on-booking hook run
 // through here. They were two near-identical copies that had already drifted;
@@ -949,6 +970,10 @@ async function notifyStaffForBooking(client, booking) {
         <p style="font-size:12px;color:#A78BCA;text-align:center">Log in with your access code · ${PORTAL}</p>
       `)
     });
+    const offerMap = buildOfferMap(matched, booking.id);
+    await notifySms(client, staff, offerText(booking, dateStr, offerMap), {
+      booking_id: booking.id, trigger_label: 'Gig available', offer_map: offerMap
+    });
   }
 
   console.log(`notifyStaffForBooking: notified ${eligible.length} staff for booking ${booking.id} (tags: ${tags.join(', ')})`);
@@ -978,3 +1003,5 @@ exports.slotTags = slotTags;
 exports.eligibleStaff = eligibleStaff;
 exports.wantsSms = wantsSms;
 exports.wantsEmail = wantsEmail;
+exports.buildOfferMap = buildOfferMap;
+exports.offerText = offerText;
