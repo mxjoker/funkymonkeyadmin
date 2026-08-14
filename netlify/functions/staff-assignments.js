@@ -3,6 +3,7 @@ const {
   CORS, preflight, requireAuth, unauthorized, forbidden,
 } = require('./_auth');
 const { sendEmail, wrap } = require('./_email');
+const { sendSms, ensureSmsTables } = require('./_sms');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -13,6 +14,25 @@ const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stri
 const notify = ({ to_email, subject, html }) =>
   sendEmail(to_email, subject, html)
     .catch(e => console.error('staff notify failed:', to_email, '|', e.message));
+
+// Staff SMS rides on comms_preference, the column that has been on the staff
+// table — with an "SMS (coming soon)" option in both UIs — since before this
+// feature existed. A second opt-in mechanism would mean two places to check and
+// one of them eventually being missed.
+const wantsSms = (s) => ['sms', 'both'].includes(s && s.comms_preference);
+
+// Fire-and-forget, same contract as notify() above: a Twilio outage must never
+// fail the assignment it accompanies. sendSms does not throw, but ensureSmsTables
+// can, so the whole thing is guarded.
+async function notifySms(client, staff, body, meta = {}) {
+  if (!wantsSms(staff) || !staff.phone) return;
+  try {
+    await ensureSmsTables(client);
+    await sendSms(client, staff.phone, body, { ...meta, staff_id: staff.id });
+  } catch (e) {
+    console.error('staff notifySms failed:', staff.staff_id, '|', e.message);
+  }
+}
 
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 const PORTAL = `${SITE}/staff-portal.html`;
@@ -760,6 +780,15 @@ exports.handler = async (event) => {
                 <p style="font-size:12px;color:#A78BCA;text-align:center">Questions? Contact Joe at <a href="tel:4054316625" style="color:#06B6D4">(405) 431-6625</a></p>
               `)
             });
+
+            // Shift start, not just the event time: the whole point of the text
+            // is the number the crew member has to set an alarm for.
+            const smsTime = fa.schedule_start
+              ? toStr(toMins(fa.schedule_start))
+              : (b.event_time || 'TBD');
+            await notifySms(client, s,
+              `You're booked: ${b.service_name}, ${dateStr}. Load up ${smsTime}, ${b.event_zip || 'OKC'}. Details in the portal: ${PORTAL}`,
+              { booking_id: b.id, trigger_label: "You're booked" });
           }
 
           return json(200, assignment);
@@ -933,3 +962,4 @@ exports.STAFFABLE_STATUSES = STAFFABLE_STATUSES;
 exports.isStaffable = isStaffable;
 exports.slotTags = slotTags;
 exports.eligibleStaff = eligibleStaff;
+exports.wantsSms = wantsSms;

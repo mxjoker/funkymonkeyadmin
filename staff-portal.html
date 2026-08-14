@@ -697,7 +697,7 @@ async function openPreferences() {
       ${prefField('Phone *','<input id="pf-phone" type="tel" value="'+esc(s.phone||'')+'">')}
       ${prefField('Email *','<input id="pf-email" type="email" value="'+esc(s.email||'')+'">')}
       <div style="grid-column:1/-1">
-        ${prefField('Comms Preference','<select id="pf-comms"><option value="email" '+(s.comms_preference==='email'||!s.comms_preference?'selected':'')+'>Email</option><option value="sms" '+(s.comms_preference==='sms'?'selected':'')+'>SMS (coming soon)</option><option value="call" '+(s.comms_preference==='call'?'selected':'')+'>Phone Call</option></select>')}
+        ${prefField('Comms Preference','<select id="pf-comms"><option value="email" '+(s.comms_preference==='email'||!s.comms_preference?'selected':'')+'>Email</option><option value="sms" '+(s.comms_preference==='sms'?'selected':'')+'>SMS</option><option value="both" '+(s.comms_preference==='both'?'selected':'')+'>Email + SMS</option><option value="call" '+(s.comms_preference==='call'?'selected':'')+'>Phone Call</option></select>')}
       </div>
     </div>
     <div style="margin-bottom:16px">
