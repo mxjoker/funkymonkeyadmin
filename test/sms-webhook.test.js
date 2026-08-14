@@ -79,3 +79,21 @@ test('parseForm decodes a urlencoded body including + and %', () => {
   assert.strictEqual(out.Body, 'a c');
   assert.strictEqual(out.From, '+14055417953');
 });
+
+// Twilio's published example from their Security documentation. Every other
+// test here builds its expected signature with the same algorithm the
+// production code uses, so they would all still pass if that algorithm were
+// wrong in both places at once. This one is anchored outside the codebase:
+// it is the only test that fails if someone "simplifies" the HMAC into
+// something Twilio would never produce.
+test('the signature algorithm matches Twilio published vector', () => {
+  const { twilioSignature } = loadSig();
+  const sig = twilioSignature('12345', 'https://example.com/myapp.php?foo=1&bar=2', {
+    CallSid: 'CA1234567890ABCDE',
+    Caller:  '+14158675310',
+    Digits:  '1234',
+    From:    '+14158675310',
+    To:      '+18005551212'
+  });
+  assert.strictEqual(sig, 'L/OH5YylLD5NRKLltdqwSvS0BnU=');
+});
