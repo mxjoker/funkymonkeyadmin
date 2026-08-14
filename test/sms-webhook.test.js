@@ -89,11 +89,17 @@ test('parseForm decodes a urlencoded body including + and %', () => {
 test('the signature algorithm matches Twilio published vector', () => {
   const { twilioSignature } = loadSig();
   const sig = twilioSignature('12345', 'https://example.com/myapp.php?foo=1&bar=2', {
-    CallSid: 'CA1234567890ABCDE',
-    Caller:  '+14158675310',
+    // Deliberately NOT in sorted order. Twilio's published example happens to
+    // list its parameters alphabetically, so writing them that way makes
+    // Object.keys() insertion order match sorted order and the .sort() step
+    // becomes untestable — the test still passes with the sort removed.
+    // Scrambled here so the sort is load-bearing. The expected signature is
+    // unchanged: it is defined over the parameters after sorting.
+    To:      '+18005551212',
     Digits:  '1234',
+    CallSid: 'CA1234567890ABCDE',
     From:    '+14158675310',
-    To:      '+18005551212'
+    Caller:  '+14158675310'
   });
   assert.strictEqual(sig, 'L/OH5YylLD5NRKLltdqwSvS0BnU=');
 });
