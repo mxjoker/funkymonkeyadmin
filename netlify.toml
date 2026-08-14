@@ -196,3 +196,15 @@
   from = "/api/sms-webhook"
   to = "/.netlify/functions/sms-webhook"
   status = 200
+
+# Public compliance pages. A2P 10DLC campaign vetting fetches these URLs, and
+# the booking form links to them at the point the phone number is collected.
+[[redirects]]
+  from = "/privacy"
+  to = "/privacy.html"
+  status = 200
+
+[[redirects]]
+  from = "/sms-terms"
+  to = "/sms-terms.html"
+  status = 200
