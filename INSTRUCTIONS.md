@@ -581,6 +581,6 @@ Already run May 15, 2026 — 16 assignments backfilled.
 
 **1. Instant Booking v2 (foam parties)** — see `docs/ROADMAP.md` for the agreed design (foam gigs ≥2 weeks out, availability gate, zip-based mileage table, required contact info, Stripe deposit at booking time). Do not implement without reading that file first.
 
-**2. SMS notifications** — `_sms.js` (Twilio) is complete but nothing calls it. To activate: Twilio account + A2P 10DLC registration; set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` in Netlify; wire into staff gig-assignment notifications (`comms_preference = 'sms'` already exists on staff records) and client deposit-link delivery.
+**2. SMS notifications** — `_sms.js` is the single Twilio sender: `sendSms(client, to, body, meta)` enforces opt-out and 8am–9pm Central quiet hours and writes an `sms_log` row for every outcome. Delivery status comes from the `sms-status.js` callback, never from the send call. Requires `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `NOTIFY_SMS` in Netlify, and an approved A2P 10DLC campaign — without one, carriers filter messages that Twilio still reports as accepted.
 
 **3. Financial export** — expand accounting export with staff fees, expenses, and profit per gig.

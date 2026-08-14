@@ -99,4 +99,139 @@ function parseLetters(reply, offerMap) {
   return { picked, unknown, freeform: false };
 }
 
-module.exports = { normalisePhone, isQuietHours, renderSms, parseLetters };
+// ── Tables ───────────────────────────────────────────────────────────────────
+// Both mirror email_log. provider_sid is UNIQUE, which is what makes a replayed
+// webhook idempotent; it is nullable because held / skipped rows never got one,
+// and Postgres permits many NULLs under a UNIQUE constraint.
+let smsSchemaReady;
+async function ensureSmsTables(client) {
+  if (!smsSchemaReady) {
+    smsSchemaReady = (async () => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS sms_log (
+          id SERIAL PRIMARY KEY,
+          direction VARCHAR(8) NOT NULL DEFAULT 'out',
+          phone VARCHAR(32) NOT NULL,
+          body TEXT NOT NULL DEFAULT '',
+          booking_id INTEGER,
+          staff_id INTEGER,
+          rule_id INTEGER,
+          trigger_label VARCHAR(255) DEFAULT '',
+          provider_sid VARCHAR(64) UNIQUE,
+          status VARCHAR(32) NOT NULL DEFAULT 'queued',
+          error_detail TEXT DEFAULT '',
+          offer_map JSONB,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `);
+      await client.query('CREATE INDEX IF NOT EXISTS sms_log_phone_idx ON sms_log (phone, created_at DESC)');
+      await client.query('CREATE INDEX IF NOT EXISTS sms_log_rule_idx  ON sms_log (rule_id, booking_id)');
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS sms_optout (
+          phone VARCHAR(32) PRIMARY KEY,
+          reason VARCHAR(64) DEFAULT 'STOP',
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `);
+    })().catch(e => { smsSchemaReady = null; throw e; });
+  }
+  return smsSchemaReady;
+}
+
+async function isOptedOut(client, e164) {
+  const { rows } = await client.query('SELECT phone FROM sms_optout WHERE phone=$1', [e164]);
+  return rows.length > 0;
+}
+
+async function logSms(client, row) {
+  try {
+    const { rows } = await client.query(
+      `INSERT INTO sms_log (direction, phone, body, booking_id, staff_id, rule_id, trigger_label, provider_sid, status, error_detail, offer_map)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       ON CONFLICT (provider_sid) DO NOTHING
+       RETURNING id`,
+      [row.direction || 'out', row.phone, row.body || '', row.booking_id || null, row.staff_id || null,
+       row.rule_id || null, row.trigger_label || '', row.provider_sid || null, row.status,
+       row.error_detail || '', row.offer_map ? JSON.stringify(row.offer_map) : null]
+    );
+    return rows[0] ? rows[0].id : null;
+  } catch (e) {
+    console.error('logSms error:', e.message);
+    return null;
+  }
+}
+
+// ── The one sender ───────────────────────────────────────────────────────────
+// Never throws. Every outcome is a status AND a logged row, so there is no path
+// where a message quietly did not happen. Callers read `.status`; none of the
+// five non-send outcomes resembles success.
+//
+// `meta.now` exists only so quiet hours are testable without faking the clock.
+async function sendSms(client, to, body, meta = {}) {
+  const sid   = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const from  = process.env.TWILIO_PHONE_NUMBER;
+  const site  = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
+  const base  = { direction: 'out', body, booking_id: meta.booking_id, staff_id: meta.staff_id,
+                  rule_id: meta.rule_id, trigger_label: meta.trigger_label, offer_map: meta.offer_map };
+
+  if (!sid || !token || !from) {
+    console.error('sendSms: Twilio credentials are not configured');
+    await logSms(client, { ...base, phone: String(to || ''), status: 'failed', error_detail: 'no_credentials' });
+    return { status: 'no_credentials' };
+  }
+
+  const e164 = normalisePhone(to);
+  if (!e164) {
+    // The raw value goes in the phone column deliberately: "which record has a
+    // broken number" is the question this row exists to answer.
+    console.error('sendSms: unparseable number:', JSON.stringify(to));
+    await logSms(client, { ...base, phone: String(to || ''), status: 'invalid_number', error_detail: `raw: ${JSON.stringify(to)}` });
+    return { status: 'invalid_number' };
+  }
+
+  if (await isOptedOut(client, e164)) {
+    await logSms(client, { ...base, phone: e164, status: 'opted_out' });
+    return { status: 'opted_out' };
+  }
+
+  // Held, not dropped. flushHeldSms() in Task 8 sends these at 9am Central.
+  if (isQuietHours(meta.now || new Date())) {
+    await logSms(client, { ...base, phone: e164, status: 'held' });
+    return { status: 'held' };
+  }
+
+  try {
+    const auth = Buffer.from(`${sid}:${token}`).toString('base64');
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        To: e164, From: from, Body: body,
+        // Delivery truth arrives here, seconds later. The response below only
+        // ever means "Twilio accepted it".
+        StatusCallback: `${site}/api/sms-status`
+      }).toString()
+    });
+    const data = await res.json();
+
+    if (!res.ok || data.code) {
+      const reason = `${data.code || res.status}: ${data.message || 'Twilio send failed'}`;
+      console.error('Twilio error:', e164, '|', reason);
+      await logSms(client, { ...base, phone: e164, status: 'failed', error_detail: reason });
+      return { status: 'failed', reason };
+    }
+
+    // 'queued', not 'sent'. See the module header.
+    await logSms(client, { ...base, phone: e164, status: 'queued', provider_sid: data.sid });
+    console.log('SMS queued to:', e164, '| SID:', data.sid);
+    return { status: 'queued', sid: data.sid };
+  } catch (e) {
+    console.error('sendSms error:', e164, '|', e.message);
+    await logSms(client, { ...base, phone: e164, status: 'failed', error_detail: e.message });
+    return { status: 'failed', reason: e.message };
+  }
+}
+
+module.exports = { normalisePhone, isQuietHours, renderSms, parseLetters, ensureSmsTables, isOptedOut, logSms, sendSms };
