@@ -253,4 +253,4 @@ async function logChange(client, bookingId, action, detail) {
   }
 }
 
-module.exports = { wrap, render, esc, fmtEventDate, sendEmail, logStatus, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange };
+module.exports = { wrap, render, esc, fmtEventDate, reviewLinkFor, sendEmail, logStatus, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange };
