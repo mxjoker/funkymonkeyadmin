@@ -316,7 +316,9 @@ git commit -m "feat(sms): phone normalisation, quiet hours, plain-text render, l
 - Consumes: `normalisePhone`, `isQuietHours` from Task 1
 - Produces:
   - `ensureSmsTables(client) -> Promise<void>`
-  - `sendSms(client, to, body, meta = {}) -> Promise<{ status, sid?, reason? }>` where `meta` is `{ booking_id, staff_id, rule_id, trigger_label, offer_map }` and `status` is one of `queued` | `invalid_number` | `opted_out` | `held` | `failed` | `no_credentials`
+  - `sendSms(client, to, body, meta = {}) -> Promise<{ status, sid?, reason?, logged }>` where `meta` is `{ booking_id, staff_id, rule_id, trigger_label, offer_map }` and `status` is one of `queued` | `invalid_number` | `opted_out` | `held` | `failed` | `no_credentials`
+
+**Amended during implementation** (review finding, ruled by Joe 2026-08-14): as written below, `logSms` swallows its own INSERT failure and `sendSms` ignores the return, so a failed log write still reported `{status:'queued'}` — texts would keep sending while the log stayed empty, silently disabling delivery-status tracking and the Task 7/8 de-dupe guards. Shipped code therefore differs from the block below in two ways: `sendSms` calls `await ensureSmsTables(client).catch(...)` before its first query (memoised, so it self-heals the likeliest cause at near-zero cost), and every return path carries a `logged` boolean, with a loud `MESSAGE SENT BUT NOT LOGGED` error on the path where a message actually went out. `logSms`'s own contract is deliberately unchanged — Task 6 relies on its `null` return under `ON CONFLICT (provider_sid) DO NOTHING` to detect a replayed webhook. This is a deliberate divergence from `logEmail`: an `sms_log` row is the only evidence an SMS ever existed.
   - `isOptedOut(client, e164) -> Promise<boolean>`
 
 - [ ] **Step 1: Write the failing tests**
