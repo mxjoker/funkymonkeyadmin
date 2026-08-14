@@ -135,7 +135,7 @@ test('an apostrophe survives as an apostrophe', () => {
 test('renderSms fills money, date and review tokens', () => {
   const booking = { client_name: 'Dana Ruiz', service_name: 'Foam Party', event_date: '2026-08-23', balance_due: 250, service_id: 'foam_party' };
   const out = renderSms('{{client_first_name}} owes ${{balance_due}} for {{service_name}} on {{event_date}}', booking);
-  assert.strictEqual(out, 'Dana owes $250.00 for Foam Party on Sat, 8/23/2026');
+  assert.strictEqual(out, 'Dana owes $250.00 for Foam Party on Sun, 8/23/2026');
 });
 
 test('a deposit of zero is never rendered as a default amount', () => {
@@ -1110,7 +1110,7 @@ test('a single matching role still gets a letter', () => {
 
 test('the offer text lists every letter and the STOP notice', () => {
   const map = buildOfferMap(['Foam Operator', 'Setup'], 42);
-  const txt = offerText({ service_name: 'Foam Party', event_zip: '73013', event_time: '6:00 PM' }, 'Sat, 8/23/2026', map);
+  const txt = offerText({ service_name: 'Foam Party', event_zip: '73013', event_time: '6:00 PM' }, 'Sun, 8/23/2026', map);
   assert.match(txt, /a\) Foam Operator/);
   assert.match(txt, /b\) Setup/);
   assert.match(txt, /Reply STOP to opt out/);
