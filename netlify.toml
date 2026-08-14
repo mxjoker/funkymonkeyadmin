@@ -183,3 +183,16 @@
   from = "/api/calendar"
   to = "/.netlify/functions/calendar"
   status = 200
+
+# Twilio webhooks. The signature check rebuilds the signed URL from SITE_URL +
+# these exact paths, so Twilio must be configured with these URLs and no query
+# string — see _twilio-sig.js.
+[[redirects]]
+  from = "/api/sms-status"
+  to = "/.netlify/functions/sms-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/sms-webhook"
+  to = "/.netlify/functions/sms-webhook"
+  status = 200
