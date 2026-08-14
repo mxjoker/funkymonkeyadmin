@@ -42,7 +42,7 @@ function withCreds() {
   process.env.SITE_URL            = 'https://funkymonkeyadmin.netlify.app';
 }
 
-// 8am CDT — inside the send window, so these cases test the thing they name.
+// 10am CDT — inside the send window, so these cases test the thing they name.
 const DAYTIME = new Date('2026-08-15T15:00:00Z');
 
 test('a good number reaches Twilio with the right payload', async () => {
@@ -155,4 +155,26 @@ test('missing credentials are reported, not treated as a successful send', async
 
   assert.strictEqual(calls.length, 0);
   assert.strictEqual(res.status, 'no_credentials');
+});
+
+test('a message that sends successfully but fails to log returns logged: false', async () => {
+  withCreds();
+  stubFetch({ ok: true });
+  // Fake client that rejects on INSERT — simulates logSms failure
+  const c = {
+    queries: [],
+    inserts: () => [],
+    query: async (sql, params) => {
+      if (/INSERT INTO sms_log/i.test(sql)) throw new Error('Database offline');
+      if (/FROM sms_optout/i.test(sql)) return { rows: [] };
+      return { rows: [{ id: 1 }] };
+    }
+  };
+  const { sendSms } = loadSms();
+
+  const res = await sendSms(c, '4055417953', 'hi', { now: DAYTIME });
+
+  assert.strictEqual(res.status, 'queued', 'the message really did send to Twilio');
+  assert.strictEqual(res.logged, false, 'but the log write failed, so logged: false');
+  assert.ok(res.sid, 'SID is present because Twilio accepted it');
 });

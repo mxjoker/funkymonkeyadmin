@@ -178,8 +178,8 @@ async function sendSms(client, to, body, meta = {}) {
 
   if (!sid || !token || !from) {
     console.error('sendSms: Twilio credentials are not configured');
-    await logSms(client, { ...base, phone: String(to || ''), status: 'failed', error_detail: 'no_credentials' });
-    return { status: 'no_credentials' };
+    const logged = await logSms(client, { ...base, phone: String(to || ''), status: 'failed', error_detail: 'no_credentials' });
+    return { status: 'no_credentials', logged: !!logged };
   }
 
   const e164 = normalisePhone(to);
@@ -187,19 +187,28 @@ async function sendSms(client, to, body, meta = {}) {
     // The raw value goes in the phone column deliberately: "which record has a
     // broken number" is the question this row exists to answer.
     console.error('sendSms: unparseable number:', JSON.stringify(to));
-    await logSms(client, { ...base, phone: String(to || ''), status: 'invalid_number', error_detail: `raw: ${JSON.stringify(to)}` });
-    return { status: 'invalid_number' };
+    const logged = await logSms(client, { ...base, phone: String(to || ''), status: 'invalid_number', error_detail: `raw: ${JSON.stringify(to)}` });
+    if (!logged) console.error('sendSms: INVALID_NUMBER NOT LOGGED —', to);
+    return { status: 'invalid_number', logged: !!logged };
   }
 
+  // Cheap after the first call — ensureSmsTables memoises on smsSchemaReady.
+  // Self-healing here rather than trusting every caller to remember: an
+  // unlogged send is invisible, and the log row is the ONLY evidence an SMS
+  // existed. Deliberately stricter than logEmail's convention in _email.js.
+  await ensureSmsTables(client).catch(e => console.error('sendSms: ensureSmsTables failed:', e.message));
+
   if (await isOptedOut(client, e164)) {
-    await logSms(client, { ...base, phone: e164, status: 'opted_out' });
-    return { status: 'opted_out' };
+    const logged = await logSms(client, { ...base, phone: e164, status: 'opted_out' });
+    if (!logged) console.error('sendSms: OPTED_OUT NOT LOGGED —', e164);
+    return { status: 'opted_out', logged: !!logged };
   }
 
   // Held, not dropped. flushHeldSms() in Task 8 sends these at 9am Central.
   if (isQuietHours(meta.now || new Date())) {
-    await logSms(client, { ...base, phone: e164, status: 'held' });
-    return { status: 'held' };
+    const logged = await logSms(client, { ...base, phone: e164, status: 'held' });
+    if (!logged) console.error('sendSms: HELD NOT LOGGED —', e164);
+    return { status: 'held', logged: !!logged };
   }
 
   try {
@@ -219,18 +228,21 @@ async function sendSms(client, to, body, meta = {}) {
     if (!res.ok || data.code) {
       const reason = `${data.code || res.status}: ${data.message || 'Twilio send failed'}`;
       console.error('Twilio error:', e164, '|', reason);
-      await logSms(client, { ...base, phone: e164, status: 'failed', error_detail: reason });
-      return { status: 'failed', reason };
+      const logged = await logSms(client, { ...base, phone: e164, status: 'failed', error_detail: reason });
+      if (!logged) console.error('sendSms: TWILIO_ERROR NOT LOGGED —', e164, '|', reason);
+      return { status: 'failed', reason, logged: !!logged };
     }
 
     // 'queued', not 'sent'. See the module header.
-    await logSms(client, { ...base, phone: e164, status: 'queued', provider_sid: data.sid });
+    const logged = await logSms(client, { ...base, phone: e164, status: 'queued', provider_sid: data.sid });
+    if (!logged) console.error('sendSms: MESSAGE SENT BUT NOT LOGGED —', e164, '| SID:', data.sid);
     console.log('SMS queued to:', e164, '| SID:', data.sid);
-    return { status: 'queued', sid: data.sid };
+    return { status: 'queued', sid: data.sid, logged: !!logged };
   } catch (e) {
     console.error('sendSms error:', e164, '|', e.message);
-    await logSms(client, { ...base, phone: e164, status: 'failed', error_detail: e.message });
-    return { status: 'failed', reason: e.message };
+    const logged = await logSms(client, { ...base, phone: e164, status: 'failed', error_detail: e.message });
+    if (!logged) console.error('sendSms: EXCEPTION NOT LOGGED —', e164, '|', e.message);
+    return { status: 'failed', reason: e.message, logged: !!logged };
   }
 }
 
