@@ -4694,9 +4694,19 @@ function openRuleModal(rule) {
           <option value="admin" ${r.recipient==='admin'?'selected':''}>Me (Admin)</option>
         </select>
       </div>
+      <div><label class="form-label">Channel</label>
+        <select class="form-control" id="rule-channel">
+          <option value="email" ${(r.channel||'email')==='email'?'selected':''}>Email only</option>
+          <option value="sms" ${r.channel==='sms'?'selected':''}>SMS only</option>
+          <option value="both" ${r.channel==='both'?'selected':''}>Email + SMS</option>
+        </select>
+      </div>
       <div><label class="form-label">Subject</label><input class="form-control" id="rule-subject" value="${esc(r.subject)}"></div>
       <div><label class="form-label">Body (HTML allowed, use {{variables}})</label>
         <textarea class="form-control" id="rule-body" rows="6" style="font-family:monospace;font-size:.8rem">${esc(r.body_html)}</textarea>
+      </div>
+      <div><label class="form-label">SMS text <span style="color:#9ca3af;font-size:.72rem">plain text, aim for under 320 characters</span></label>
+        <textarea class="form-control" id="rule-body-sms" rows="3" maxlength="320" style="font-family:monospace;font-size:.8rem">${esc(r.body_sms||'')}</textarea>
       </div>
       <div style="display:flex;gap:10px;padding-top:4px">
         <button class="btn btn-primary" onclick="saveRule(${r.id||'null'})">Save Rule</button>
@@ -4729,6 +4739,8 @@ async function saveRule(ruleId) {
     recipient:     document.getElementById('rule-recipient').value,
     subject:       document.getElementById('rule-subject').value.trim(),
     body_html:     document.getElementById('rule-body').value.trim(),
+    channel:       document.getElementById('rule-channel').value,
+    body_sms:      document.getElementById('rule-body-sms').value.trim(),
     active: true
   };
   try {

@@ -184,42 +184,6 @@ async function logEmail(client, bookingId, ruleId, triggerLabel, subject, recipi
   }
 }
 
-// ── Fire automation rules for a status change ─────────────────────────────────
-async function fireStatusAutomations(client, booking, newStatus, stripeLink) {
-  try {
-    const { rows: rules } = await client.query(
-      `SELECT * FROM automation_rules
-       WHERE active=TRUE AND trigger_event='status_change' AND trigger_status=$1
-       ORDER BY sort_order`,
-      [newStatus]
-    );
-
-    const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
-
-    for (const rule of rules) {
-      const toEmail = rule.recipient === 'admin' ? NOTIFY : booking.client_email;
-      if (!toEmail) continue;
-      const subject = render(rule.subject, booking, stripeLink);
-      const html    = wrap(render(rule.body_html, booking, stripeLink));
-      // Per-rule guard: sendEmail throws, and this runs inside a booking status
-      // change. One bad address must not abort the status update or the
-      // remaining rules.
-      try {
-        const res = await sendEmail(toEmail, subject, html);
-        await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient, logStatus(res));
-      } catch (e) {
-        console.error('fireStatusAutomations email failed:', toEmail, '|', e.message);
-        await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient, 'failed', e.message);
-      }
-    }
-
-    return rules.length;
-  } catch(e) {
-    console.error('fireStatusAutomations error:', e.message);
-    return 0;
-  }
-}
-
 // ── Ensure email_log table exists ─────────────────────────────────────────────
 async function ensureEmailLog(client) {
   await client.query(`
@@ -253,4 +217,4 @@ async function logChange(client, bookingId, action, detail) {
   }
 }
 
-module.exports = { wrap, render, esc, fmtEventDate, reviewLinkFor, sendEmail, logStatus, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange };
+module.exports = { wrap, render, esc, fmtEventDate, reviewLinkFor, sendEmail, logStatus, logEmail, ensureEmailLog, ensureBookingChanges, logChange };

@@ -8,6 +8,18 @@ function loadEmail() {
   return require('../netlify/functions/_email.js');
 }
 
+// Task 7 moved the status-change rule loop out of _email.js's
+// fireStatusAutomations (dead weight next to automations.js's near-duplicate
+// triggerStatusChange) into automations.js as the single copy. These tests
+// exercise that loop's behavior — dedupe, per-rule error isolation, logging —
+// which is unchanged, only relocated, so they now load automations.js.
+function loadAutomations() {
+  for (const m of ['../netlify/functions/automations.js', '../netlify/functions/_sms.js', '../netlify/functions/_email.js']) {
+    delete require.cache[require.resolve(m)];
+  }
+  return require('../netlify/functions/automations.js');
+}
+
 function stubFetch(response) {
   const calls = [];
   globalThis.fetch = async (url, opts) => {
@@ -165,10 +177,10 @@ test('a suppressed send is logged as "suppressed", not "sent"', async () => {
   process.env.RESEND_API_KEY = 'test-key';
   process.env.EMAIL_ALLOWLIST = 'joe.coover@gmail.com';
   const calls = stubFetch({ ok: true });
-  const { fireStatusAutomations } = loadEmail();
+  const { triggerStatusChange } = loadAutomations();
   const client = fakeRuleClient();
 
-  await fireStatusAutomations(client, BOOKING, 'confirmed');
+  await triggerStatusChange(client, BOOKING, 'confirmed');
 
   assert.strictEqual(calls.length, 0, 'the allowlist must have blocked the send');
   const row = logRow(client);
@@ -181,10 +193,10 @@ test('a real send is still logged as "sent"', async () => {
   process.env.RESEND_API_KEY = 'test-key';
   delete process.env.EMAIL_ALLOWLIST;
   const calls = stubFetch({ ok: true, json: { id: 'resend-abc-123' } });
-  const { fireStatusAutomations } = loadEmail();
+  const { triggerStatusChange } = loadAutomations();
   const client = fakeRuleClient();
 
-  await fireStatusAutomations(client, BOOKING, 'confirmed');
+  await triggerStatusChange(client, BOOKING, 'confirmed');
 
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(logRow(client).params[6], 'sent');
@@ -215,12 +227,12 @@ test('a throwing sendEmail is caught, logged "failed", and does not propagate', 
   process.env.RESEND_API_KEY = 'test-key';
   delete process.env.EMAIL_ALLOWLIST;
   stubFetch({ ok: false, json: { statusCode: 403, message: 'x' } });
-  const { fireStatusAutomations } = loadEmail();
+  const { triggerStatusChange } = loadAutomations();
   const client = fakeRuleClient();
 
   // Returning rules.length (not 0) proves the throw was handled per-rule
-  // rather than escaping into fireStatusAutomations' outer catch.
-  const fired = await fireStatusAutomations(client, BOOKING, 'confirmed');
+  // rather than escaping into triggerStatusChange's outer catch.
+  const fired = await triggerStatusChange(client, BOOKING, 'confirmed');
 
   assert.strictEqual(fired, 1, 'the function must return normally, not via its outer catch');
   const row = logRow(client);
@@ -237,13 +249,13 @@ test('a second rule still fires after the first rule\'s send throws', async () =
   globalThis.fetch = async () => (++n === 1)
     ? { ok: false, json: async () => ({ statusCode: 403, message: 'bad address' }) }
     : { ok: true,  json: async () => ({ id: 'resend-ok' }) };
-  const { fireStatusAutomations } = loadEmail();
+  const { triggerStatusChange } = loadAutomations();
   const client = fakeRuleClient([
     { id: 1, name: 'First',  recipient: 'client', subject: 'A', body_html: '<p>a</p>' },
     { id: 2, name: 'Second', recipient: 'client', subject: 'B', body_html: '<p>b</p>' }
   ]);
 
-  const fired = await fireStatusAutomations(client, BOOKING, 'confirmed');
+  const fired = await triggerStatusChange(client, BOOKING, 'confirmed');
 
   assert.strictEqual(fired, 2);
   assert.strictEqual(n, 2, 'the second rule must still have attempted its send');
