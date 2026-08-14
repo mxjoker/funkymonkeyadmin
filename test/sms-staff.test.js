@@ -36,6 +36,7 @@ test('email goes out unless SMS-only was explicitly chosen', () => {
 });
 
 const { buildOfferMap, offerText } = require('../netlify/functions/staff-assignments.js');
+const { smsSegments } = require('../netlify/functions/_sms.js');
 
 // The letter→role map is stored on the outbound sms_log row so a reply resolves
 // against what was actually offered, not against the open-gig list at reply
@@ -58,5 +59,6 @@ test('the offer text lists every letter and the STOP notice', () => {
   assert.match(txt, /a\) Foam Operator/);
   assert.match(txt, /b\) Setup/);
   assert.match(txt, /Reply STOP to opt out/);
-  assert.ok(txt.length <= 320, `offer must fit two segments, was ${txt.length}`);
+  const segs = smsSegments(txt);
+  assert.ok(segs <= 2, `offer must fit two segments, was ${segs} (${txt.length} chars)`);
 });

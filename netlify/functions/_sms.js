@@ -70,6 +70,50 @@ function renderSms(template, booking = {}, link) {
     .replace(/{{payment_link}}/g,      link || '');
 }
 
+// ── GSM-7 encoding ──────────────────────────────────────────────────────────
+// SMS segment size depends on the alphabet, not the character count: GSM-7 is
+// 153 chars per concatenated segment, but ONE character outside it pushes the
+// whole message to UCS-2 at 67. A single "·" or "—" therefore doubles the
+// segment count of an otherwise short message — invisibly, because nothing
+// about the string looks wrong.
+//
+// Applied inside sendSms so every template is covered, including ones later
+// tasks add. Transliteration changes glyphs, never meaning: an em dash reads
+// as a hyphen and nobody notices. Anything not on this list is left alone and
+// simply sends as UCS-2 — we do not mangle text we do not understand.
+const GSM7_BASIC = '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà';
+const GSM7_EXTENDED = '^{}\\[~]|€';  // each of these costs two GSM-7 characters
+
+const SMART_PUNCTUATION = [
+  [/[–—]/g, '-'],    // en dash, em dash
+  [/['']/g, "'"],    // curly single quotes
+  [/[""]/g, '"'],    // curly double quotes
+  [/…/g, '...'],          // ellipsis
+  [/·/g, '-'],            // middle dot
+  [/ /g, ' '],            // non-breaking space
+];
+
+function toGsm7(text) {
+  return SMART_PUNCTUATION.reduce((s, [re, to]) => s.replace(re, to), String(text ?? ''));
+}
+
+// Segments the message will actually cost. Exported so tests can assert the
+// real budget rather than a character count that does not imply it.
+function smsSegments(text) {
+  const s = String(text ?? '');
+  let units = 0, gsm = true;
+  for (const ch of s) {
+    if (GSM7_BASIC.includes(ch)) units += 1;
+    else if (GSM7_EXTENDED.includes(ch)) units += 2;
+    else { gsm = false; break; }
+  }
+  if (!gsm) {
+    const u16 = s.length;                       // UCS-2 counts UTF-16 code units
+    return u16 <= 70 ? 1 : Math.ceil(u16 / 67);
+  }
+  return units <= 160 ? 1 : Math.ceil(units / 153);
+}
+
 // ── Letter reply parsing ─────────────────────────────────────────────────────
 // An offer lists roles as lettered options; a reply may combine them ("ac").
 // Resolved against the offer_map stored on THAT outbound message, never against
@@ -169,6 +213,7 @@ async function logSms(client, row) {
 //
 // `meta.now` exists only so quiet hours are testable without faking the clock.
 async function sendSms(client, to, body, meta = {}) {
+  body = toGsm7(body);
   const sid   = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
   const from  = process.env.TWILIO_PHONE_NUMBER;
@@ -246,4 +291,4 @@ async function sendSms(client, to, body, meta = {}) {
   }
 }
 
-module.exports = { normalisePhone, isQuietHours, renderSms, parseLetters, ensureSmsTables, isOptedOut, logSms, sendSms };
+module.exports = { normalisePhone, isQuietHours, renderSms, parseLetters, ensureSmsTables, isOptedOut, logSms, sendSms, toGsm7, smsSegments };

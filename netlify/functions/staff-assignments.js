@@ -900,17 +900,20 @@ const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 // insert is keyed on (booking_id, staff_id, tag_filled) — someone who matches
 // two roles on one gig is two distinct rows, not one.
 function buildOfferMap(matchedTags, bookingId) {
+  if (matchedTags.length > LETTERS.length) {
+    console.error(`buildOfferMap: ${matchedTags.length} roles exceeds the ${LETTERS.length}-letter alphabet — booking ${bookingId}, extras dropped`);
+  }
   const map = {};
   matchedTags.forEach((tag, i) => { map[LETTERS[i]] = { booking_id: bookingId, tag_filled: tag }; });
   return map;
 }
 
-// Written for the medium: two segments (320 chars) is the budget, and a
-// reformatted email blows it four times over.
+// Written for the medium: two segments is the budget. GSM-7 normalization in
+// sendSms converts smart punctuation, but this template avoids them anyway.
 function offerText(booking, dateStr, offerMap) {
   const lines = Object.entries(offerMap).map(([ltr, v]) => `${ltr}) ${v.tag_filled}`).join('\n');
   const when = `${dateStr}${booking.event_time ? ' ' + booking.event_time : ''}`;
-  return `Gig available: ${booking.service_name}\n${when} · ${booking.event_zip || 'OKC'}\n${lines}\nReply with any combination (a, ab) if you're interested. Reply STOP to opt out.`;
+  return `Gig available: ${booking.service_name}\n${when} - ${booking.event_zip || 'OKC'}\n${lines}\nReply with any combination (a, ab) if you're interested. Reply STOP to opt out.`;
 }
 
 // ── The one gig-available notifier ───────────────────────────────────────────

@@ -178,3 +178,19 @@ test('a message that sends successfully but fails to log returns logged: false',
   assert.strictEqual(res.logged, false, 'but the log write failed, so logged: false');
   assert.ok(res.sid, 'SID is present because Twilio accepted it');
 });
+
+// ── Segment counting: encoding cliffs ──────────────────────────────────────
+test('100 pure-ASCII characters fit in one GSM-7 segment', () => {
+  const { smsSegments } = loadSms();
+  const ascii = 'a'.repeat(100);
+  assert.strictEqual(smsSegments(ascii), 1, '100 ASCII chars <= 160 GSM-7 limit');
+});
+
+test('the same message with a single em dash becomes two segments', () => {
+  const { smsSegments } = loadSms();
+  const ascii = 'a'.repeat(70);
+  assert.strictEqual(smsSegments(ascii), 1, 'baseline: 70 ASCII chars = 1 GSM-7 segment');
+  const withDash = ascii + ' — ';
+  const segs = smsSegments(withDash);
+  assert.strictEqual(segs, 2, '1 em dash (UCS-2) pushes 73 UTF-16 units into 2 segments at 67 units per segment');
+});
