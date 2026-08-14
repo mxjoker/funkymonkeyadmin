@@ -362,9 +362,17 @@ exports.handler = async (event) => {
                     b.client_name, b.client_phone, b.client_email,
                     b.total_price, b.deposit_paid, b.balance_due,
                     b.notes as client_notes, b.status as booking_status,
-                    gl.status as checklist_status, gl.id as log_id
+                    gl.status as checklist_status, gl.id as log_id,
+                    -- The staff portal shows the party window (event_time +
+                    -- duration) alongside the shift window (sa.schedule_start
+                    -- + sa.total_minutes, both already computed by
+                    -- autoCalcTimes). Without the duration a gig reads as a
+                    -- start time with no end, which is what staff were asking
+                    -- about: "when am I working", not just "what day".
+                    svc.duration_minutes
              FROM staff_assignments sa
              JOIN bookings b ON b.id = sa.booking_id
+             LEFT JOIN services svc ON svc.service_id = b.service_id
              LEFT JOIN gig_logs gl ON gl.assignment_id = sa.id
              WHERE sa.staff_id = $1
                AND b.event_date >= CURRENT_DATE
@@ -386,9 +394,14 @@ exports.handler = async (event) => {
             const { rows } = await client.query(
               `SELECT DISTINCT b.id, b.reference, b.service_name, b.event_date, b.event_time,
                       b.event_type, b.guest_count, b.event_zip, b.status as booking_status,
-                      ss.tag_required
+                      ss.tag_required,
+                      -- No assignment exists yet, so there is no schedule_start
+                      -- to show. The party window still tells someone deciding
+                      -- whether to take the gig how long it runs.
+                      svc.duration_minutes
                FROM bookings b
                JOIN staff_slots ss ON ss.service_id = b.service_id
+               LEFT JOIN services svc ON svc.service_id = b.service_id
                WHERE b.status = ANY($3::text[])
                  AND b.event_date >= CURRENT_DATE
                  AND ss.tag_required = ANY($1::text[])

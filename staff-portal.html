@@ -139,6 +139,44 @@ function fmtTime(t) {
   } catch { return t; }
 }
 
+// ══ PURE TIME HELPERS — extracted verbatim by test/staff-portal-times.test.js ══
+// Nothing in this block may touch the DOM or page state.
+
+// "14:00" + 90 -> "15:30". Accepts the "14:00:00" Postgres hands back.
+// Returns '' rather than a wrong time when the input is unusable, because a
+// staff member acting on a made-up finish time is worse than seeing none.
+function addMinutes(hhmm, mins) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm || ''));
+  if (!m) return '';
+  // Number(null) and Number('') are both 0, so a missing duration would
+  // otherwise add nothing and render a zero-length window ("2:00 PM – 2:00
+  // PM"). A gig of no length is never real: treat it as unknown.
+  const n = Number(mins);
+  if (!isFinite(n) || n <= 0) return '';
+  const total = Number(m[1]) * 60 + Number(m[2]) + Math.round(n);
+  // A gig running past midnight wraps rather than reading "26:30".
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
+}
+
+// "10:00 AM – 11:30 AM", or just the start when the length is unknown — an
+// open-ended range is honest, an invented one is not.
+function timeRange(start, mins) {
+  if (!start) return '';
+  const end = addMinutes(start, mins);
+  return end ? `${fmtTime(start)} – ${fmtTime(end)}` : fmtTime(start);
+}
+
+// Minutes -> "6h 15m" / "45m", for the shift length badge.
+function fmtDuration(mins) {
+  const n = Number(mins);
+  if (!isFinite(n) || n <= 0) return '';
+  const h = Math.floor(n / 60), m = Math.round(n % 60);
+  return h ? (m ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
+}
+
+// ══ END PURE TIME HELPERS ══
+
 // ═══════════════════════════════════════
 // AUTH
 // ═══════════════════════════════════════
@@ -464,6 +502,40 @@ function gigCard(g, isAssigned) {
         ${g.event_time?`<div style="font-size:.75rem;color:#a78bca">${fmtTime(g.event_time)}</div>`:''}
       </div>
     </div>
+
+    ${(() => {
+      // Two different windows, and staff care about both: when they are
+      // WORKING (leave the house, load, drive, set up, run it, pack out) and
+      // when the PARTY itself runs. Showing only the party time meant people
+      // turned up at the party start with no set-up allowance.
+      const shift = timeRange(g.schedule_start, g.total_minutes);
+      const party = timeRange(g.event_time, g.duration_minutes);
+      const len   = fmtDuration(g.total_minutes);
+      if (!shift && !party) return '';
+      // schedule_start is only computed when someone is actually assigned
+      // (autoCalcTimes runs on the assign path, not on expressing interest),
+      // so a pending gig legitimately has no shift window. Say that rather
+      // than leaving a gap that reads as a broken screen.
+      const shiftRow = shift
+        ? `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:${party ? '6px' : '0'}">
+             <span style="color:#c084fc;font-weight:800;min-width:52px">⏱ Shift</span>
+             <span style="color:#fff;font-weight:700">${shift}</span>
+             ${len ? `<span style="color:#a78bca;font-size:.72rem">(${len} total)</span>` : ''}
+           </div>`
+        : `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:${party ? '6px' : '0'}">
+             <span style="color:#c084fc;font-weight:800;min-width:52px">⏱ Shift</span>
+             <span style="color:#a78bca;font-style:italic">${isAssigned ? 'not calculated yet' : 'set once you are confirmed'}</span>
+           </div>`;
+      return `
+      <div style="margin-top:10px;padding:10px;background:rgba(124,58,237,.12);border:1px solid rgba(168,85,247,.25);border-radius:8px;font-size:.8rem">
+        ${shiftRow}
+        ${party ? `<div style="display:flex;align-items:baseline;gap:8px">
+          <span style="color:#c084fc;font-weight:800;min-width:52px">🎉 Party</span>
+          <span style="color:#fff;font-weight:700">${party}</span>
+        </div>` : ''}
+        ${shift && party ? `<div style="color:#a78bca;font-size:.7rem;margin-top:6px;font-style:italic">Shift includes load, drive, set-up and pack-out.</div>` : ''}
+      </div>`;
+    })()}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:.78rem;color:#a78bca;margin-top:10px">
       ${(() => {
         const place = [isAssigned ? g.event_location : '', g.event_zip].filter(Boolean).join(', ');
@@ -487,6 +559,15 @@ function openGigCard(g) {
       <div>
         <div style="font-weight:700;color:#fff">${esc(g.service_name)}</div>
         <div style="font-size:.75rem;color:#a78bca;margin-top:3px">${fmtDateShort(g.event_date)} · ${esc(g.event_zip||'OKC area')} · ${g.guest_count||'?'} guests</div>
+        ${(() => {
+          // Nobody has been assigned yet, so there is no shift window to show
+          // — but someone deciding whether to put their hand up still needs to
+          // know when the party runs, not just which day it falls on.
+          const party = timeRange(g.event_time, g.duration_minutes);
+          return party
+            ? `<div style="font-size:.78rem;color:#fff;font-weight:700;margin-top:4px">🎉 ${party}</div>`
+            : `<div style="font-size:.75rem;color:#f59e0b;margin-top:4px">⏰ Time TBC</div>`;
+        })()}
         <div style="margin-top:6px"><span style="background:rgba(168,85,247,.15);color:#c084fc;border-radius:4px;padding:2px 8px;font-size:.73rem;font-weight:700">${esc(g.tag_required)}</span></div>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
