@@ -8,6 +8,13 @@ const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems,
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
+// The exact consent wording shown beside the checkbox on booking-form.html.
+// Stored verbatim on any booking that consents, because the evidentiary
+// question is never "did a box get ticked" but "what did they agree to". If the
+// form's wording changes, change it here in the same commit — a consent record
+// that quotes wording nobody ever saw is worse than no record.
+const SMS_CONSENT_TEXT = "Yes, send me text messages about my booking at the number above. You'll get booking confirmations, deposit and payment links, a reminder before your event, and a review request afterwards — around 2-5 messages per booking. Msg & data rates may apply. Reply STOP to cancel, HELP for help. Consent is not a condition of booking.";
+
 // Public field subset per API contract.
 //
 // Every name here must be a real bookings column: pickPublicFields does
@@ -86,6 +93,13 @@ async function ensureTable(client) {
 
   // Add any missing columns for backwards compat
   const cols = [
+    // Express SMS consent, captured at the booking form. NOT a duplicate of
+    // sms_optout: that is a global STOP list, this is the positive record that
+    // this person agreed, when, and to what wording. Carrier vetting requires
+    // the affirmative act; this is where the evidence of it lives.
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS sms_consent BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS sms_consent_at TIMESTAMPTZ",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS sms_consent_text TEXT DEFAULT ''",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS reference VARCHAR(20)",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'review'",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS service_id VARCHAR(64)",
@@ -280,6 +294,10 @@ exports.handler = async (event) => {
 
     // ── Validation (contract §POST /api/bookings) ────────────────────────────
     const clientName = String(b.client_name || '').trim();
+    // Strict true. An absent field, a string, or anything else is NOT consent —
+    // this is the record that says a person affirmatively agreed, so it must
+    // never be produced by a truthy accident.
+    const smsConsent = b.sms_consent === true;
     if (!isDraft && !clientName) return json(400, { error: 'client_name is required' });
     if (clientName.length > 120) return json(400, { error: 'client_name too long (max 120)' });
 
@@ -386,7 +404,8 @@ exports.handler = async (event) => {
           client_name, client_phone, client_email, referral_source,
           child_name, brand,
           organisation_name, occasion, surface_type, venue, customer_type,
-          guests_of_honour, deposit_paid_at, deposit_method, deposit_ref
+          guests_of_honour, deposit_paid_at, deposit_method, deposit_ref,
+          sms_consent, sms_consent_at, sms_consent_text
         ) VALUES (
           $1, $29,
           $2, $3, $4,
@@ -398,7 +417,8 @@ exports.handler = async (event) => {
           $23, $24, $25, $26,
           $27, $28,
           $30, $31, $32, $33, $34,
-          $35, $36, $37, $38
+          $35, $36, $37, $38,
+          $39, $40, $41
         ) RETURNING *
       `, [
         reference,
@@ -439,6 +459,9 @@ exports.handler = async (event) => {
         depositPaidAt,
         cap255(b.deposit_method),
         cap255(b.deposit_ref),
+        smsConsent,
+        smsConsent ? new Date() : null,
+        smsConsent ? SMS_CONSENT_TEXT : '',
       ]);
 
       const booking = rows[0];

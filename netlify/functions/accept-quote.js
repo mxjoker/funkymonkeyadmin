@@ -7,8 +7,9 @@ const { withClient } = require('./_db');
 const { CORS, preflight } = require('./_auth');
 const {
   wrap, esc, sendEmail, logEmail, logStatus, logChange,
-  ensureEmailLog, ensureBookingChanges, fireStatusAutomations,
+  ensureEmailLog, ensureBookingChanges,
 } = require('./_email');
+const { triggerStatusChange } = require('./automations');
 const { ensureBookingItems, getItems } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
@@ -122,7 +123,7 @@ exports.handler = async (event) => {
 
       // Any admin-configured rules for the 'accepted' rung fire too. This is
       // additive — there are none today, and it costs one indexed query.
-      await fireStatusAutomations(c, updated, 'accepted', updated.stripe_payment_link || null);
+      await triggerStatusChange(c, updated, 'accepted', updated.stripe_payment_link || null);
 
       return json(200, { success: true, status: 'accepted', reference: updated.reference });
     } catch (e) {

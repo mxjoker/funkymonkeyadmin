@@ -1,6 +1,7 @@
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
 const { wrap, render, esc, sendEmail, logStatus, logEmail, ensureEmailLog } = require('./_email');
+const { sendSms, renderSms, ensureSmsTables } = require('./_sms');
 
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 
@@ -35,6 +36,15 @@ async function ensureTables(client) {
 
   // email_log: owned by _email.js (its rule_id column links to automation_rules)
   await ensureEmailLog(client);
+
+  // SMS is a channel on this engine, not a parallel system: same triggers, same
+  // rule editor, so "when do we contact people" stays defined in one place.
+  // body_sms is its own column rather than a stripped body_html — SMS bills per
+  // 160 characters, and a reformatted email is four segments of nobody's idea
+  // of a text message.
+  await client.query("ALTER TABLE automation_rules ADD COLUMN IF NOT EXISTS channel VARCHAR(8) DEFAULT 'email'");
+  await client.query("ALTER TABLE automation_rules ADD COLUMN IF NOT EXISTS body_sms TEXT DEFAULT ''");
+  await ensureSmsTables(client);
 
   // booking_tasks: per-booking admin checklist
   await client.query(`
@@ -103,38 +113,99 @@ async function ensureTables(client) {
   return schemaReady;
 }
 
-// ── Send one automation email (uses shared _email helpers) ───────────────────
-async function sendAutomationEmail(client, rule, booking, stripeLink) {
+// ── SMS de-dupe guard ────────────────────────────────────────────────────────
+// Deliberately NOT `status='sent'`, which is what the email guard uses. An SMS
+// row is 'queued' until the delivery callback lands, and stays 'queued' forever
+// if the carrier drops it — so a status filter would never suppress anything.
+// The question here is "did we already try", and any row answers it.
+async function alreadySmsSent(client, ruleId, bookingId) {
+  const { rows } = await client.query(
+    'SELECT id FROM sms_log WHERE rule_id=$1 AND booking_id=$2 LIMIT 1', [ruleId, bookingId]
+  );
+  return rows.length > 0;
+}
+
+// ── Send one rule, on whichever channels it asks for ─────────────────────────
+// The single choke point for triggerStatusChange and all three scheduled loops.
+// Returns true if anything went out on any channel.
+//
+// ponytail: a channel='both' rule whose email succeeds is excluded by the outer
+// email_log guard on the next run, so a failed SMS half is not retried. Neither
+// is a failed email today. Add a per-channel outer guard if that ever bites.
+async function sendAutomationMessage(client, rule, booking, stripeLink, now) {
   const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
-  const toEmail = rule.recipient === 'admin' ? NOTIFY : booking.client_email;
-  if (!toEmail) return false;
-  const subject = render(rule.subject, booking, stripeLink);
-  const html    = wrap(render(rule.body_html, booking, stripeLink));
-  // Guarded here rather than at each loop: this is the single choke point for
-  // triggerStatusChange and all three scheduled loops, so one bad recipient
-  // can never abort the rest of the batch.
-  try {
-    const res = await sendEmail(toEmail, subject, html);
-    await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient, logStatus(res));
-    return true;
-  } catch (e) {
-    console.error('automation email failed:', toEmail, '| rule:', rule.name, '|', e.message);
-    await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient, 'failed', e.message);
-    return false;
+  const channel = rule.channel || 'email';
+  let sentAnything = false;
+
+  // SMS first, and above the email recipient check — an SMS-only rule must not
+  // be skipped because the booking happens to have no email address.
+  if (channel === 'sms' || channel === 'both') {
+    const toAdmin = rule.recipient === 'admin';
+    const toPhone = toAdmin ? process.env.NOTIFY_SMS : booking.client_phone;
+    const smsBody = renderSms(rule.body_sms || '', booking, stripeLink);
+    // A client is texted only if they ticked the consent box. sms_optout is a
+    // global STOP list and answers a different question — "did they ask us to
+    // stop" — which is not the same as "did they ever agree to start". Having a
+    // phone number is not consent to be texted on it. Admin messages go to Joe's
+    // own number and need no such record.
+    if (!toAdmin && booking.sms_consent !== true) {
+      console.log('automation SMS skipped — no client SMS consent | rule:', rule.name, '| booking:', booking.id);
+    } else if (!toPhone) {
+      console.error('automation SMS skipped — no phone | rule:', rule.name, '| booking:', booking.id);
+    } else if (!smsBody.trim()) {
+      console.error('automation SMS skipped — rule has an empty body_sms | rule:', rule.name);
+    } else if (await alreadySmsSent(client, rule.id, booking.id)) {
+      console.log('automation SMS skipped — already sent | rule:', rule.name, '| booking:', booking.id);
+    } else {
+      const res = await sendSms(client, toPhone, smsBody, {
+        booking_id: booking.id, rule_id: rule.id, trigger_label: rule.name, now
+      });
+      if (res.status === 'queued' || res.status === 'held') sentAnything = true;
+    }
   }
+
+  if (channel === 'email' || channel === 'both') {
+    const toEmail = rule.recipient === 'admin' ? NOTIFY : booking.client_email;
+    if (toEmail) {
+      const subject = render(rule.subject, booking, stripeLink);
+      const html    = wrap(render(rule.body_html, booking, stripeLink));
+      // Guarded here rather than at each loop: one bad recipient must never
+      // abort the rest of the batch.
+      try {
+        const res = await sendEmail(toEmail, subject, html);
+        await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient, logStatus(res));
+        sentAnything = true;
+      } catch (e) {
+        console.error('automation email failed:', toEmail, '| rule:', rule.name, '|', e.message);
+        await logEmail(client, booking.id, rule.id, rule.name, subject, toEmail, rule.recipient, 'failed', e.message);
+      }
+    }
+  }
+
+  return sentAnything;
 }
 
 // ── Trigger: status_change ────────────────────────────────────────────────────
-// Called from booking.js when status changes
+// The one status-change loop. _email.js used to carry a near-identical
+// fireStatusAutomations — the live path, while this one was reachable only via
+// an HTTP action nothing called. Two copies of a rule loop is how a channel gets
+// added to one of them and half the messages quietly stop.
 async function triggerStatusChange(client, booking, newStatus, stripeLink) {
-  const { rows: rules } = await client.query(
-    `SELECT * FROM automation_rules
-     WHERE active=TRUE AND trigger_event='status_change' AND trigger_status=$1
-     ORDER BY sort_order`,
-    [newStatus]
-  );
-  for (const rule of rules) {
-    await sendAutomationEmail(client, rule, booking, stripeLink);
+  try {
+    await ensureTables(client);
+    const { rows: rules } = await client.query(
+      `SELECT * FROM automation_rules
+       WHERE active=TRUE AND trigger_event='status_change' AND trigger_status=$1
+       ORDER BY sort_order`,
+      [newStatus]
+    );
+    for (const rule of rules) {
+      await sendAutomationMessage(client, rule, booking, stripeLink);
+    }
+    return rules.length;
+  } catch (e) {
+    console.error('triggerStatusChange error:', e.message);
+    return 0;
   }
 }
 
@@ -166,7 +237,7 @@ async function runScheduledAutomations(client) {
       [dateStr, rule.id]
     );
     for (const booking of bookings) {
-      if (await sendAutomationEmail(client, rule, booking, null)) sent++;
+      if (await sendAutomationMessage(client, rule, booking, null)) sent++;
     }
   }
 
@@ -191,7 +262,7 @@ async function runScheduledAutomations(client) {
       [dateStr, rule.id]
     );
     for (const booking of bookings) {
-      if (await sendAutomationEmail(client, rule, booking, null)) sent++;
+      if (await sendAutomationMessage(client, rule, booking, null)) sent++;
     }
   }
 
@@ -214,7 +285,7 @@ async function runScheduledAutomations(client) {
       [rule.trigger_status, rule.trigger_days, rule.id]
     );
     for (const booking of bookings) {
-      if (await sendAutomationEmail(client, rule, booking, null)) sent++;
+      if (await sendAutomationMessage(client, rule, booking, null)) sent++;
     }
   }
 
@@ -330,19 +401,52 @@ exports.handler = async (event) => {
       if (action === 'save_rule') {
         const r = body.rule;
         if (r.id) {
+          // A partial update (toggleRule sends only {id, active}) must not blank
+          // out every other column — this UPDATE used to set name/trigger_event/
+          // subject/body_html unconditionally from an object that had none of
+          // them, which violated their NOT NULL constraints and 500'd, silently
+          // killing the active toggle.
+          //
+          // COALESCE($n, column) preserves the stored value when a field is
+          // absent from the request (its JS value is `undefined`, sent below as
+          // SQL NULL). `active` is deliberately NOT coalesced: `false` is a real,
+          // meaningful value there, and COALESCE would treat it as "absent" only
+          // if it were null — it isn't — so this is just a plain positional set.
+          //
+          // trigger_status/trigger_days are genuinely nullable and a full save
+          // must be able to CLEAR them (e.g. switching a rule off status_change
+          // unsets trigger_status). COALESCE alone can't tell "absent, preserve"
+          // apart from "explicitly sent as null, clear it" — both arrive as SQL
+          // NULL. So each carries its own hasOwnProperty flag ($4/$6) and a CASE:
+          // present (even if null) → use the sent value; absent → keep the
+          // column untouched. saveRule() always sends both keys on every save
+          // (real value or null), so a full save can still clear them; toggleRule
+          // never sends either key, so they survive a toggle untouched.
+          const has = (k) => Object.prototype.hasOwnProperty.call(r, k);
+          const orNull = (k) => has(k) ? r[k] : null;
           await client.query(
-            `UPDATE automation_rules SET name=$1,active=$2,trigger_event=$3,trigger_status=$4,
-             trigger_days=$5,recipient=$6,subject=$7,body_html=$8,sort_order=$9,updated_at=NOW()
-             WHERE id=$10`,
-            [r.name,r.active!==false,r.trigger_event,r.trigger_status||null,
-             r.trigger_days||null,r.recipient||'client',r.subject,r.body_html,r.sort_order||0,r.id]
+            `UPDATE automation_rules SET
+               name=COALESCE($1, name), active=$2, trigger_event=COALESCE($3, trigger_event),
+               trigger_status=CASE WHEN $4 THEN $5 ELSE trigger_status END,
+               trigger_days=CASE WHEN $6 THEN $7 ELSE trigger_days END,
+               recipient=COALESCE($8, recipient), subject=COALESCE($9, subject),
+               body_html=COALESCE($10, body_html), sort_order=COALESCE($11, sort_order),
+               channel=COALESCE($12, channel), body_sms=COALESCE($13, body_sms),
+               updated_at=NOW()
+             WHERE id=$14`,
+            [orNull('name'), r.active !== false, orNull('trigger_event'),
+             has('trigger_status'), r.trigger_status || null,
+             has('trigger_days'), r.trigger_days || null,
+             orNull('recipient'), orNull('subject'), orNull('body_html'), orNull('sort_order'),
+             orNull('channel'), orNull('body_sms'), r.id]
           );
         } else {
           await client.query(
-            `INSERT INTO automation_rules (name,active,trigger_event,trigger_status,trigger_days,recipient,subject,body_html,sort_order)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+            `INSERT INTO automation_rules (name,active,trigger_event,trigger_status,trigger_days,recipient,subject,body_html,sort_order,channel,body_sms)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
             [r.name,r.active!==false,r.trigger_event,r.trigger_status||null,
-             r.trigger_days||null,r.recipient||'client',r.subject,r.body_html,r.sort_order||0]
+             r.trigger_days||null,r.recipient||'client',r.subject,r.body_html,r.sort_order||0,
+             r.channel||'email',r.body_sms||'']
           );
         }
         return json(200, { success: true });
@@ -399,3 +503,6 @@ module.exports.handler = exports.handler;
 // clicked "run scheduled" in the admin UI.
 module.exports.runScheduledAutomations = runScheduledAutomations;
 module.exports.ensureTables = ensureTables;
+module.exports.triggerStatusChange = triggerStatusChange;
+module.exports.sendAutomationMessage = sendAutomationMessage;
+module.exports.alreadySmsSent = alreadySmsSent;

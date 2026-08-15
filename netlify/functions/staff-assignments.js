@@ -3,6 +3,7 @@ const {
   CORS, preflight, requireAuth, unauthorized, forbidden,
 } = require('./_auth');
 const { sendEmail, wrap } = require('./_email');
+const { sendSms, ensureSmsTables } = require('./_sms');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -10,9 +11,40 @@ const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stri
 // address must never fail the assignment/claim/survey it accompanies, nor stop
 // the loop that notifies the remaining staff. Guarded here so all four call
 // sites (and any future one) are covered by one catch.
-const notify = ({ to_email, subject, html }) =>
-  sendEmail(to_email, subject, html)
+// A staff member who unchecked Email does not get one. Guarded at the one
+// door so a future call site cannot forget. Calls with no `staff` (the
+// owner-notification at the survey path) always send.
+const notify = ({ to_email, subject, html, staff }) => {
+  if (staff && !wantsEmail(staff)) return Promise.resolve();
+  return sendEmail(to_email, subject, html)
     .catch(e => console.error('staff notify failed:', to_email, '|', e.message));
+};
+
+// Staff SMS rides on comms_preference, the column that has been on the staff
+// table — with an "SMS (coming soon)" option in both UIs — since before this
+// feature existed. A second opt-in mechanism would mean two places to check and
+// one of them eventually being missed.
+const wantsSms = (s) => ['sms', 'both'].includes(s && s.comms_preference);
+
+// Only an explicit SMS-only choice suppresses email. Anything else — 'email',
+// 'both', the legacy 'call', null, '' — still gets one. Defaulting the unknown
+// cases to "send it" is deliberate: this codebase's signature bug is the
+// silent non-delivery, and a staff member who quietly stops being told about
+// gigs is exactly that shape.
+const wantsEmail = (s) => (s && s.comms_preference) !== 'sms';
+
+// Fire-and-forget, same contract as notify() above: a Twilio outage must never
+// fail the assignment it accompanies. sendSms does not throw, but ensureSmsTables
+// can, so the whole thing is guarded.
+async function notifySms(client, staff, body, meta = {}) {
+  if (!wantsSms(staff) || !staff.phone) return;
+  try {
+    await ensureSmsTables(client);
+    await sendSms(client, staff.phone, body, { ...meta, staff_id: staff.id });
+  } catch (e) {
+    console.error('staff notifySms failed:', staff.staff_id, '|', e.message);
+  }
+}
 
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 const PORTAL = `${SITE}/staff-portal.html`;
@@ -451,14 +483,8 @@ exports.handler = async (event) => {
             staff_id = auth.staffId;
           }
 
-          const { rows } = await client.query(
-            `INSERT INTO staff_assignments (booking_id, staff_id, tag_filled, status)
-             VALUES ($1,$2,$3,$4)
-             ON CONFLICT (booking_id, staff_id, tag_filled) DO UPDATE SET status=$4, updated_at=NOW()
-             RETURNING *`,
-            [parseInt(booking_id), parseInt(staff_id), tag_filled, status || 'interested']
-          );
-          return json(200, rows[0]);
+          const row = await expressInterest(client, { booking_id, staff_id, tag_filled, status });
+          return json(200, row);
         }
 
         if (action === 'update_checklist') {
@@ -743,6 +769,7 @@ exports.handler = async (event) => {
             await notify({
               to_email: s.email,
               to_name: s.preferred_name || s.name,
+              staff: s,
               subject: `✅ You're booked! ${b.service_name} on ${dateStr}`,
               html: wrap(`
                 <p style="font-size:16px;margin-bottom:16px">Hi <strong>${s.preferred_name || s.name}</strong>! 🎉</p>
@@ -760,6 +787,15 @@ exports.handler = async (event) => {
                 <p style="font-size:12px;color:#A78BCA;text-align:center">Questions? Contact Joe at <a href="tel:4054316625" style="color:#06B6D4">(405) 431-6625</a></p>
               `)
             });
+
+            // Shift start, not just the event time: the whole point of the text
+            // is the number the crew member has to set an alarm for.
+            const smsTime = fa.schedule_start
+              ? toStr(toMins(fa.schedule_start))
+              : (b.event_time || 'TBD');
+            await notifySms(client, s,
+              `You're booked: ${b.service_name}, ${dateStr}. Load up ${smsTime}, ${b.event_zip || 'OKC'}. Details in the portal: ${PORTAL}`,
+              { booking_id: b.id, trigger_label: "You're booked" });
           }
 
           return json(200, assignment);
@@ -850,6 +886,30 @@ exports.handler = async (event) => {
   }
 };
 
+// ── Letter-mapped offers ─────────────────────────────────────────────────────
+const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+
+// One letter per role this staff member matched on this booking. The value is
+// {booking_id, tag_filled} rather than a bare booking id because the interest
+// insert is keyed on (booking_id, staff_id, tag_filled) — someone who matches
+// two roles on one gig is two distinct rows, not one.
+function buildOfferMap(matchedTags, bookingId) {
+  if (matchedTags.length > LETTERS.length) {
+    console.error(`buildOfferMap: ${matchedTags.length} roles exceeds the ${LETTERS.length}-letter alphabet — booking ${bookingId}, extras dropped`);
+  }
+  const map = {};
+  matchedTags.forEach((tag, i) => { map[LETTERS[i]] = { booking_id: bookingId, tag_filled: tag }; });
+  return map;
+}
+
+// Written for the medium: two segments is the budget. GSM-7 normalization in
+// sendSms converts smart punctuation, but this template avoids them anyway.
+function offerText(booking, dateStr, offerMap) {
+  const lines = Object.entries(offerMap).map(([ltr, v]) => `${ltr}) ${v.tag_filled}`).join('\n');
+  const when = `${dateStr}${booking.event_time ? ' ' + booking.event_time : ''}`;
+  return `Gig available: ${booking.service_name}\n${when} - ${booking.event_zip || 'OKC'}\n${lines}\nReply with any combination (a, ab) if you're interested. Reply STOP to opt out.`;
+}
+
 // ── The one gig-available notifier ───────────────────────────────────────────
 // Both the manual "Notify Staff" button and the automatic on-booking hook run
 // through here. They were two near-identical copies that had already drifted;
@@ -890,6 +950,7 @@ async function notifyStaffForBooking(client, booking) {
     await notify({
       to_email: staff.email,
       to_name: staff.preferred_name || staff.name,
+      staff,
       subject: `🎪 Gig Available — ${booking.service_name} on ${dateStr}`,
       html: wrap(`
         <p style="font-size:16px;margin-bottom:16px">Hi <strong>${staff.preferred_name || staff.name}</strong>! 👋</p>
@@ -906,10 +967,44 @@ async function notifyStaffForBooking(client, booking) {
         <p style="font-size:12px;color:#A78BCA;text-align:center">Log in with your access code · ${PORTAL}</p>
       `)
     });
+    const offerMap = buildOfferMap(matched, booking.id);
+    await notifySms(client, staff, offerText(booking, dateStr, offerMap), {
+      booking_id: booking.id, trigger_label: 'Gig available', offer_map: offerMap
+    });
   }
 
   console.log(`notifyStaffForBooking: notified ${eligible.length} staff for booking ${booking.id} (tags: ${tags.join(', ')})`);
   return { notified: eligible.length, configured: true, tags, eligible: eligible.length };
+}
+
+// The one interest insert. Was inline inside the POST handler; the SMS webhook
+// is a second caller, and two copies of an upsert is how they drift.
+//
+// Staff express interest, Joe assigns — so there is no race and no atomic claim
+// here on purpose. Interest is not exclusive: two people wanting a one-slot role
+// is normal and harmless. The ON CONFLICT is what makes a Twilio webhook retry
+// idempotent: a replayed "ab" updates two rows rather than creating four.
+async function expressInterest(client, { booking_id, staff_id, tag_filled, status }) {
+  const { rows } = await client.query(
+    // 'assigned' is a stronger state than interest and must never be downgraded
+    // by this upsert. A staff member can text a stale offer letter (one that
+    // sat on their phone since before Joe assigned them) long after the 'assign'
+    // action already wrote status='assigned' for the same
+    // (booking_id, staff_id, tag_filled) row — that late reply must not flip
+    // them back to 'interested' and drop them off the day-of reminder / onto
+    // the unstaffed-alert list. Only demotion path is the admin 'unassign'
+    // action, which updates the row directly and does not go through here.
+    `INSERT INTO staff_assignments (booking_id, staff_id, tag_filled, status)
+     VALUES ($1,$2,$3,$4)
+     ON CONFLICT (booking_id, staff_id, tag_filled) DO UPDATE
+       SET status = CASE WHEN staff_assignments.status = 'assigned'
+                         THEN staff_assignments.status
+                         ELSE EXCLUDED.status END,
+           updated_at = NOW()
+     RETURNING *`,
+    [parseInt(booking_id), parseInt(staff_id), tag_filled, status || 'interested']
+  );
+  return rows[0];
 }
 
 // Exported for use by bookings.js / booking.js — fires automatically on a new
@@ -933,3 +1028,9 @@ exports.STAFFABLE_STATUSES = STAFFABLE_STATUSES;
 exports.isStaffable = isStaffable;
 exports.slotTags = slotTags;
 exports.eligibleStaff = eligibleStaff;
+exports.wantsSms = wantsSms;
+exports.wantsEmail = wantsEmail;
+exports.buildOfferMap = buildOfferMap;
+exports.offerText = offerText;
+exports.expressInterest = expressInterest;
+exports.ensureTables = ensureTables;

@@ -31,3 +31,6 @@ admin.html.backup-*
 # Secrets that must never be committed even by accident
 FME Passcodes/
 *Passcode*
+
+# SDD scratch workspace (ledger, briefs, review packages)
+.superpowers/

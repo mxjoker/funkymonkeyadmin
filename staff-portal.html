@@ -677,6 +677,18 @@ async function submitSurvey(logId) {
 </script>
 
 <script>
+// Checkbox pair -> the stored comms_preference value. Returns null when
+// neither is ticked, so the caller can refuse to save rather than write a
+// staff member into a state where nothing ever reaches them.
+function commsPreferenceFrom(emailId, smsId) {
+  const email = document.getElementById(emailId).checked;
+  const sms   = document.getElementById(smsId).checked;
+  if (email && sms) return 'both';
+  if (email) return 'email';
+  if (sms) return 'sms';
+  return null;
+}
+
 // ═══════════════════════════════════════
 // PREFERENCES MODAL
 // ═══════════════════════════════════════
@@ -697,7 +709,15 @@ async function openPreferences() {
       ${prefField('Phone *','<input id="pf-phone" type="tel" value="'+esc(s.phone||'')+'">')}
       ${prefField('Email *','<input id="pf-email" type="email" value="'+esc(s.email||'')+'">')}
       <div style="grid-column:1/-1">
-        ${prefField('Comms Preference','<select id="pf-comms"><option value="email" '+(s.comms_preference==='email'||!s.comms_preference?'selected':'')+'>Email</option><option value="sms" '+(s.comms_preference==='sms'?'selected':'')+'>SMS (coming soon)</option><option value="call" '+(s.comms_preference==='call'?'selected':'')+'>Phone Call</option></select>')}
+        <label style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#a78bca;font-weight:700;display:block;margin-bottom:4px">Notifications &amp; reminders</label>
+        <div style="display:flex;gap:16px;padding:9px 0">
+          <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;font-weight:400;color:#fff">
+            <input type="checkbox" id="pf-comms-email" ${s.comms_preference!=='sms'?'checked':''}> Email
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;font-weight:400;color:#fff">
+            <input type="checkbox" id="pf-comms-sms" ${['sms','both'].includes(s.comms_preference)?'checked':''}> SMS
+          </label>
+        </div>
       </div>
     </div>
     <div style="margin-bottom:16px">
@@ -730,12 +750,14 @@ async function savePreferences() {
   const phone = document.getElementById('pf-phone').value.trim();
   const email = document.getElementById('pf-email').value.trim();
   if (!phone || !email) { alert('Phone and email are required.'); return; }
+  const comms = commsPreferenceFrom('pf-comms-email', 'pf-comms-sms');
+  if (!comms) { alert('Pick at least one way to reach them — email, SMS, or both.'); return; }
   // Only send the fields the server accepts for staff self-PATCH
   const payload = {
     preferred_name:   document.getElementById('pf-pname').value.trim(),
     pronouns:         document.getElementById('pf-pronouns').value.trim(),
     phone, email,
-    comms_preference: document.getElementById('pf-comms').value,
+    comms_preference: comms,
     shared_notes:     document.getElementById('pf-shared').value.trim(),
     staff_notes:      document.getElementById('pf-notes').value.trim(),
   };

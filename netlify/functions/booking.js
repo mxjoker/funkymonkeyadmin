@@ -1,6 +1,7 @@
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
-const { wrap, render, sendEmail, logEmail, fireStatusAutomations, ensureEmailLog, ensureBookingChanges, logChange } = require('./_email');
+const { wrap, render, sendEmail, logEmail, ensureEmailLog, ensureBookingChanges, logChange } = require('./_email');
+const { triggerStatusChange } = require('./automations');
 const { notifyMatchingStaff } = require('./staff-assignments');
 const { ensureBookingItems, replaceItems, rollupItems, getItems, balanceIsDerivable, normaliseItems } = require('./_items');
 
@@ -352,7 +353,7 @@ exports.handler = async (event) => {
 
         // Fire automation rules — single clean path, no fallback duplication
         if (u.status && ["confirmed", "cancelled", "completed"].includes(u.status)) {
-          const sent = await fireStatusAutomations(c, updated, u.status, stripeLink);
+          const sent = await triggerStatusChange(c, updated, u.status, stripeLink);
           console.log(`Fired ${sent} automation(s) for status=${u.status} booking=${updated.reference}`);
         }
 
