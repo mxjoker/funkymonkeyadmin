@@ -275,12 +275,31 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#7c3aed}
         <div class="form-row">
           <label>Phone Number *</label>
           <input type="tel" id="c-phone" placeholder="(405) 555-1234" oninput="chk3()"/>
-          <p style="font-size:.78rem;color:#666;margin-top:4px;line-height:1.5">We'll text you about your booking. Reply STOP to opt out. Message and data rates may apply. See our <a href="https://www.funkymonkeyevents.com/sms-terms" target="_blank" rel="noopener" style="color:#7c3aed">SMS Terms</a> and <a href="https://www.funkymonkeyevents.com/privacy" target="_blank" rel="noopener" style="color:#7c3aed">Privacy Policy</a>.</p>
         </div>
         <div class="form-row">
           <label>Email Address *</label>
           <input type="email" id="c-email" placeholder="jane@example.com" oninput="chk3()"/>
         </div>
+      </div>
+      <!-- Express written consent for SMS.
+           Carrier vetting rejected a passive "we'll text you" notice: consent
+           must be an affirmative act, the box must start UNCHECKED, and all four
+           disclosures (message type, frequency, rates, opt-out) must sit beside
+           it on the same form as the phone field. Do not pre-check this, and do
+           not make it required — consent to texts is never a condition of
+           booking, and making it one fails vetting on its own. -->
+      <div class="form-row" style="background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:10px;padding:14px 16px">
+        <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-weight:400;margin:0">
+          <input type="checkbox" id="c-sms-consent" style="margin-top:3px;width:18px;height:18px;flex-shrink:0;cursor:pointer"/>
+          <span style="font-size:.86rem;color:#1e1b4b;line-height:1.55">
+            <strong>Yes, send me text messages about my booking</strong> at the number above.<br/>
+            <span style="font-size:.78rem;color:#666">
+              You'll get booking confirmations, deposit and payment links, a reminder before your event, and a review request afterwards — around 2–5 messages per booking. Msg &amp; data rates may apply. Reply STOP to cancel, HELP for help. Consent is not a condition of booking. See our
+              <a href="https://www.funkymonkeyevents.com/sms-terms" target="_blank" rel="noopener" style="color:#7c3aed">SMS Terms</a> and
+              <a href="https://www.funkymonkeyevents.com/privacy" target="_blank" rel="noopener" style="color:#7c3aed">Privacy Policy</a>.
+            </span>
+          </span>
+        </label>
       </div>
       <div class="form-row">
         <label>How did you hear about us? <span style="font-weight:400;color:#aaa">(optional)</span></label>
@@ -1265,6 +1284,10 @@ async function submitBooking() {
     client_phone: document.getElementById('c-phone').value.trim(),
     client_email: document.getElementById('c-email').value.trim(),
     referral_source: document.getElementById('c-ref').value,
+    // Express SMS consent. Sent as a plain boolean; the server timestamps it and
+    // records the exact wording shown, because "what did they agree to, and
+    // when" is the whole evidentiary value of a consent record.
+    sms_consent: document.getElementById('c-sms-consent').checked,
     // funkymonkeyevents.com is the FME brand. Sent explicitly rather than
     // leaning on the column default so the wire format states what it means,
     // and so a future JCM or FMMS landing page is a one-line change here.

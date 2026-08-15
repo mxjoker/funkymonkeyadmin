@@ -140,9 +140,17 @@ async function sendAutomationMessage(client, rule, booking, stripeLink, now) {
   // SMS first, and above the email recipient check — an SMS-only rule must not
   // be skipped because the booking happens to have no email address.
   if (channel === 'sms' || channel === 'both') {
-    const toPhone = rule.recipient === 'admin' ? process.env.NOTIFY_SMS : booking.client_phone;
+    const toAdmin = rule.recipient === 'admin';
+    const toPhone = toAdmin ? process.env.NOTIFY_SMS : booking.client_phone;
     const smsBody = renderSms(rule.body_sms || '', booking, stripeLink);
-    if (!toPhone) {
+    // A client is texted only if they ticked the consent box. sms_optout is a
+    // global STOP list and answers a different question — "did they ask us to
+    // stop" — which is not the same as "did they ever agree to start". Having a
+    // phone number is not consent to be texted on it. Admin messages go to Joe's
+    // own number and need no such record.
+    if (!toAdmin && booking.sms_consent !== true) {
+      console.log('automation SMS skipped — no client SMS consent | rule:', rule.name, '| booking:', booking.id);
+    } else if (!toPhone) {
       console.error('automation SMS skipped — no phone | rule:', rule.name, '| booking:', booking.id);
     } else if (!smsBody.trim()) {
       console.error('automation SMS skipped — rule has an empty body_sms | rule:', rule.name);

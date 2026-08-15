@@ -31,7 +31,10 @@ function stubFetch() {
   return calls;
 }
 
-const BOOKING = { id: 5, client_name: 'Dana Ruiz', client_email: 'dana@example.com', client_phone: '405-541-7953', service_name: 'Foam Party', event_date: '2026-08-23' };
+// sms_consent: true — these tests exercise channel routing, which only happens
+// for a client who ticked the consent box. The tests that cover the consent gate
+// itself override this field explicitly.
+const BOOKING = { id: 5, client_name: 'Dana Ruiz', client_email: 'dana@example.com', client_phone: '405-541-7953', service_name: 'Foam Party', event_date: '2026-08-23', sms_consent: true };
 const DAYTIME = new Date('2026-08-15T15:00:00Z');
 
 function creds() {
@@ -178,4 +181,61 @@ test('a partial {id, active} save_rule update does not blank the other columns',
   assert.match(update.sql, /trigger_days=CASE WHEN \$\d+ THEN \$\d+ ELSE trigger_days END/i);
   const hasIdx = update.sql.match(/trigger_status=CASE WHEN \$(\d+)/i)[1] - 1;
   assert.strictEqual(update.params[hasIdx], false, 'trigger_status must be flagged absent, not cleared');
+});
+
+// ── Client SMS consent ───────────────────────────────────────────────────────
+// Carrier vetting rejected a passive "we'll text you" notice on the booking
+// form. Consent is now an unchecked box the customer ticks, and a booking
+// without it must never be texted — having a phone number is not consent.
+test('a client who did not tick the consent box is never texted', async () => {
+  creds();
+  const calls = stubFetch();
+  const { sendAutomationMessage } = loadAutomations();
+
+  await sendAutomationMessage(fakeClient(),
+    { id: 1, name: 'R', channel: 'sms', recipient: 'client', subject: 'S', body_html: '<p>x</p>', body_sms: 'Hi' },
+    { ...BOOKING, sms_consent: false }, null, DAYTIME);
+
+  assert.strictEqual(calls.length, 0, 'no consent means no call to Twilio at all');
+});
+
+// The column defaults to FALSE, but every booking taken before the checkbox
+// existed has no opinion recorded. Absent is not consent.
+test('a booking predating the consent checkbox is never texted', async () => {
+  creds();
+  const calls = stubFetch();
+  const { sendAutomationMessage } = loadAutomations();
+
+  await sendAutomationMessage(fakeClient(),
+    { id: 1, name: 'R', channel: 'sms', recipient: 'client', subject: 'S', body_html: '<p>x</p>', body_sms: 'Hi' },
+    { ...BOOKING, sms_consent: undefined }, null, DAYTIME);
+
+  assert.strictEqual(calls.length, 0, 'an absent consent record must not be read as consent');
+});
+
+test('a client who ticked the box is texted', async () => {
+  creds();
+  const calls = stubFetch();
+  const { sendAutomationMessage } = loadAutomations();
+
+  await sendAutomationMessage(fakeClient(),
+    { id: 1, name: 'R', channel: 'sms', recipient: 'client', subject: 'S', body_html: '<p>x</p>', body_sms: 'Hi' },
+    { ...BOOKING, sms_consent: true }, null, DAYTIME);
+
+  assert.strictEqual(calls.length, 1);
+  assert.match(calls[0].url, /twilio/);
+});
+
+// Admin alerts go to Joe's own number, which needs no consent record.
+test('an admin-recipient rule still sends without a booking consent record', async () => {
+  creds();
+  process.env.NOTIFY_SMS = '+14055550111';
+  const calls = stubFetch();
+  const { sendAutomationMessage } = loadAutomations();
+
+  await sendAutomationMessage(fakeClient(),
+    { id: 1, name: 'R', channel: 'sms', recipient: 'admin', subject: 'S', body_html: '<p>x</p>', body_sms: 'Unstaffed' },
+    { ...BOOKING, sms_consent: false }, null, DAYTIME);
+
+  assert.strictEqual(calls.length, 1, 'admin messages are not gated on client consent');
 });

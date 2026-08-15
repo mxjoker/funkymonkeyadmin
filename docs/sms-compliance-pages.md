@@ -169,17 +169,46 @@ bookings@funkymonkeyevents.com
 
 ## Twilio campaign form — what to paste where
 
-**Opt-in description** (must match the booking form's wording exactly):
+**REJECTED 2026-08-15, and why.** The first submission failed on three counts, all
+about the opt-in form rather than these pages:
 
-> Customers provide their phone number on the booking form at
-> www.funkymonkeyevents.com, where a notice beside the phone field states
-> "We'll text you about your booking. Reply STOP to opt out. Message and data
-> rates may apply." Staff provide their number in their staff portal profile and
-> select SMS as a communication preference.
+1. No wording saying the customer was signing up for texts
+2. Missing the four required disclosures beside the consent point
+3. No phone field "connected to SMS consent" — because the reviewer was sent to
+   www.funkymonkeyevents.com, which has no booking form on it at all. The form
+   lives at **https://funkymonkeyadmin.netlify.app/booking-form.html**, linked
+   from the Contact page. Give them that URL.
 
-**Sample messages** — use real ones from the system:
+All three are fixed: the form now has an unchecked consent checkbox with all four
+disclosures beside it, on the same form as the phone field.
+
+**Opt-in URL to give Twilio:**
+
+> https://funkymonkeyadmin.netlify.app/booking-form.html
+
+**Opt-in description** — this must match the checkbox wording on the form exactly,
+so paste it, do not paraphrase:
+
+> Customers complete a booking request form at
+> https://funkymonkeyadmin.netlify.app/booking-form.html, linked from the Contact
+> page of www.funkymonkeyevents.com. On the same step of the form that collects
+> their phone number, there is an unchecked checkbox reading: "Yes, send me text
+> messages about my booking at the number above. You'll get booking
+> confirmations, deposit and payment links, a reminder before your event, and a
+> review request afterwards — around 2-5 messages per booking. Msg & data rates
+> may apply. Reply STOP to cancel, HELP for help. Consent is not a condition of
+> booking." The box is unchecked by default and the booking can be submitted
+> without ticking it; customers who do not tick it are never sent SMS. Staff
+> provide their number in their staff portal profile and tick an SMS checkbox
+> under "Notifications & reminders".
+
+**Sample messages** — real ones from the system:
 
 1. `You're booked: Foam Party, Sun 8/23. Load up 4:30 PM, 73013. Details in the portal: https://funkymonkeyadmin.netlify.app/staff-portal.html`
 2. `Hi Dana! Your Foam Party on Sun 8/23 is confirmed. Questions? Call (405) 431-6625. Reply STOP to opt out.`
+3. `Funky Monkey Events. Reply with the letters from a gig offer to register interest, or STOP to opt out. Questions: (405) 431-6625.`
 
 **Use case:** Mixed / Customer Care.
+
+**Before you resubmit:** the form must be deployed, or the reviewer opens the old
+version with no checkbox and rejects it again for the same reason.
