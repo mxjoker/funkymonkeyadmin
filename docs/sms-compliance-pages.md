@@ -121,9 +121,9 @@ This is not a marketing or promotional program. We do not send advertising by te
 
 ## How you opt in
 
-Customers provide a mobile number on our booking form, where a notice beside the phone field states: *"We'll text you about your booking. Reply STOP to opt out. Message and data rates may apply."* Submitting the form with a mobile number is your consent to receive the messages described above.
+Customers provide a mobile number on our booking request form, and on the same step of that form there is a checkbox reading *"Yes, send me text messages about my booking at the number above."* The box is unchecked by default. Ticking it is your consent to receive the messages described above; leaving it unticked means we will not text you, and you can still complete your booking.
 
-Staff provide a mobile number in their staff portal profile and choose which channels they want to be reached on. SMS is only sent to staff who have selected it.
+Staff provide a mobile number in their staff portal profile and tick which channels they want to be reached on under "Notifications & reminders". SMS is only sent to staff who have selected it.
 
 Consent to receive text messages is not a condition of any purchase.
 
