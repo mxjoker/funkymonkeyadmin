@@ -141,15 +141,21 @@ tr:hover td{background:#fafaf8}
 /* ── Calendar ── */
 .cal-nav{display:flex;gap:8px;align-items:center}
 .cal-month-label{font-weight:700;color:#1e1b4b;min-width:150px;text-align:center;font-size:.95rem}
-.cal-day-labels{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px}
+/* minmax(0,1fr), not 1fr. A `1fr` track will not shrink below its content's
+   min-content width, so one long service name ("Professor Buckets Bubble Show
+   - Science Theme") pushed every column wider than a seventh and shoved
+   Fri/Sat off the right edge of a phone. The days were not hidden, they were
+   pushed outside the viewport. minmax(0,…) lets the track shrink and hands the
+   overflow back to the ellipsis inside each event chip. */
+.cal-day-labels{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;margin-bottom:3px}
 .cal-day-label{text-align:center;font-size:.7rem;font-weight:700;color:#9ca3af;padding:4px}
-.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}
 .cal-cell{min-height:80px;background:#f9fafb;border-radius:8px;padding:6px;font-size:.78rem}
 .cal-cell.today{background:#f5f3ff;box-shadow:inset 0 0 0 2px #a855f7}
 .cal-cell.other{opacity:.3}
 .cal-cell .cn{font-weight:700;color:#6b7280;margin-bottom:4px;font-size:.75rem}
 .cal-cell.today .cn{color:#7c3aed}
-.cal-evt{background:#7c3aed;color:#fff;border-radius:4px;padding:2px 5px;font-size:.67rem;margin-bottom:2px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;transition:background .15s;display:flex;align-items:center;gap:2px}
+.cal-evt{background:#7c3aed;color:#fff;border-radius:4px;padding:2px 5px;font-size:.67rem;margin-bottom:2px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;transition:background .15s;display:flex;align-items:center;gap:2px;min-width:0}
 .cal-evt:hover{background:#6d28d9}
 .cal-evt.confirmed{background:#059669}
 .cal-evt.pending{background:#3b82f6}
@@ -228,6 +234,14 @@ input,select,textarea{font-family:inherit}
   .filter-bar input{flex:1}
 }
 @media(max-width:640px){
+  /* Calendar on a phone: seven columns of ~50px. Shrink the furniture so the
+     day number and the event colour still read, rather than dropping columns —
+     a month view missing Friday and Saturday is worse than a cramped one. */
+  .cal-cell{min-height:56px;padding:3px;border-radius:6px}
+  .cal-cell .cn{font-size:.68rem;margin-bottom:2px}
+  .cal-evt{font-size:.58rem;padding:1px 3px;gap:1px}
+  .cal-day-label{font-size:.6rem;padding:2px}
+  .cal-grid,.cal-day-labels{gap:2px}
   /* Booking tables collapse to Client / Date / Status — rows stay tappable */
   .bk-table th:nth-child(1),.bk-table td:nth-child(1),
   .bk-table th:nth-child(3),.bk-table td:nth-child(3),
@@ -2946,7 +2960,7 @@ function renderOneMonth(year, month, gridId, labelId) {
         `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:${s.color};color:#fff;font-size:9px;font-weight:800;border:1.5px solid #fff;margin-left:2px">${s.initials}</span>`
       ).join('');
       return `<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${esc(b.client_name)} — ${esc(b.service_name)}">
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.service_name||b.client_name)}</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.service_name||b.client_name)}</span>
         ${staffBadges}
       </div>`;
     }).join('');
