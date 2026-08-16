@@ -1767,6 +1767,21 @@ function openBooking(id) {
   const items = Array.isArray(b.items) && b.items.length ? b.items : legacyToItems(b);
 
   document.getElementById('modal-body').innerHTML = `
+    <!-- What the client told us, first thing on the page.
+         This used to render below the fold, in grey, and ONLY when non-empty —
+         so on a booking without notes there was no trace the field existed and
+         nobody knew to look. Always rendered now, and editable, because
+         booking.js has always accepted notes on PATCH and bookings taken over
+         the phone had nowhere to record what was said. -->
+    <div style="background:${b.notes ? '#fffbeb' : '#f9fafb'};border:1.5px solid ${b.notes ? '#fde68a' : '#e5e7eb'};border-radius:10px;padding:14px 16px;margin-bottom:18px">
+      <span class="section-label" style="color:${b.notes ? '#b45309' : '#9ca3af'};margin-bottom:6px">
+        ${b.notes ? '💬 What the client told us' : '💬 Notes about this event'}
+      </span>
+      <textarea class="bk-edit" data-f="notes" data-orig="${esc(b.notes || '')}" rows="${b.notes ? 3 : 2}"
+        placeholder="Nothing from the client. Anything they mention on the phone goes here — access, surface, allergies, surprises."
+        style="width:100%;border:none;background:transparent;font-family:inherit;font-size:.9rem;color:#374151;line-height:1.6;resize:vertical;padding:0">${esc(b.notes || '')}</textarea>
+    </div>
+
     <!-- Status pills -->
     <div class="status-pills">
       ${STATUSES.map(s =>
@@ -1802,7 +1817,6 @@ function openBooking(id) {
       <span class="save-flash" id="bk-flash-${b.id}">✓ Saved</span>
     </div>
 
-    ${b.notes?`<div style="margin-bottom:18px"><span class="section-label">Client Notes</span><p style="font-size:.875rem;color:#374151;line-height:1.6">${esc(b.notes)}</p></div>`:''}
 
     <!-- Quote -->
     <div class="quote-block">
