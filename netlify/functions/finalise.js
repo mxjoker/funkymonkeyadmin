@@ -11,7 +11,8 @@ const { withClient } = require('./_db');
 const { CORS, preflight } = require('./_auth');
 const { wrap, esc, sendEmail, logEmail, logStatus, logChange, ensureBookingChanges, ensureEmailLog, finaliseLinkFor } = require('./_email');
 const { normaliseAddress } = require('./_address');
-const { sanitiseClientEdit, zipChanged } = require('./_finalise');
+const { sanitiseClientEdit, zipChanged, describeFieldChange } = require('./_finalise');
+const { ensureBookingItems, getItems } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
@@ -83,7 +84,12 @@ exports.handler = async (event) => {
     return withClient(async (c) => {
       const booking = await authenticate(c, qs.reference, qs.email);
       if (!booking) return json(404, { error: 'Booking not found' });
-      return json(200, { booking: buildFinaliseResponse(booking) });
+      // Read-only line items so the client can see what the total is made of
+      // before hitting "Accept This Quote" — CLIENT_EDITABLE gains nothing here.
+      await ensureBookingItems(c);
+      const view = buildFinaliseResponse(booking);
+      view.items = await getItems(c, booking.id);
+      return json(200, { booking: view });
     });
   }
 
@@ -137,9 +143,14 @@ exports.handler = async (event) => {
       );
       const updated = rows[0];
 
+      // Reused below for the client's per-save receipt. client_email is left
+      // out — a change to it is already covered by the two emails the
+      // email-change flow below sends, and a third mention would be noise.
+      const changesForEmail = [];
       for (const k of keys) {
         if (String(booking[k] ?? '') !== String(updated[k] ?? '')) {
           await logChange(c, booking.id, 'Client finalised details', `${k}: "${booking[k] ?? ''}" → "${updated[k] ?? ''}"`);
+          if (k !== 'client_email') changesForEmail.push(describeFieldChange(k, booking[k], updated[k]));
         }
       }
 
@@ -156,18 +167,26 @@ exports.handler = async (event) => {
       // silent.
       const zip = zipChanged(booking, updated);
       if (zip.changed || addrConflict) {
-        const detail = zip.changed
-          ? `${zip.from} → ${zip.to}`
-          : `event_zip unchanged (${updated.event_zip}) but ${addrConflict}`;
+        // Both can be true at once — the client typed a new ZIP directly AND
+        // the address they typed embeds a still-different ZIP. Each is its
+        // own detail; showing only one silently drops the other.
+        const detailParts = [];
+        if (zip.changed) detailParts.push(`${zip.from} → ${zip.to}`);
+        if (addrConflict) detailParts.push(`event_zip ${zip.changed ? `now ${updated.event_zip}` : `unchanged (${updated.event_zip})`} but ${addrConflict}`);
+        const detail = detailParts.join(' | ');
         await logChange(c, booking.id, 'ZIP changed by client — price NOT recalculated', detail);
         const zipSubject = `⚠ ZIP changed after quote — ${updated.reference}`;
-        const caseHtml = zip.changed
-          ? `<p><strong>Quoted from:</strong> ${esc(zip.from)}<br/><strong>Now:</strong> ${esc(zip.to)}</p>`
-          : `<p>The ZIP on file (<strong>${esc(updated.event_zip)}</strong>) was not changed, but the address they entered now names a different ZIP than the one we priced: <strong>${esc(addrConflict)}</strong>.</p>`;
+        const caseParts = [];
+        if (zip.changed) caseParts.push(`<p><strong>Quoted from:</strong> ${esc(zip.from)}<br/><strong>Now:</strong> ${esc(zip.to)}</p>`);
+        if (addrConflict) caseParts.push(zip.changed
+          ? `<p>The address they entered also names a different ZIP than the one just saved: <strong>${esc(addrConflict)}</strong>.</p>`
+          : `<p>The ZIP on file (<strong>${esc(updated.event_zip)}</strong>) was not changed, but the address they entered now names a different ZIP than the one we priced: <strong>${esc(addrConflict)}</strong>.</p>`);
+        const caseHtml = caseParts.join('');
+        const changedWhat = zip.changed && addrConflict ? 'the ZIP and address' : zip.changed ? 'the ZIP' : 'the address';
         try {
           const res = await sendEmail(NOTIFY, zipSubject,
             wrap(`<h2>The client moved the event</h2>
-              <p><strong>${esc(updated.client_name || 'A client')}</strong> changed ${zip.changed ? 'the ZIP' : 'the address'} on <strong>${esc(updated.reference)}</strong> while finalising their details.</p>
+              <p><strong>${esc(updated.client_name || 'A client')}</strong> changed ${changedWhat} on <strong>${esc(updated.reference)}</strong> while finalising their details.</p>
               ${caseHtml}
               <p><strong>Address:</strong> ${esc(updated.event_location || '')}</p>
               <p>The total is unchanged at $${Number(updated.total_price || 0).toFixed(2)} — mileage was <em>not</em> recalculated. Re-quote if the drive is materially different.</p>
@@ -215,12 +234,19 @@ exports.handler = async (event) => {
           }
         }
 
+        // Folded in rather than sent as a third email — see changesForEmail
+        // above and the receipt block below, which only fires when the email
+        // did NOT change.
+        const changesHtml = changesForEmail.length
+          ? `<p style="margin-top:16px">They also updated:</p><ul>${changesForEmail.map(line => `<li>${line}</li>`).join('')}</ul>`
+          : '';
         const reissueSubject = `Your updated booking link — ${updated.reference}`;
         try {
           const res = await sendEmail(updated.client_email, reissueSubject,
             wrap(`<h2>Here is your new link</h2>
               <p>Your contact email is now <strong>${esc(updated.client_email)}</strong>, so your previous link no longer works. Use this one from now on:</p>
-              <p><a href="${finaliseLinkFor(updated)}" style="background:#7c3aed;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">Open my booking</a></p>`));
+              <p><a href="${finaliseLinkFor(updated)}" style="background:#7c3aed;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">Open my booking</a></p>
+              ${changesHtml}`));
           await logEmail(c, booking.id, null, 'Email changed — link re-issued', reissueSubject, updated.client_email, 'client', logStatus(res));
         } catch (e) {
           // The change has committed and their page keeps working for this
@@ -228,6 +254,34 @@ exports.handler = async (event) => {
           // means only that they have no link for NEXT time — loud, not fatal.
           console.error('finalise: link re-issue FAILED for', updated.reference, '|', e.message);
           await logEmail(c, booking.id, null, 'Email changed — link re-issued', reissueSubject, updated.client_email, 'client', 'failed', e.message);
+        }
+      }
+
+      // ── Per-save receipt ────────────────────────────────────────────────
+      // Of the twelve client-editable fields, only client_email (above) and
+      // event_zip (via the alert above) ever told anyone what changed — the
+      // other ten changed in total silence, with booking_changes as the only
+      // record and nothing reading it proactively. Since the auth key is
+      // just a reference + this same email, someone forwarded the link could
+      // move a party time and nobody would know. Skipped when the email
+      // itself changed — that case already sends two emails (above), and a
+      // third would be noise, so the change list is folded into the reissue
+      // email instead.
+      if (!emailChanged && changesForEmail.length) {
+        const receiptSubject = `Your booking was updated — ${updated.reference}`;
+        try {
+          const res = await sendEmail(updated.client_email, receiptSubject,
+            wrap(`<h2>Your booking was updated</h2>
+              <p>Here's what changed on <strong>${esc(updated.reference)}</strong>:</p>
+              <ul>${changesForEmail.map(line => `<li>${line}</li>`).join('')}</ul>
+              <p>Didn't make this change? Call us on <a href="tel:+14054316625">(405) 431-6625</a>.</p>`));
+          await logEmail(c, booking.id, null, 'Client finalised details — receipt', receiptSubject, updated.client_email, 'client', logStatus(res));
+        } catch (e) {
+          // The save has committed and is what matters — a failed receipt
+          // must not 500 the client or undo their edit, only be loud enough
+          // that a silent one doesn't stay silent twice.
+          console.error('finalise: change receipt FAILED for', updated.reference, '|', e.message);
+          await logEmail(c, booking.id, null, 'Client finalised details — receipt', receiptSubject, updated.client_email, 'client', 'failed', e.message);
         }
       }
 

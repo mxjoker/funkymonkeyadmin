@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { CLIENT_EDITABLE, sanitiseClientEdit, zipChanged } = require('../netlify/functions/_finalise.js');
+const { CLIENT_EDITABLE, sanitiseClientEdit, zipChanged, FIELD_LABELS, describeFieldChange } = require('../netlify/functions/_finalise.js');
 
 // The whitelist IS the security boundary. This test exists so that adding a
 // field to it is a deliberate act with a visible diff, never a side effect.
@@ -185,4 +185,49 @@ test('guest_count at the ceiling is accepted, one above it is not', () => {
   const over = sanitiseClientEdit({ guest_count: '100001' });
   assert.ok(!('guest_count' in over.fields));
   assert.ok(over.rejected.includes('guest_count'));
+});
+
+// ── FIELD_LABELS / describeFieldChange (per-save receipt email) ────────────
+// FIELD_LABELS is a hand-maintained sibling of CLIENT_EDITABLE, not derived
+// from it — so this is the test that actually catches drift. Without it, a
+// field added to one and not the other fails silently: the receipt just
+// prints the raw column name for that one field.
+test('every client-editable field has a human label, and no orphans', () => {
+  assert.deepStrictEqual([...CLIENT_EDITABLE].sort(), Object.keys(FIELD_LABELS).sort());
+});
+
+test('labels read as English, not column names', () => {
+  assert.strictEqual(FIELD_LABELS.guests_of_honour, 'guest of honour');
+  assert.strictEqual(FIELD_LABELS.event_zip, 'ZIP code');
+  assert.strictEqual(FIELD_LABELS.event_location, 'event address');
+  assert.strictEqual(FIELD_LABELS.venue, 'venue');
+  assert.strictEqual(FIELD_LABELS.guest_count, 'guest count');
+});
+
+test('describeFieldChange shows old and new values for a short field', () => {
+  assert.strictEqual(
+    describeFieldChange('event_zip', '73120', '73072'),
+    'ZIP code: "73120" → "73072"'
+  );
+});
+
+// A long free-text field would swamp a receipt email — naming that it
+// changed is enough, per Joe's ruling.
+test('describeFieldChange never includes notes values, only that it changed', () => {
+  const out = describeFieldChange('notes', 'old novel-length note', 'new novel-length note');
+  assert.strictEqual(out, 'notes updated');
+  assert.ok(!out.includes('novel-length'));
+});
+
+test('describeFieldChange reads a blank previous/new value as "(blank)", not empty quotes', () => {
+  assert.strictEqual(describeFieldChange('venue', '', 'The MAC'), 'venue: "(blank)" → "The MAC"');
+  assert.strictEqual(describeFieldChange('venue', 'The MAC', ''), 'venue: "The MAC" → "(blank)"');
+});
+
+// Client free text lands straight in an HTML email — it must be escaped or a
+// venue name containing a stray "<" breaks the email markup.
+test('describeFieldChange escapes HTML in the values', () => {
+  const out = describeFieldChange('venue', '<b>old</b>', '<script>bad</script>');
+  assert.ok(!out.includes('<script>'));
+  assert.match(out, /&lt;script&gt;/);
 });

@@ -473,13 +473,24 @@
 
       document.getElementById('result-reference').textContent = booking.reference;
 
-      // Read-only, always: service, date, total, deposit amount — the client
-      // cannot change what the job costs from this page.
+      // Read-only, always: the quote breakdown, date, total, deposit amount —
+      // the client cannot change what the job costs from this page. Items are
+      // what "Accept This Quote" below is accepting, so they're shown before
+      // the total they add up to, same as the page did before line items
+      // were replaced by a lump sum (regression fixed 2026-08-16).
+      const itemsHtml = (Array.isArray(booking.items) && booking.items.length)
+        ? booking.items.map(i => `
+          <div class="detail-row">
+            <span class="detail-label">${i.kind === 'service' ? 'Service' : i.kind === 'travel' ? 'Travel' : 'Add-on'}</span>
+            <span class="detail-value">${esc(i.name)}${i.quantity > 1 ? ` ×${i.quantity}` : ''} — $${(Number(i.price) * Math.max(1, Number(i.quantity) || 1)).toFixed(2)}</span>
+          </div>`).join('')
+        : `
+          <div class="detail-row">
+            <span class="detail-label">Service</span>
+            <span class="detail-value">${esc(booking.service_name)}</span>
+          </div>`;
       const readOnlyHtml = `
-        <div class="detail-row">
-          <span class="detail-label">Service</span>
-          <span class="detail-value">${esc(booking.service_name)}</span>
-        </div>
+        ${itemsHtml}
         <div class="detail-row">
           <span class="detail-label">Date</span>
           <span class="detail-value">${formatDate(booking.event_date)}</span>
@@ -624,7 +635,10 @@
           return;
         }
 
-        currentBooking = data.booking;
+        // PATCH doesn't re-fetch items — they're read-only and a save can't
+        // change them — so carry the ones already on the page forward rather
+        // than having the breakdown vanish until the next lookup.
+        currentBooking = { ...data.booking, items: currentBooking.items };
 
         // emailChanged and rejected are independent facts about the same
         // response, not alternatives — a save can change the email AND

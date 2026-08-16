@@ -7,6 +7,8 @@
 // a field and is told "saved" while it was discarded is the silent-failure
 // shape this codebase has eighteen documented instances of.
 
+const { esc } = require('./_email');
+
 // Deliberately excludes every field that carries money (total_price,
 // deposit_amount, balance_due, service_price, mileage_cost, items), workflow
 // state (status, deposit_paid), anything internal (admin_notes), and the
@@ -100,4 +102,37 @@ function zipChanged(prev, next) {
   return { changed: true, from, to };
 }
 
-module.exports = { CLIENT_EDITABLE, sanitiseClientEdit, zipChanged };
+// Human labels for every CLIENT_EDITABLE field, for the per-save receipt
+// email — a client should never be shown a column name like `guests_of_honour`
+// or `event_zip`. Kept right next to CLIENT_EDITABLE, and a test asserts the
+// two have the same keys, so a field added to one and not the other is a
+// failing test rather than a receipt that silently prints "guests_of_honour".
+const FIELD_LABELS = Object.freeze({
+  client_name: 'name',
+  client_phone: 'phone number',
+  client_email: 'email address',
+  event_time: 'event time',
+  event_location: 'event address',
+  event_zip: 'ZIP code',
+  venue: 'venue',
+  surface_type: 'surface',
+  guest_count: 'guest count',
+  child_name: "birthday child's name",
+  guests_of_honour: 'guest of honour',
+  notes: 'notes',
+});
+
+// One line of the client's per-save receipt. Values are shown for short
+// fields; notes is named but never valued — a long free-text field would
+// swamp a receipt email (Joe's ruling 2026-08-15), so naming that it changed
+// is enough. Escaped because event_location/notes/etc are client free text
+// landing straight in an HTML email.
+function describeFieldChange(key, oldVal, newVal) {
+  const label = FIELD_LABELS[key] || key;
+  if (key === 'notes') return `${label} updated`;
+  const from = oldVal === '' || oldVal == null ? '(blank)' : String(oldVal);
+  const to   = newVal === '' || newVal == null ? '(blank)' : String(newVal);
+  return `${label}: "${esc(from)}" → "${esc(to)}"`;
+}
+
+module.exports = { CLIENT_EDITABLE, sanitiseClientEdit, zipChanged, FIELD_LABELS, describeFieldChange };
