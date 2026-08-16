@@ -238,6 +238,47 @@
       font-size: 0.875rem;
     }
 
+    textarea {
+      width: 100%;
+      padding: 14px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.05);
+      color: #F3E8FF;
+      font-size: 1rem;
+      font-family: inherit;
+      resize: vertical;
+    }
+
+    textarea::placeholder { color: #A78BCA; }
+    textarea:focus { outline: none; border-color: #7C3AED; }
+
+    /* Empty editable fields are what the client is here to fill in — flag
+       them rather than let them look like an optional blank. */
+    .form-group.missing label { color: #FFD600; }
+    .form-group.missing label::after { content: ' — needed'; text-transform: none; font-weight: 400; }
+    .form-group.missing input, .form-group.missing textarea {
+      border-color: #FFD600;
+      background: rgba(255,214,0,0.06);
+    }
+
+    .notice-box {
+      display: none;
+      background: rgba(74,222,128,0.1);
+      border: 2px solid rgba(74,222,128,0.3);
+      border-radius: 12px;
+      padding: 16px;
+      color: #4ade80;
+      margin-bottom: 16px;
+      text-align: center;
+      font-weight: 600;
+    }
+    .notice-box.error {
+      background: rgba(248,113,113,0.1);
+      border-color: rgba(248,113,113,0.3);
+      color: #F87171;
+    }
+
     footer {
       text-align: center;
       padding: 40px 20px;
@@ -296,6 +337,8 @@
           <div class="reference-number" id="result-reference">FM-000000</div>
         </div>
 
+        <div id="page-notice" class="notice-box"></div>
+
         <div id="booking-details"></div>
       </div>
 
@@ -342,6 +385,7 @@
       const btn = document.getElementById('lookup-btn');
 
       errorEl.style.display = 'none';
+      document.getElementById('page-notice').style.display = 'none';
 
       if (!reference || !email) {
         errorEl.textContent = 'Please enter both your booking reference and email address';
@@ -353,23 +397,17 @@
       btn.textContent = 'Looking up...';
 
       try {
-        const res = await fetch(`/api/bookings?reference=${encodeURIComponent(reference)}&email=${encodeURIComponent(email)}`);
+        const res = await fetch(`/api/finalise?reference=${encodeURIComponent(reference)}&email=${encodeURIComponent(email)}`);
         const data = await res.json();
 
-        if (res.status === 404 || !data.bookings || data.bookings.length === 0) {
-          errorEl.textContent = 'No booking found for that reference number and email. Please check and try again.';
-          errorEl.style.display = 'block';
-          return;
-        }
-
-        if (!res.ok) {
-          errorEl.textContent = data.error || 'Failed to look up booking. Please try again.';
+        if (!res.ok || !data.booking) {
+          errorEl.textContent = data.error || 'No booking found for that reference number and email. Please check and try again.';
           errorEl.style.display = 'block';
           return;
         }
 
         // Success — server already verified the email matches
-        currentBooking = data.bookings[0];
+        currentBooking = data.booking;
         displayBooking(currentBooking);
       } catch(e) {
         errorEl.textContent = 'Failed to look up booking. Please try again.';
@@ -380,35 +418,71 @@
       }
     }
 
+    // Mirrors CLIENT_EDITABLE in netlify/functions/_finalise.js — this is a
+    // static page with no shared import, so keep the two lists in sync by hand.
+    // [key, label, input type]. `notes` is rendered separately as a textarea.
+    const CLIENT_EDITABLE_FIELDS = [
+      ['client_name', 'Your Name', 'text'],
+      ['client_phone', 'Phone Number', 'tel'],
+      ['client_email', 'Email Address', 'email'],
+      ['event_time', 'Event Time', 'time'],
+      ['event_location', 'Event Address', 'text'],
+      ['event_zip', 'Event ZIP Code', 'text'],
+      ['venue', 'Venue Name', 'text'],
+      ['surface_type', 'Surface (grass, concrete, indoor, etc.)', 'text'],
+      ['guest_count', 'Number of Guests', 'number'],
+      ['child_name', "Birthday Child's Name", 'text'],
+      ['guests_of_honour', 'Other Guests of Honour', 'text'],
+    ];
+    const ALL_EDITABLE_KEYS = [...CLIENT_EDITABLE_FIELDS.map(f => f[0]), 'notes'];
+
+    function editableFieldHtml(key, label, value, type) {
+      const v = value === undefined || value === null ? '' : String(value);
+      const missing = v.trim() === '';
+      return `
+        <div class="form-group${missing ? ' missing' : ''}">
+          <label for="f-${key}">${esc(label)}</label>
+          <input type="${type}" id="f-${key}" value="${esc(v)}" placeholder="${missing ? 'Please fill this in' : ''}">
+        </div>`;
+    }
+
+    function editableTextareaHtml(key, label, value) {
+      const v = value === undefined || value === null ? '' : String(value);
+      const missing = v.trim() === '';
+      return `
+        <div class="form-group${missing ? ' missing' : ''}">
+          <label for="f-${key}">${esc(label)}</label>
+          <textarea id="f-${key}" rows="3" placeholder="${missing ? 'Please fill this in' : ''}">${esc(v)}</textarea>
+        </div>`;
+    }
+
+    function detailRow(label, value) {
+      return `<div class="detail-row"><span class="detail-label">${esc(label)}</span><span class="detail-value">${esc(value) || 'TBD'}</span></div>`;
+    }
+
+    function showNotice(text, isError) {
+      const el = document.getElementById('page-notice');
+      el.textContent = text;
+      el.classList.toggle('error', !!isError);
+      el.style.display = 'block';
+    }
+
     function displayBooking(booking) {
       document.getElementById('lookup-form').style.display = 'none';
       document.getElementById('result').style.display = 'block';
 
       document.getElementById('result-reference').textContent = booking.reference;
 
-      const detailsHtml = `
-        ${(Array.isArray(booking.items) && booking.items.length
-          ? booking.items.map(i => `
-            <div class="detail-row">
-              <span class="detail-label">${i.kind === 'service' ? 'Service' : i.kind === 'travel' ? 'Travel' : 'Add-on'}</span>
-              <span class="detail-value">${esc(i.name)}${i.quantity > 1 ? ` ×${i.quantity}` : ''} — $${(Number(i.price) * Math.max(1, Number(i.quantity) || 1)).toFixed(2)}</span>
-            </div>`).join('')
-          : `
-            <div class="detail-row">
-              <span class="detail-label">Service</span>
-              <span class="detail-value">${esc(booking.service_name)}</span>
-            </div>`)}
+      // Read-only, always: service, date, total, deposit amount — the client
+      // cannot change what the job costs from this page.
+      const readOnlyHtml = `
+        <div class="detail-row">
+          <span class="detail-label">Service</span>
+          <span class="detail-value">${esc(booking.service_name)}</span>
+        </div>
         <div class="detail-row">
           <span class="detail-label">Date</span>
           <span class="detail-value">${formatDate(booking.event_date)}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Time</span>
-          <span class="detail-value">${booking.event_time || 'TBD'}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Location</span>
-          <span class="detail-value">${booking.event_zip ? 'ZIP ' + booking.event_zip : 'TBD'}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">Total</span>
@@ -417,7 +491,7 @@
         ${booking.deposit_amount ? `
           <div class="detail-row">
             <span class="detail-label">Deposit ${booking.deposit_paid ? 'Paid' : 'Required'}</span>
-            <span class="detail-value">${booking.deposit_paid ? '✅' : ''} $${Number(booking.deposit_amount).toFixed(2)}</span>
+            <span class="detail-value">${booking.deposit_paid ? '✅ ' : ''}$${Number(booking.deposit_amount).toFixed(2)}</span>
           </div>
           <div class="detail-row">
             <span class="detail-label">Balance Due at Event</span>
@@ -428,12 +502,36 @@
           <span class="detail-label">Status</span>
           <span class="detail-value">${formatStatus(booking.status)}</span>
         </div>
-        ${booking.notes ? `
+      `;
+
+      // A deposit-paid booking is done being finalised — the server 409s a
+      // save attempt, so don't offer a form it can't submit. Still show the
+      // event details read-only rather than dropping them from the page.
+      if (booking.deposit_paid) {
+        const detailsHtml = CLIENT_EDITABLE_FIELDS
+          .filter(([key]) => key !== 'client_email') // already shown via the reference/lookup, redundant here
+          .map(([key, label]) => detailRow(label, booking[key])).join('');
+        const notesHtml = booking.notes ? `
           <div class="detail-row" style="flex-direction:column;gap:8px;align-items:flex-start">
-            <span class="detail-label">Your Notes</span>
+            <span class="detail-label">Notes</span>
             <span class="detail-value" style="font-weight:400;line-height:1.6">${esc(booking.notes)}</span>
+          </div>` : '';
+        document.getElementById('booking-details').innerHTML = readOnlyHtml + detailsHtml + notesHtml + `
+          <div class="info-box" style="margin-top:24px">
+            <h3>✅ This booking is confirmed</h3>
+            <p>Your deposit is paid and your details are locked in. Need to change anything? Call us at <strong>(405) 431-6625</strong>.</p>
           </div>
-        ` : ''}
+        `;
+        return;
+      }
+
+      document.getElementById('booking-details').innerHTML = readOnlyHtml + `
+        <div class="section-title" style="margin-top:24px">✏️ Complete Your Details</div>
+        <p style="color:#A78BCA;margin-bottom:16px;font-size:.9rem">Anything marked <span style="color:#FFD600">needed</span> is still missing — fill in what you can.</p>
+        ${CLIENT_EDITABLE_FIELDS.map(([key, label, type]) => editableFieldHtml(key, label, booking[key], type)).join('')}
+        ${editableTextareaHtml('notes', 'Notes for Us', booking.notes)}
+        <button class="btn" id="save-btn" onclick="saveBooking()">Save My Details</button>
+
         ${booking.status === 'quoted' ? `
           <div style="margin-top:20px;padding-top:20px;border-top:1px solid rgba(255,255,255,.12);text-align:center">
             <p style="color:#A78BCA;line-height:1.6;margin-bottom:14px">
@@ -451,9 +549,98 @@
             <p style="color:#4ade80;font-weight:700">🎉 Accepted! We'll email your deposit link shortly.</p>
           </div>
         ` : ''}
-      `;
 
-      document.getElementById('booking-details').innerHTML = detailsHtml;
+        <div class="info-box" style="margin-top:24px">
+          ${booking.stripe_payment_link ? `
+            <h3>💳 Ready for your deposit?</h3>
+            <p style="margin-bottom:12px">Secure your date with a deposit payment.</p>
+            <a class="btn" href="${esc(booking.stripe_payment_link)}" style="display:block;text-align:center;text-decoration:none">Pay Deposit Now</a>
+          ` : `
+            <h3>💳 Deposit</h3>
+            <p>Your details are saved. We'll email your deposit link shortly.</p>
+          `}
+        </div>
+      `;
+    }
+
+    function buildUpdates() {
+      const updates = {};
+      for (const key of ALL_EDITABLE_KEYS) {
+        const el = document.getElementById(`f-${key}`);
+        if (!el) continue;
+        const newVal = el.value.trim();
+        const oldVal = String(currentBooking[key] ?? '').trim();
+        // Only send fields the client actually changed — an untouched empty
+        // box must stay absent from the payload, not become an intentional blank.
+        if (newVal !== oldVal) updates[key] = newVal;
+      }
+      return updates;
+    }
+
+    async function saveBooking() {
+      if (!currentBooking) return;
+      const btn = document.getElementById('save-btn');
+      const updates = buildUpdates();
+
+      if (!Object.keys(updates).length) {
+        showNotice('Nothing changed to save.');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+
+      try {
+        const res = await fetch('/api/finalise', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reference: currentBooking.reference,
+            email: document.getElementById('email').value.trim().toLowerCase(),
+            updates
+          })
+        });
+        const data = await res.json();
+
+        if (res.status === 409) {
+          // Someone else (or another tab) already paid this while the form
+          // was open. Stop offering a save the server will refuse.
+          currentBooking.deposit_paid = true;
+          displayBooking(currentBooking);
+          showNotice(data.error || 'This booking is already confirmed — call us on (405) 431-6625 to change anything.', true);
+          return;
+        }
+
+        if (!res.ok) {
+          let msg = data.error || 'Failed to save. Please try again.';
+          if (data.rejected && data.rejected.length) msg += ` (could not save: ${data.rejected.join(', ')})`;
+          showNotice(msg, true);
+          return;
+        }
+
+        currentBooking = data.booking;
+
+        // The email is half the auth key. It just changed, so the key this page
+        // holds is stale — swap it in place rather than making them dig a new link
+        // out of their inbox mid-flow.
+        if (data.emailChanged) {
+          document.getElementById('email').value = data.booking.client_email;
+          currentBooking.client_email = data.booking.client_email;
+          history.replaceState(null, '', `?ref=${encodeURIComponent(data.booking.reference)}&email=${encodeURIComponent(data.booking.client_email)}`);
+          showNotice(`Your email is now ${data.booking.client_email}. We've sent a new link there for next time.`);
+        } else if (data.rejected && data.rejected.length) {
+          showNotice(`Saved — but these could not be updated: ${data.rejected.join(', ')}`, true);
+        } else {
+          showNotice('Saved!');
+        }
+
+        displayBooking(currentBooking);
+      } catch (e) {
+        showNotice('Failed to save. Please try again.', true);
+      } finally {
+        const b = document.getElementById('save-btn');
+        if (b) { b.disabled = false; b.textContent = 'Save My Details'; }
+      }
     }
 
     function resetForm() {
@@ -461,6 +648,7 @@
       document.getElementById('result').style.display = 'none';
       document.getElementById('reference').value = '';
       document.getElementById('email').value = '';
+      document.getElementById('page-notice').style.display = 'none';
       currentBooking = null;
     }
 
@@ -567,6 +755,15 @@
     document.getElementById('email').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') lookupBooking();
     });
+
+    // Arriving from a finalisation email: the link carries both halves of the
+    // auth, so do not make them retype what we just sent them.
+    const params = new URLSearchParams(location.search);
+    if (params.get('ref') && params.get('email')) {
+      document.getElementById('reference').value = params.get('ref');
+      document.getElementById('email').value = params.get('email');
+      lookupBooking();
+    }
   </script>
 </body>
 </html>
