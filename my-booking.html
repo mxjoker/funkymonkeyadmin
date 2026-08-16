@@ -572,7 +572,13 @@
         const oldVal = String(currentBooking[key] ?? '').trim();
         // Only send fields the client actually changed — an untouched empty
         // box must stay absent from the payload, not become an intentional blank.
-        if (newVal !== oldVal) updates[key] = newVal;
+        if (newVal === oldVal) continue;
+        // The server treats an empty guest_count as "not filled in" rather than
+        // "set to nothing", so sending '' produces a cheerful "Saved!" followed by
+        // the old number reappearing. Omit it instead — the value genuinely does
+        // not change either way, and this way nothing claims otherwise.
+        if (key === 'guest_count' && newVal === '') continue;
+        updates[key] = newVal;
       }
       return updates;
     }
@@ -620,19 +626,26 @@
 
         currentBooking = data.booking;
 
-        // The email is half the auth key. It just changed, so the key this page
-        // holds is stale — swap it in place rather than making them dig a new link
-        // out of their inbox mid-flow.
+        // emailChanged and rejected are independent facts about the same
+        // response, not alternatives — a save can change the email AND
+        // reject another field in the same request, and both must be told.
+        const notices = [];
         if (data.emailChanged) {
+          // The email is half the auth key. It just changed, so the key this page
+          // holds is stale — swap it in place rather than making them dig a new link
+          // out of their inbox mid-flow.
           document.getElementById('email').value = data.booking.client_email;
           currentBooking.client_email = data.booking.client_email;
           history.replaceState(null, '', `?ref=${encodeURIComponent(data.booking.reference)}&email=${encodeURIComponent(data.booking.client_email)}`);
-          showNotice(`Your email is now ${data.booking.client_email}. We've sent a new link there for next time.`);
-        } else if (data.rejected && data.rejected.length) {
-          showNotice(`Saved — but these could not be updated: ${data.rejected.join(', ')}`, true);
-        } else {
-          showNotice('Saved!');
+          notices.push(`Your email is now ${data.booking.client_email}. We've sent a new link there for next time.`);
         }
+        // A rejected field on a save that otherwise succeeded is exactly the
+        // "told you it saved while discarding it" failure this flow exists to avoid.
+        if (data.rejected && data.rejected.length) {
+          notices.push(`We couldn't save: ${data.rejected.join(', ')}. Please check ${data.rejected.length > 1 ? 'those fields' : 'that field'} and try again.`);
+        }
+        if (notices.length) showNotice(notices.join(' '), !!(data.rejected && data.rejected.length));
+        else showNotice('Saved!');
 
         displayBooking(currentBooking);
       } catch (e) {
