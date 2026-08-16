@@ -112,6 +112,7 @@ exports.handler = async (event) => {
       if (!Object.keys(fields).length) return json(400, { error: 'Nothing to save', rejected });
 
       // Keep the ZIP out of the address line, same as every other writer.
+      let addrConflict = null;
       if (fields.event_location !== undefined || fields.event_zip !== undefined) {
         const addr = normaliseAddress(
           fields.event_location !== undefined ? fields.event_location : booking.event_location,
@@ -120,7 +121,10 @@ exports.handler = async (event) => {
         // Same signal every other writer surfaces (bookings.js, booking.js) —
         // a disagreement between the address's embedded ZIP and event_zip
         // must not vanish just because this caller doesn't re-price on it.
-        if (addr.conflict) console.error('finalise: address/ZIP disagree on', booking.reference, '|', addr.conflict);
+        if (addr.conflict) {
+          console.error('finalise: address/ZIP disagree on', booking.reference, '|', addr.conflict);
+          addrConflict = addr.conflict;
+        }
         if (fields.event_location !== undefined) fields.event_location = addr.location;
         if (fields.event_zip !== undefined) fields.event_zip = addr.zip;
       }
@@ -142,15 +146,29 @@ exports.handler = async (event) => {
       // The ZIP prices the job. Changing it does NOT re-price (Joe's ruling
       // 2026-08-15) — a client watching their total move mid-checkout is the
       // worst moment for it. Tell a human and let them decide.
+      //
+      // Two distinct ways the price can now be wrong: the client changed
+      // event_zip directly (zip.changed), OR they edited only event_location
+      // to an address whose embedded ZIP disagrees with the stored event_zip
+      // (addrConflict) — normaliseAddress keeps the stored ZIP in that case,
+      // so zip.changed is false and the event has still moved. Either one
+      // must alert; only firing on zip.changed left the address-only path
+      // silent.
       const zip = zipChanged(booking, updated);
-      if (zip.changed) {
-        await logChange(c, booking.id, 'ZIP changed by client — price NOT recalculated', `${zip.from} → ${zip.to}`);
+      if (zip.changed || addrConflict) {
+        const detail = zip.changed
+          ? `${zip.from} → ${zip.to}`
+          : `event_zip unchanged (${updated.event_zip}) but ${addrConflict}`;
+        await logChange(c, booking.id, 'ZIP changed by client — price NOT recalculated', detail);
         const zipSubject = `⚠ ZIP changed after quote — ${updated.reference}`;
+        const caseHtml = zip.changed
+          ? `<p><strong>Quoted from:</strong> ${esc(zip.from)}<br/><strong>Now:</strong> ${esc(zip.to)}</p>`
+          : `<p>The ZIP on file (<strong>${esc(updated.event_zip)}</strong>) was not changed, but the address they entered now names a different ZIP than the one we priced: <strong>${esc(addrConflict)}</strong>.</p>`;
         try {
           const res = await sendEmail(NOTIFY, zipSubject,
             wrap(`<h2>The client moved the event</h2>
-              <p><strong>${esc(updated.client_name || 'A client')}</strong> changed the ZIP on <strong>${esc(updated.reference)}</strong> while finalising their details.</p>
-              <p><strong>Quoted from:</strong> ${esc(zip.from)}<br/><strong>Now:</strong> ${esc(zip.to)}</p>
+              <p><strong>${esc(updated.client_name || 'A client')}</strong> changed ${zip.changed ? 'the ZIP' : 'the address'} on <strong>${esc(updated.reference)}</strong> while finalising their details.</p>
+              ${caseHtml}
               <p><strong>Address:</strong> ${esc(updated.event_location || '')}</p>
               <p>The total is unchanged at $${Number(updated.total_price || 0).toFixed(2)} — mileage was <em>not</em> recalculated. Re-quote if the drive is materially different.</p>
               <a href="${SITE}/admin.html" style="background:#7c3aed;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">Open in Admin</a>`));

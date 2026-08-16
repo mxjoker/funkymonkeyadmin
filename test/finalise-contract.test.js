@@ -141,3 +141,48 @@ test('legitimate emails with tags and subdomains still pass', () => {
     assert.ok(!r.rejected.includes('client_email'));
   }
 });
+
+// ── Fix 4: over-length values are rejected, not truncated ───────────────────
+// event_zip is VARCHAR(10). An over-length value must never reach the UPDATE —
+// Postgres would raise 22001 and 502 the whole request with no field named.
+test('an over-length event_zip is rejected, not truncated', () => {
+  const r = sanitiseClientEdit({ event_zip: '73120 (Edmond)' }); // 14 chars
+  assert.ok(!('event_zip' in r.fields));
+  assert.ok(r.rejected.includes('event_zip'));
+});
+
+test('event_zip at exactly the column width is accepted', () => {
+  const ten = '1234567890';
+  const r = sanitiseClientEdit({ event_zip: ten });
+  assert.strictEqual(r.fields.event_zip, ten);
+  assert.deepStrictEqual(r.rejected, []);
+});
+
+// notes is TEXT (no DB-enforced cap) but still has a sanity ceiling here.
+test('notes over the sanity ceiling is rejected, not truncated', () => {
+  const r = sanitiseClientEdit({ notes: 'x'.repeat(5001) });
+  assert.ok(!('notes' in r.fields));
+  assert.ok(r.rejected.includes('notes'));
+});
+
+test('notes at exactly the ceiling is accepted', () => {
+  const r = sanitiseClientEdit({ notes: 'x'.repeat(5000) });
+  assert.strictEqual(r.fields.notes.length, 5000);
+  assert.deepStrictEqual(r.rejected, []);
+});
+
+// guest_count feeds an INTEGER column (max 2147483647). A guest count above
+// a sane ceiling is a typo, not a party, and must not overflow the column.
+test('guest_count above the sane ceiling is rejected', () => {
+  const r = sanitiseClientEdit({ guest_count: '99999999999' });
+  assert.ok(!('guest_count' in r.fields));
+  assert.ok(r.rejected.includes('guest_count'));
+});
+
+test('guest_count at the ceiling is accepted, one above it is not', () => {
+  const ok = sanitiseClientEdit({ guest_count: '100000' });
+  assert.strictEqual(ok.fields.guest_count, 100000);
+  const over = sanitiseClientEdit({ guest_count: '100001' });
+  assert.ok(!('guest_count' in over.fields));
+  assert.ok(over.rejected.includes('guest_count'));
+});

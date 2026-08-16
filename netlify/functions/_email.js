@@ -113,6 +113,12 @@ function render(template, booking, stripeLink) {
     .replace(/{{balance_due}}/g,       Number(booking.balance_due   ||0).toFixed(2))
     .replace(/{{reference}}/g,         booking.reference     || '')
     .replace(/{{deposit_link}}/g,      depositBtn)
+    // {{payment_link}} is renderSms's token, not render()'s — but the rule
+    // editor shows both bodies side by side and nothing stops a body written
+    // for one channel being pasted into the other. Resolve it here too (to
+    // the raw URL the button points at, not the HTML button) so that copy
+    // never comes out as a literal, unreplaced "{{payment_link}}".
+    .replace(/{{payment_link}}/g,      stripeLink || '')
     .replace(/{{finalise_link}}/g,     finaliseLinkFor(booking));
 }
 

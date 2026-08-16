@@ -31,6 +31,24 @@ const CLIENT_EDITABLE = Object.freeze([
 // accepting a typo the re-issue notice will surface anyway.
 const EMAIL_SHAPE = /^[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
 
+// Postgres raises 22001 on an over-length value and the whole request 502s
+// with nothing to tell the client which field was at fault. Rejecting names
+// the field (via `rejected[]`, which the client page already surfaces);
+// truncating would silently store something they did not type — the exact
+// bug class this file exists to prevent. Widths match the VARCHAR columns in
+// bookings.js; event_location and notes are TEXT columns with no DB-enforced
+// cap, so 5000 is a sanity limit, not a schema mirror.
+const MAX_LEN = {
+  client_name: 255, client_phone: 50, client_email: 255,
+  event_time: 10, event_zip: 10, event_location: 5000,
+  venue: 255, surface_type: 64, child_name: 255,
+  guests_of_honour: 255, notes: 5000,
+};
+
+// Postgres INTEGER overflows at 2147483647 and raises 22003. A guest count
+// above this is a typo, not a party.
+const GUEST_COUNT_MAX = 100000;
+
 function sanitiseClientEdit(body) {
   const fields = {};
   const rejected = [];
@@ -48,12 +66,15 @@ function sanitiseClientEdit(body) {
       // is reported.
       if (t === '') continue;
       if (!/^\d+$/.test(t)) { rejected.push(k); continue; }
-      fields[k] = Number(t);
+      const n = Number(t);
+      if (n > GUEST_COUNT_MAX) { rejected.push(k); continue; }
+      fields[k] = n;
       continue;
     }
     if (k === 'client_email') {
       const e = String(v || '').trim().toLowerCase();
       if (!EMAIL_SHAPE.test(e)) { rejected.push(k); continue; }
+      if (MAX_LEN[k] && e.length > MAX_LEN[k]) { rejected.push(k); continue; }
       fields[k] = e;
       continue;
     }
@@ -62,6 +83,7 @@ function sanitiseClientEdit(body) {
     // stringify an object into the column rather than refusing it, so the
     // wrong type lands looking plausible.
     if (typeof v !== 'string') { rejected.push(k); continue; }
+    if (MAX_LEN[k] && v.length > MAX_LEN[k]) { rejected.push(k); continue; }
     fields[k] = v;
   }
   return { fields, rejected };

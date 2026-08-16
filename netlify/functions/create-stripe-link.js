@@ -84,6 +84,22 @@ exports.handler = async (event) => {
 
     const url = session.url;
 
+    // Persist the link. Without this the URL exists only in the caller's
+    // memory: booking.js:353 is otherwise the sole writer of this column and
+    // it only fires on status='confirmed', which happens AFTER payment. The
+    // client-facing finalisation page reads this column, so an unpersisted
+    // link means the pay step silently never appears. Failure to persist must
+    // not lose the URL the caller is waiting for, but must be loud — a
+    // returned-but-unsaved link reproduces exactly this bug.
+    try {
+      await withClient(c => c.query(
+        'UPDATE bookings SET stripe_payment_link=$1, updated_at=NOW() WHERE id=$2',
+        [url, bookingRow.id]
+      ));
+    } catch (persistErr) {
+      console.error('create-stripe-link: FAILED TO PERSIST stripe_payment_link for booking', bookingRow.id, '|', persistErr.message);
+    }
+
     // Email the client with the payment link. Skippable via skip_client_email:
     // the finalisation flow sends its own, better email right after this call
     // (it points at the page where the client completes details AND pays, not

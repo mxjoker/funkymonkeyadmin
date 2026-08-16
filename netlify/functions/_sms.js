@@ -68,6 +68,12 @@ function renderSms(template, booking = {}, link) {
     .replace(/{{balance_due}}/g,       Number(booking.balance_due    || 0).toFixed(2))
     .replace(/{{reference}}/g,         booking.reference || '')
     .replace(/{{payment_link}}/g,      link || '')
+    // {{deposit_link}} is render()'s token, not this one's — but the rule
+    // editor shows both bodies side by side, so a body written for email can
+    // get pasted into the SMS box. An HTML button is meaningless in a text
+    // message, so resolve it to the same raw URL rather than leaving a
+    // literal "{{deposit_link}}" in the text.
+    .replace(/{{deposit_link}}/g,      link || '')
     .replace(/{{finalise_link}}/g,     finaliseLinkFor(booking));
 }
 

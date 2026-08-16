@@ -607,7 +607,7 @@ input,select,textarea{font-family:inherit}
           <button class="btn btn-primary btn-sm" onclick="openRuleModal(null)">+ New Rule</button>
         </div>
       </div>
-      <p class="text-muted" style="margin-bottom:20px">Emails are sent automatically based on booking status changes or days relative to the event. Use <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{client_first_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{service_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{event_date}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_amount}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_link}}</code> in templates.</p>
+      <p class="text-muted" style="margin-bottom:20px">Emails are sent automatically based on booking status changes or days relative to the event. Use <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{client_first_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{service_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{event_date}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_amount}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_link}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{finalise_link}}</code> in templates.</p>
       <div class="card" style="margin-bottom:20px">
         <div class="card-hdr"><h2>Email Rules</h2></div>
         <div id="auto-rules-body"><div style="text-align:center;padding:32px;color:#9ca3af">Loading…</div></div>
@@ -4901,6 +4901,7 @@ function openRuleModal(rule) {
       </div>
       <div><label class="form-label">SMS text <span style="color:#9ca3af;font-size:.72rem">plain text, aim for under 320 characters</span></label>
         <textarea class="form-control" id="rule-body-sms" rows="3" maxlength="320" style="font-family:monospace;font-size:.8rem">${esc(r.body_sms||'')}</textarea>
+        <p class="text-muted" style="margin-top:6px;font-size:.72rem">Use <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{client_first_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{event_date}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_amount}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{payment_link}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{finalise_link}}</code> — same tokens as the email body above.</p>
       </div>
       <div style="display:flex;gap:10px;padding-top:4px">
         <button class="btn btn-primary" onclick="saveRule(${r.id||'null'})">Save Rule</button>
