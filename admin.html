@@ -1630,6 +1630,40 @@ const CUSTOMER_TYPES = ['Individual', 'Corporate', 'Venue / Planner', 'School / 
 // from both method lists, so a Square payment could not be labelled as one.
 const DEPOSIT_METHODS = ['Square', 'Stripe', 'Cash', 'Venmo', 'Check', 'Card (manual)', 'Invoice', 'Waived'];
 
+// Lifts a trailing ZIP out of the Address box as soon as you leave it, so the
+// two fields cannot drift apart. Mirrors normaliseAddress() on the server — the
+// server is still authoritative, this just means you see the result before you
+// save rather than after. An existing ZIP is never overwritten silently: a
+// disagreement is shown and left for a human, because event_zip is the field
+// mileage was priced from.
+function wireAddressZip() {
+  const addrEl = document.querySelector('.bk-edit[data-f="event_location"]');
+  const zipEl  = document.querySelector('.bk-edit[data-f="event_zip"]');
+  const hint   = document.getElementById('addr-zip-hint');
+  if (!addrEl || !zipEl) return;
+
+  addrEl.addEventListener('blur', () => {
+    const m = String(addrEl.value || '').trim().match(/[,\s]+(\d{5})(?:-\d{4})?\s*$/);
+    if (hint) hint.textContent = '';
+    if (!m) return;
+    const found = m[1];
+    const stripped = addrEl.value.trim().slice(0, m.index).replace(/[,\s]+$/, '');
+    const existing = String(zipEl.value || '').trim();
+
+    if (!existing) {
+      addrEl.value = stripped;
+      zipEl.value = found;
+      if (hint) hint.textContent = `ZIP ${found} taken from the address.`;
+    } else if (existing.slice(0, 5) === found) {
+      addrEl.value = stripped;
+      if (hint) hint.textContent = `ZIP already set to ${existing} — removed from the address line.`;
+    } else if (hint) {
+      hint.textContent = `⚠ Address ends ${found} but ZIP is ${existing}. Mileage was priced from ${existing} — fix whichever is wrong.`;
+      hint.style.color = '#d97706';
+    }
+  });
+}
+
 function bookingField(label, name, value, type = 'text', opts = null) {
   const v = value === null || value === undefined ? '' : String(value);
   // A stored value that matches none of the presets (e.g. legacy lowercase
@@ -1756,6 +1790,7 @@ function openBooking(id) {
       ${bookingField('Guests', 'guest_count', b.guest_count, 'number')}
       ${bookingField('ZIP', 'event_zip', b.event_zip)}
       ${bookingField('Address', 'event_location', b.event_location)}
+      <div style="grid-column:1/-1;margin-top:-6px"><span id="addr-zip-hint" style="font-size:.72rem;color:#9ca3af"></span></div>
       ${bookingField('Venue Name', 'venue', b.venue)}
       ${bookingField('Surface', 'surface_type', b.surface_type, 'text',
         ['Grass','Concrete','Asphalt','Indoor — hard floor','Indoor — carpet','Turf','Other'])}
@@ -1976,6 +2011,8 @@ function openBooking(id) {
     </div>
   ` : ''}
   `;
+
+  wireAddressZip();
 
   const itemsHost = document.getElementById('items-list-' + b.id);
   if (itemsHost) {

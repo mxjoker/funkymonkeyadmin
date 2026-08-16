@@ -4,6 +4,7 @@ const { wrap, render, sendEmail, logEmail, ensureEmailLog, ensureBookingChanges,
 const { triggerStatusChange } = require('./automations');
 const { notifyMatchingStaff } = require('./staff-assignments');
 const { ensureBookingItems, replaceItems, rollupItems, getItems, balanceIsDerivable, normaliseItems } = require('./_items');
+const { normaliseAddress } = require('./_address');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -190,6 +191,22 @@ exports.handler = async (event) => {
         if (!prevRes.rows.length) return json(404, { error: "Not found" });
         const prev = prevRes.rows[0];
         const prevStatus = prev.status || '?';
+
+        // Keep the ZIP out of the address line on edit too. u may carry either
+        // field, both, or neither, so the split is fed from whichever value this
+        // request supplies falling back to the stored one — otherwise editing
+        // only the address would strip its ZIP and compare it against nothing.
+        if (u.event_location !== undefined || u.event_zip !== undefined) {
+          const addr = normaliseAddress(
+            u.event_location !== undefined ? u.event_location : prev.event_location,
+            u.event_zip      !== undefined ? u.event_zip      : prev.event_zip
+          );
+          if (u.event_location !== undefined) u.event_location = addr.location;
+          // Only fill the ZIP from the address when the request did not set one
+          // and the record had none. An admin who typed a ZIP means it.
+          if (u.event_zip === undefined && !prev.event_zip && addr.zip) u.event_zip = addr.zip;
+          if (addr.conflict) console.error('booking', id, 'address/ZIP disagree:', addr.conflict);
+        }
 
         // Decided against the row as it stood BEFORE this request, so a caller
         // cannot make a balance derivable by editing it in the same PATCH.

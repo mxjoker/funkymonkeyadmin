@@ -6,6 +6,7 @@ const { notifyMatchingStaff } = require('./staff-assignments');
 const { normaliseBrand } = require('./_brand');
 const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems, getItemsForBookings } = require('./_items');
 const { sendSms } = require('./_sms');
+const { normaliseAddress } = require('./_address');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -306,6 +307,12 @@ exports.handler = async (event) => {
     // this is the record that says a person affirmatively agreed, so it must
     // never be produced by a truthy accident.
     const smsConsent = b.sms_consent === true;
+
+    // The ZIP belongs in event_zip and nowhere else — _address.js's fullAddress
+    // has always excluded it, but a hand-typed or pasted address arrives with it
+    // attached. Split here, at the writer, so every path stores the same shape.
+    const addr = normaliseAddress(b.event_location, b.event_zip);
+    if (addr.conflict) console.error('booking address/ZIP disagree:', addr.conflict, '| client:', clientName);
     if (!isDraft && !clientName) return json(400, { error: 'client_name is required' });
     if (clientName.length > 120) return json(400, { error: 'client_name too long (max 120)' });
 
@@ -442,8 +449,8 @@ exports.handler = async (event) => {
         balanceDue,
         eventDate,
         cap255(b.event_time),
-        cap255(b.event_zip),
-        cap5k(b.event_location),
+        cap255(addr.zip),
+        cap5k(addr.location),
         cap255(b.event_type),
         cap255(b.event_type_id),
         guestCount,
