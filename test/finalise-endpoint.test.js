@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { buildFinaliseResponse, FINALISE_FIELDS } = require('../netlify/functions/finalise.js');
+const { buildFinaliseResponse, FINALISE_FIELDS, emailMatches } = require('../netlify/functions/finalise.js');
 
 // The client sees their own data, which is a wider set than PUBLIC_FIELDS —
 // but it must still never carry anything internal.
@@ -39,4 +39,48 @@ test('the view carries the money figures read-only', () => {
 test('a booking with no payment link says so rather than pretending', () => {
   const out = buildFinaliseResponse({ reference: 'FM-1' });
   assert.strictEqual(out.stripe_payment_link, '');
+});
+
+// Fix 3: `row[f] ?? (typeof row[f] === 'number' ? 0 : '')` was dead code — by
+// the time `??` falls through, row[f] is null/undefined, so its typeof can
+// never be 'number'. A NULL total_price rendered as '' and a page doing
+// `$${total_price}` showed a bare "$" on the deposit-collection page.
+test('a NULL money field reads as the number 0, not an empty string', () => {
+  const out = buildFinaliseResponse({ reference: 'FM-1', total_price: null, deposit_amount: null, balance_due: null });
+  assert.strictEqual(out.total_price, 0);
+  assert.strictEqual(out.deposit_amount, 0);
+  assert.strictEqual(out.balance_due, 0);
+});
+
+// ── Fix 1: the auth bypass ───────────────────────────────────────────────
+// emailMatches is the actual security boundary for GET/PATCH — authenticate()
+// just calls it against a DB row. It must return false for every combination
+// of an empty stored email (drafts, PPM-synced rows with no email) against an
+// empty/blank/missing supplied one — otherwise '' !== '' reads as a match and
+// anyone holding only the reference can read and edit an email-less booking.
+test('an empty email never authenticates, on either side', () => {
+  const storedEmpties = ['', null, undefined];
+  const suppliedEmpties = ['', '   ', null, undefined];
+  for (const stored of storedEmpties) {
+    for (const supplied of suppliedEmpties) {
+      assert.strictEqual(
+        emailMatches(stored, supplied), false,
+        `stored=${JSON.stringify(stored)} supplied=${JSON.stringify(supplied)} must not authenticate`
+      );
+    }
+  }
+  // A populated stored email against an empty supplied one must also fail —
+  // the bypass this closes is exactly "supply nothing, get in anyway".
+  for (const supplied of suppliedEmpties) {
+    assert.strictEqual(emailMatches('dana@example.com', supplied), false);
+  }
+});
+
+test('a genuine case-insensitive match still authenticates', () => {
+  assert.strictEqual(emailMatches('Dana@Example.com', 'dana@example.com'), true);
+  assert.strictEqual(emailMatches('dana@example.com', '  Dana@EXAMPLE.com  '), true);
+});
+
+test('a mismatched non-empty email does not authenticate', () => {
+  assert.strictEqual(emailMatches('dana@example.com', 'someone-else@example.com'), false);
 });
