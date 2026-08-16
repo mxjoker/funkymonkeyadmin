@@ -427,3 +427,21 @@ test('a real deposit still renders its amount and button', () => {
   assert.match(out, /\$100\.00/);
   assert.match(out, /Pay Deposit/);
 });
+
+// ── Fix 4: {{deposit_link}}, {{payment_link}} and {{finalise_link}} all ─────
+// resolve everywhere. The rule editor shows the email and SMS bodies side by
+// side with no per-channel token guard, so a body written for one channel can
+// be pasted into the other's box. render() previously only knew
+// {{deposit_link}}; {{payment_link}} (renderSms's token) came out as a
+// literal, unreplaced string in a client's email.
+test('render() also resolves {{payment_link}}, not just its own {{deposit_link}}', () => {
+  const { render } = loadEmail();
+  const booking = { client_name: 'Dana Ruiz', client_email: 'dana@example.com', reference: 'FM-1234' };
+  const link = 'https://checkout.stripe.com/c/pay/cs_test_xyz';
+
+  const out = render('{{deposit_link}} {{payment_link}} {{finalise_link}}', booking, link);
+
+  assert.doesNotMatch(out, /{{\w+}}/, 'no template token should survive unresolved');
+  assert.ok(out.includes(link), '{{payment_link}} must resolve to the raw URL the button points at');
+  assert.match(out, /my-booking\.html/, '{{finalise_link}} must resolve to the finalisation page');
+});

@@ -9,7 +9,7 @@
 // not tell a delivered message from a missing API key. This one returns a
 // status for every outcome and writes a row for every one of them.
 
-const { fmtEventDate, reviewLinkFor } = require('./_email');
+const { fmtEventDate, reviewLinkFor, finaliseLinkFor } = require('./_email');
 
 const TZ = 'America/Chicago';
 
@@ -67,7 +67,14 @@ function renderSms(template, booking = {}, link) {
     .replace(/{{deposit_amount}}/g,    Number(booking.deposit_amount || 0).toFixed(2))
     .replace(/{{balance_due}}/g,       Number(booking.balance_due    || 0).toFixed(2))
     .replace(/{{reference}}/g,         booking.reference || '')
-    .replace(/{{payment_link}}/g,      link || '');
+    .replace(/{{payment_link}}/g,      link || '')
+    // {{deposit_link}} is render()'s token, not this one's — but the rule
+    // editor shows both bodies side by side, so a body written for email can
+    // get pasted into the SMS box. An HTML button is meaningless in a text
+    // message, so resolve it to the same raw URL rather than leaving a
+    // literal "{{deposit_link}}" in the text.
+    .replace(/{{deposit_link}}/g,      link || '')
+    .replace(/{{finalise_link}}/g,     finaliseLinkFor(booking));
 }
 
 // ── GSM-7 encoding ──────────────────────────────────────────────────────────

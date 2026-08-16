@@ -112,7 +112,14 @@ function render(template, booking, stripeLink) {
     .replace(/{{deposit_amount}}/g,    Number(booking.deposit_amount||0).toFixed(2))
     .replace(/{{balance_due}}/g,       Number(booking.balance_due   ||0).toFixed(2))
     .replace(/{{reference}}/g,         booking.reference     || '')
-    .replace(/{{deposit_link}}/g,      depositBtn);
+    .replace(/{{deposit_link}}/g,      depositBtn)
+    // {{payment_link}} is renderSms's token, not render()'s — but the rule
+    // editor shows both bodies side by side and nothing stops a body written
+    // for one channel being pasted into the other. Resolve it here too (to
+    // the raw URL the button points at, not the HTML button) so that copy
+    // never comes out as a literal, unreplaced "{{payment_link}}".
+    .replace(/{{payment_link}}/g,      stripeLink || '')
+    .replace(/{{finalise_link}}/g,     finaliseLinkFor(booking));
 }
 
 // ── Email allowlist ───────────────────────────────────────────────────────────
@@ -205,6 +212,21 @@ async function ensureEmailLog(client) {
 }
 
 
+// The one link a client needs to complete their booking. Both the email and
+// the SMS renderer will use this, so the two cannot drift into pointing at
+// different pages.
+//
+// Returns '' when the booking has no client email: the finalisation page
+// authenticates on reference + email, so a link without one 404s the instant
+// it is clicked. An empty token is honest; a dead link is not.
+function finaliseLinkFor(booking) {
+  const site = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
+  const ref = (booking && booking.reference) || '';
+  const email = (booking && booking.client_email) || '';
+  if (!ref || !email) return '';
+  return `${site}/my-booking.html?ref=${encodeURIComponent(ref)}&email=${encodeURIComponent(email)}`;
+}
+
 // ── Log a booking change ───────────────────────────────────────────────────────
 async function logChange(client, bookingId, action, detail) {
   try {
@@ -217,4 +239,4 @@ async function logChange(client, bookingId, action, detail) {
   }
 }
 
-module.exports = { wrap, render, esc, fmtEventDate, reviewLinkFor, sendEmail, logStatus, logEmail, ensureEmailLog, ensureBookingChanges, logChange };
+module.exports = { wrap, render, esc, fmtEventDate, reviewLinkFor, sendEmail, logStatus, logEmail, ensureEmailLog, ensureBookingChanges, logChange, finaliseLinkFor };

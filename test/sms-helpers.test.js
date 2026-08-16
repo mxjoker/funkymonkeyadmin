@@ -53,6 +53,21 @@ test('a deposit of zero is never rendered as a default amount', () => {
   assert.strictEqual(renderSms('${{deposit_amount}}', { deposit_amount: 0 }), '$0.00');
 });
 
+// ── Fix 4: {{deposit_link}}, {{payment_link}} and {{finalise_link}} all ─────
+// resolve everywhere. renderSms previously only knew {{payment_link}}; an
+// email body pasted into the SMS box would text a client the literal string
+// "{{deposit_link}}".
+test('renderSms also resolves {{deposit_link}}, not just its own {{payment_link}}', () => {
+  const booking = { client_name: 'Dana Ruiz', client_email: 'dana@example.com', reference: 'FM-1234' };
+  const link = 'https://checkout.stripe.com/c/pay/cs_test_xyz';
+
+  const out = renderSms('{{deposit_link}} {{payment_link}} {{finalise_link}}', booking, link);
+
+  assert.doesNotMatch(out, /{{\w+}}/, 'no template token should survive unresolved');
+  assert.ok(out.includes(link), '{{deposit_link}} in an SMS must resolve to the raw URL, not an HTML button');
+  assert.match(out, /my-booking\.html/, '{{finalise_link}} must resolve to the finalisation page');
+});
+
 // ── parseLetters ────────────────────────────────────────────────────────────
 const OFFER = { a: { booking_id: 1, tag_filled: 'Foam Operator' }, b: { booking_id: 1, tag_filled: 'Setup' }, c: { booking_id: 1, tag_filled: 'Driver' } };
 

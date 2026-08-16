@@ -607,7 +607,7 @@ input,select,textarea{font-family:inherit}
           <button class="btn btn-primary btn-sm" onclick="openRuleModal(null)">+ New Rule</button>
         </div>
       </div>
-      <p class="text-muted" style="margin-bottom:20px">Emails are sent automatically based on booking status changes or days relative to the event. Use <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{client_first_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{service_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{event_date}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_amount}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_link}}</code> in templates.</p>
+      <p class="text-muted" style="margin-bottom:20px">Emails are sent automatically based on booking status changes or days relative to the event. Use <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{client_first_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{service_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{event_date}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_amount}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_link}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{finalise_link}}</code> in templates.</p>
       <div class="card" style="margin-bottom:20px">
         <div class="card-hdr"><h2>Email Rules</h2></div>
         <div id="auto-rules-body"><div style="text-align:center;padding:32px;color:#9ca3af">Loading…</div></div>
@@ -1876,6 +1876,16 @@ function openBooking(id) {
     </div>`}
 
     ${isNew ? '' : `
+    <!-- Client finalisation link -->
+    <div style="background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <strong style="font-size:.875rem">🔗 Finalisation Link</strong>
+        <button class="btn btn-primary btn-sm" onclick="sendFinalisationLink('${b.id}')">Send Finalisation Link</button>
+      </div>
+      <div style="font-size:.75rem;color:#6b7280;margin-top:6px">Emails the client a link to review/complete their details and pay the deposit.</div>
+    </div>`}
+
+    ${isNew ? '' : `
     <!-- Download Invoice -->
     <div style="background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px">
       <div style="display:flex;align-items:center;justify-content:space-between">
@@ -2769,6 +2779,81 @@ async function sendStripeLink(id) {
       el.textContent = '❌ ' + (data.error || 'Unknown error');
     }
   } catch(e) { el.textContent = '❌ ' + e.message; }
+}
+
+// ── Send finalisation link — creates the deposit link first (if one is
+// needed and none exists yet), then emails the client the my-booking.html
+// link. Order matters: the finalisation page can only ever surface a link
+// that already exists (create-stripe-link.js is admin-only), so a link
+// missing here means a client who lands on the page with nothing to pay. ──
+async function sendFinalisationLink(id) {
+  const b = allBookings.find(x => String(x.id) === String(id));
+  if (!b) return;
+  if (!b.client_email) { alert('This booking has no client email, so there is nobody to send the link to.'); return; }
+  if (!confirm(`Email ${b.client_email} a link to finalise their details and pay the deposit?`)) return;
+  try {
+    // Create the deposit link first. The finalisation page only ever surfaces
+    // a link that already exists — it cannot create one, by design.
+    //
+    // NOTE: sends the same fields sendStripeLink() above sends — bookingId/
+    // bookingRef/client/email/service/amount. create-stripe-link.js requires
+    // all of those (amount especially — it 400s without one), so a request
+    // built from just { booking_id: b.id } would fail on every booking that
+    // doesn't already have a cached link.
+    //
+    // Guarded on deposit_amount > 0, matching booking.js's own auto-generate
+    // rule and this modal's "set to 0, no Stripe link is created" copy above
+    // — a school/library booking with deposit_amount=0 must not be billed a
+    // fallback amount for money the booking never asked for.
+    const depositAmount = Number(b.deposit_amount) || 0;
+    if (!b.stripe_payment_link && depositAmount > 0) {
+      const linkRes = await apiFetch('/api/create-stripe-link', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookingId:  b.id,
+          bookingRef: b.reference,
+          client:     b.client_name,
+          email:      b.client_email,
+          service:    b.service_name,
+          amount:     depositAmount,
+          // create-stripe-link.js emails its own "deposit link is ready"
+          // notice on every successful call. The finalisation email below is
+          // the better one for this flow — it points at the page where the
+          // client completes details AND pays, not just Stripe — so suppress
+          // the built-in one rather than sending both.
+          skip_client_email: true
+        })
+      });
+      if (!linkRes.ok) throw new Error('Could not create the deposit link');
+      const linkData = await linkRes.json();
+      b.stripe_payment_link = linkData.url;
+    }
+    // A $0-deposit booking (school, library, etc.) has nothing to pay — same
+    // invariant as _email.js's {{deposit_amount}} comment, just in the prose
+    // here instead of a number. Don't tell them to pay what isn't owed.
+    const askForDeposit = depositAmount > 0;
+    const bodyText = askForDeposit
+      ? `<p>Please review your details, fill in anything missing, and pay your deposit to secure the date:</p>`
+      : `<p>Please review your details and fill in anything missing so we have everything we need for your event:</p>`;
+    const res = await apiFetch('/api/automations', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'send_manual', booking_id: b.id,
+        subject: `Finalise your booking — ${b.reference}`,
+        html: `<p>Hi ${esc((b.client_name||'').split(' ')[0] || 'there')}!</p>
+               ${bodyText}
+               <p><a href="${finaliseLinkClient(b)}">Finalise my booking</a></p>` })
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Send failed');
+    alert('Sent.');
+  } catch (e) { alert('Could not send: ' + e.message); }
+}
+
+// Mirrors finaliseLinkFor() in _email.js. Duplicated deliberately — admin.html
+// is a static page with no access to server modules — so if that one changes,
+// change this in the same commit.
+function finaliseLinkClient(b) {
+  if (!b.reference || !b.client_email) return '';
+  return `${location.origin}/my-booking.html?ref=${encodeURIComponent(b.reference)}&email=${encodeURIComponent(b.client_email)}`;
 }
 
 // ── Record client deposit payment — inline feedback, reopens modal to show updated deposit status ──
@@ -4816,6 +4901,7 @@ function openRuleModal(rule) {
       </div>
       <div><label class="form-label">SMS text <span style="color:#9ca3af;font-size:.72rem">plain text, aim for under 320 characters</span></label>
         <textarea class="form-control" id="rule-body-sms" rows="3" maxlength="320" style="font-family:monospace;font-size:.8rem">${esc(r.body_sms||'')}</textarea>
+        <p class="text-muted" style="margin-top:6px;font-size:.72rem">Use <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{client_first_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{event_date}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_amount}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{payment_link}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{finalise_link}}</code> — same tokens as the email body above.</p>
       </div>
       <div style="display:flex;gap:10px;padding-top:4px">
         <button class="btn btn-primary" onclick="saveRule(${r.id||'null'})">Save Rule</button>

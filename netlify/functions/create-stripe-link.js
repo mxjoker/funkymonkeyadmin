@@ -24,7 +24,7 @@ exports.handler = async (event) => {
     return json(400, { error: "Invalid JSON" });
   }
 
-  const { bookingId, bookingRef, client, email, service, amount } = body;
+  const { bookingId, bookingRef, client, email, service, amount, skip_client_email } = body;
 
   // Validate amount: must be present and 0 < amount <= 10000
   const amountNum = Number(amount);
@@ -84,31 +84,55 @@ exports.handler = async (event) => {
 
     const url = session.url;
 
-    // Email the client with the payment link
+    // Persist the link. Without this the URL exists only in the caller's
+    // memory: booking.js:353 is otherwise the sole writer of this column and
+    // it only fires on status='confirmed', which happens AFTER payment. The
+    // client-facing finalisation page reads this column, so an unpersisted
+    // link means the pay step silently never appears. Failure to persist must
+    // not lose the URL the caller is waiting for, but must be loud — a
+    // returned-but-unsaved link reproduces exactly this bug.
     try {
-      await sendEmail(email, `Your deposit link is ready! 💳 — Funky Monkey Events`,
-        wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${esc(client)}</strong>! 🎉</p>
-          <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Your booking for <strong style="color:#F3E8FF">${esc(service)}</strong> is approved! Pay your deposit to lock in your date.</p>
-          <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:24px;text-align:center">
-            <div style="font-size:11px;color:#A78BCA;text-transform:uppercase;font-weight:700;margin-bottom:6px">Deposit Amount</div>
-            <div style="font-size:36px;font-weight:900;color:#10B981;font-family:'Fredoka One',sans-serif">$${amountNum.toFixed(2)}</div>
-            <div style="font-size:12px;color:#A78BCA;margin-top:4px">Secure your date — balance due day of event</div>
-          </div>
-          <div style="text-align:center;margin-bottom:24px">
-            <a href="${url}" style="background-color:#10B981;color:#ffffff;padding:16px 40px;border-radius:12px;text-decoration:none;font-weight:900;font-size:16px;display:inline-block">Pay Deposit Now →</a>
-            <div style="font-size:11px;color:#A78BCA;margin-top:14px;line-height:1.5">
-              Button not working? Copy this link into your browser:<br>
-              <a href="${url}" style="color:#06B6D4;word-break:break-all">${url}</a>
+      await withClient(c => c.query(
+        'UPDATE bookings SET stripe_payment_link=$1, updated_at=NOW() WHERE id=$2',
+        [url, bookingRow.id]
+      ));
+    } catch (persistErr) {
+      console.error('create-stripe-link: FAILED TO PERSIST stripe_payment_link for booking', bookingRow.id, '|', persistErr.message);
+    }
+
+    // Email the client with the payment link. Skippable via skip_client_email:
+    // the finalisation flow sends its own, better email right after this call
+    // (it points at the page where the client completes details AND pays, not
+    // just Stripe) — without this flag that flow fires this one too, so the
+    // client gets two emails about the same thing seconds apart. Default stays
+    // "send it": the existing sendStripeLink() button in admin.html relies on
+    // this being the only email and never sets the flag.
+    if (!skip_client_email) {
+      try {
+        await sendEmail(email, `Your deposit link is ready! 💳 — Funky Monkey Events`,
+          wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${esc(client)}</strong>! 🎉</p>
+            <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Your booking for <strong style="color:#F3E8FF">${esc(service)}</strong> is approved! Pay your deposit to lock in your date.</p>
+            <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:24px;text-align:center">
+              <div style="font-size:11px;color:#A78BCA;text-transform:uppercase;font-weight:700;margin-bottom:6px">Deposit Amount</div>
+              <div style="font-size:36px;font-weight:900;color:#10B981;font-family:'Fredoka One',sans-serif">$${amountNum.toFixed(2)}</div>
+              <div style="font-size:12px;color:#A78BCA;margin-top:4px">Secure your date — balance due day of event</div>
             </div>
-          </div>
-          <div style="background:#FFFFFF08;border-radius:10px;padding:12px;font-size:11px;color:#A78BCA;line-height:1.6;text-align:center">
-            🔒 Secure payment powered by Stripe · Accepts all major cards, Apple Pay &amp; Google Pay<br>
-            Link expires in 24 hours · Booking ref: ${esc(String(bookingRef || bookingId))}
-          </div>
-          <p style="font-size:13px;color:#A78BCA;text-align:center;margin-top:16px">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`));
-    } catch(emailErr) {
-      console.error("create-stripe-link: email failed:", emailErr.message);
-      // Email failure does not fail the link creation
+            <div style="text-align:center;margin-bottom:24px">
+              <a href="${url}" style="background-color:#10B981;color:#ffffff;padding:16px 40px;border-radius:12px;text-decoration:none;font-weight:900;font-size:16px;display:inline-block">Pay Deposit Now →</a>
+              <div style="font-size:11px;color:#A78BCA;margin-top:14px;line-height:1.5">
+                Button not working? Copy this link into your browser:<br>
+                <a href="${url}" style="color:#06B6D4;word-break:break-all">${url}</a>
+              </div>
+            </div>
+            <div style="background:#FFFFFF08;border-radius:10px;padding:12px;font-size:11px;color:#A78BCA;line-height:1.6;text-align:center">
+              🔒 Secure payment powered by Stripe · Accepts all major cards, Apple Pay &amp; Google Pay<br>
+              Link expires in 24 hours · Booking ref: ${esc(String(bookingRef || bookingId))}
+            </div>
+            <p style="font-size:13px;color:#A78BCA;text-align:center;margin-top:16px">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`));
+      } catch(emailErr) {
+        console.error("create-stripe-link: email failed:", emailErr.message);
+        // Email failure does not fail the link creation
+      }
     }
 
     return json(200, { url, sessionId: session.id });
