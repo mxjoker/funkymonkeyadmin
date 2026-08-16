@@ -1486,6 +1486,16 @@ function roundTo15(value) {
   return `${String(h).padStart(2, '0')}:${String(slot).padStart(2, '0')}`;
 }
 
+// What the deposit button will actually charge. `deposit_amount` is
+// authoritative and 0 is a legitimate value: schools and libraries are
+// deliberately no-deposit, and booking.js:349 already refuses to mint a link
+// for one. The old code defaulted a falsy deposit_amount to a flat 100,
+// sending those bookings a $100 Stripe demand for money nobody asked them for.
+function depositLinkAmount(b) {
+  const n = Number(b && b.deposit_amount);
+  return isFinite(n) && n > 0 ? n : 0;
+}
+
 // ══ END PURE HELPERS ══
 
 // Default matches the old "Newest Inquiry" dropdown default, so the view the
@@ -1869,7 +1879,9 @@ function openBooking(id) {
     <div class="stripe-block">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <strong style="font-size:.875rem">💳 Stripe Deposit Link</strong>
-        <button class="btn btn-primary btn-sm" onclick="sendStripeLink('${b.id}')">Send to Client</button>
+        ${depositLinkAmount(b) > 0
+          ? `<button class="btn btn-primary btn-sm" onclick="sendStripeLink('${b.id}')">Send $${depositLinkAmount(b).toFixed(2)} deposit link</button>`
+          : `<span style="font-size:.75rem;color:#6b7280">No deposit on this booking</span>`}
       </div>
       ${b.stripe_payment_link?`<div class="stripe-result">Last link: <a href="${b.stripe_payment_link}" target="_blank" style="color:#7c3aed">Open →</a></div>`:''}
       <div class="stripe-result" id="stripe-msg-${b.id}"></div>
@@ -2747,7 +2759,11 @@ async function sendStripeLink(id) {
   const el = document.getElementById('stripe-msg-' + id);
   el.textContent = 'Generating…';
 
-  const depositAmount = Number(b.deposit_amount) || 100;
+  const depositAmount = depositLinkAmount(b);
+  if (depositAmount <= 0) {
+    el.textContent = '❌ This booking has a $0 deposit — nothing to charge.';
+    return;
+  }
 
   try {
     const res = await apiFetch('/api/create-stripe-link', {
