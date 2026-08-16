@@ -93,6 +93,23 @@ test('guest_count is coerced to a number and rejected when it is not one', () =>
   assert.ok(bad.rejected.includes('guest_count'));
 });
 
+// client_email is half the auth key. A malformed one locks the client out AND
+// sends the re-issued link nowhere, so it never reaches the database.
+test('a malformed email is rejected rather than stored', () => {
+  for (const bad of ['notanemail', 'no@domain', 'two @spaces.com', '', '@x.com']) {
+    const r = sanitiseClientEdit({ client_email: bad });
+    assert.ok(!('client_email' in r.fields), `should reject ${JSON.stringify(bad)}`);
+    assert.ok(r.rejected.includes('client_email'));
+  }
+});
+
+// Stored lowercase because authenticate() compares lowercased. Storing "Dana@
+// Example.com" verbatim would authenticate fine today and break the moment
+// anything compares it case-sensitively.
+test('an accepted email is normalised to lowercase and trimmed', () => {
+  assert.strictEqual(sanitiseClientEdit({ client_email: '  Dana@Example.COM ' }).fields.client_email, 'dana@example.com');
+});
+
 // ── zipChanged ──────────────────────────────────────────────────────────────
 test('a real ZIP change is reported with both values', () => {
   const r = zipChanged({ event_zip: '73120' }, { event_zip: '73072' });
@@ -145,9 +162,19 @@ const CLIENT_EDITABLE = Object.freeze([
   'guest_count', 'child_name', 'guests_of_honour', 'notes',
 ]);
 
-// guest_count is the only editable field with a type that matters — it feeds
-// per-guest add-on pricing, so "lots" must be a rejection rather than a NaN
-// that silently zeroes a line.
+// Two editable fields have types that matter.
+//
+// guest_count feeds per-guest add-on pricing, so "lots" must be a rejection
+// rather than a NaN that silently zeroes a line.
+//
+// client_email is half the authentication key. A malformed one does not just
+// store bad data — it locks the client out of their own booking AND sends the
+// re-issued link into the void, so it is rejected here rather than discovered
+// later. Deliberately a shape check, not a validity check: we cannot know if an
+// address exists, and rejecting unusual-but-legal addresses would be worse than
+// accepting a typo the re-issue notice will surface anyway.
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function sanitiseClientEdit(body) {
   const fields = {};
   const rejected = [];
@@ -157,6 +184,12 @@ function sanitiseClientEdit(body) {
       const n = Number(v);
       if (!Number.isFinite(n) || n < 0) { rejected.push(k); continue; }
       fields[k] = Math.trunc(n);
+      continue;
+    }
+    if (k === 'client_email') {
+      const e = String(v || '').trim().toLowerCase();
+      if (!EMAIL_SHAPE.test(e)) { rejected.push(k); continue; }
+      fields[k] = e;
       continue;
     }
     fields[k] = v;
@@ -200,7 +233,8 @@ git commit -m "feat(finalise): the contract for what a client may change"
 - Test: `test/finalise-endpoint.test.js`
 
 **Interfaces:**
-- Consumes: `sanitiseClientEdit`, `zipChanged` (Task 1); `normaliseAddress` from `_address.js`; `logChange`, `sendEmail`, `wrap`, `esc` from `_email.js`
+- Consumes: `sanitiseClientEdit`, `zipChanged` (Task 1); `normaliseAddress` from `_address.js`; `logChange`, `sendEmail`, `wrap`, `esc`, **`finaliseLinkFor`** from `_email.js`
+- **Ordering note:** `finaliseLinkFor` is written in Task 3 Step 3 but is needed here for the re-issue email. Build that one function first — it is eight lines and has no dependencies — or Task 2 will not run.
 - Produces: `GET /api/finalise?reference=&email=` → the client's own booking, wider than `PUBLIC_FIELDS`; `PATCH /api/finalise` → applies a sanitised edit
 
 **Why not extend `bookings.js`:** `PUBLIC_FIELDS` is a deliberate published contract with a comment explaining each exclusion (`venue` "deliberately not exposed publicly", `client_phone` absent). The finalisation page needs a *different, wider* set — a client's own phone number is not a public field, but it is a field they must be able to correct. Widening `PUBLIC_FIELDS` to serve this page would change what every other public consumer sees.
@@ -397,7 +431,54 @@ exports.handler = async (event) => {
         }
       }
 
-      return json(200, { success: true, booking: buildFinaliseResponse(updated), rejected });
+      // ── The email changed, so the link they are holding is now dead ────────
+      // client_email is half the authentication key: the link in their inbox
+      // carries the OLD address and will 404 from here on. Re-issue to the new
+      // one (Joe's ruling 2026-08-15).
+      //
+      // The notice to the OLD address is not a courtesy — it is the only
+      // control this flow has. Auth is a reference plus an email, so anyone
+      // forwarded the original message could change the contact address and
+      // quietly take over the booking. Telling the previous address means that
+      // cannot happen silently. Send it FIRST: it is the one with a security
+      // job, and it must not be skipped if the second send throws.
+      const emailChanged = keys.includes('client_email') &&
+        (booking.client_email || '').toLowerCase() !== (updated.client_email || '').toLowerCase();
+
+      if (emailChanged) {
+        await logChange(c, booking.id, 'Client changed their email — link re-issued',
+          `${booking.client_email || '(none)'} → ${updated.client_email}`);
+
+        if (booking.client_email) {
+          try {
+            await sendEmail(booking.client_email,
+              `Contact email changed on your booking — ${updated.reference}`,
+              wrap(`<h2>Your contact email was changed</h2>
+                <p>The email address on booking <strong>${esc(updated.reference)}</strong> was just changed to <strong>${esc(updated.client_email)}</strong>.</p>
+                <p><strong>If this was you, nothing further is needed</strong> — your new link has been sent to that address.</p>
+                <p>If it was not you, call us straight away on <a href="tel:+14054316625">(405) 431-6625</a>.</p>`));
+          } catch (e) {
+            console.error('finalise: old-address change notice FAILED for', updated.reference, '|', e.message);
+          }
+        }
+
+        try {
+          await sendEmail(updated.client_email,
+            `Your updated booking link — ${updated.reference}`,
+            wrap(`<h2>Here is your new link</h2>
+              <p>Your contact email is now <strong>${esc(updated.client_email)}</strong>, so your previous link no longer works. Use this one from now on:</p>
+              <p><a href="${finaliseLinkFor(updated)}" style="background:#7c3aed;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">Open my booking</a></p>`));
+        } catch (e) {
+          // The change has committed and their page keeps working for this
+          // session (Task 4 Step 4 updates it in place). A failed re-issue
+          // means only that they have no link for NEXT time — loud, not fatal.
+          console.error('finalise: link re-issue FAILED for', updated.reference, '|', e.message);
+        }
+      }
+
+      // emailChanged tells the page to update the key it authenticates with,
+      // so the client can carry on saving without a reload.
+      return json(200, { success: true, booking: buildFinaliseResponse(updated), rejected, emailChanged });
     });
   }
 
@@ -620,6 +701,21 @@ For a booking that is **not** `deposit_paid`, render each `CLIENT_EDITABLE` fiel
 - [ ] **Step 4: Save, then pay**
 
 One button saves via `PATCH /api/finalise`. On success:
+
+- If the response carries `emailChanged: true`, **update the email this page authenticates with** before doing anything else. The client is holding a link with their old address; without this the very next save — or the page reload after payment — 404s on a booking they are looking at.
+
+```js
+  // The email is half the auth key. It just changed, so the key this page
+  // holds is stale — swap it in place rather than making them dig a new link
+  // out of their inbox mid-flow.
+  if (data.emailChanged) {
+    document.getElementById('email').value = data.booking.client_email;
+    currentBooking.client_email = data.booking.client_email;
+    history.replaceState(null, '', `?ref=${encodeURIComponent(data.booking.reference)}&email=${encodeURIComponent(data.booking.client_email)}`);
+    showNotice(`Your email is now ${data.booking.client_email}. We've sent a new link there for next time.`);
+  }
+```
+
 - If `stripe_payment_link` is present, show the deposit button pointing at it.
 - If it is absent, say so plainly — *"Your details are saved. We'll email your deposit link shortly."* — rather than rendering a dead button. This is the state that occurs when the admin sent the link before a Stripe link existed.
 
@@ -660,6 +756,6 @@ git commit -m "feat(finalise): clients complete their own details, then pay"
 
 1. **The auth is modest.** Reference + email in a URL means anyone forwarded that email can edit the booking. I chose it for consistency — the same key already gates `accept-quote.js`, which commits a client to a quote — and the editable set carries no money. But it is a real widening of what that key permits, and if it ever feels wrong the upgrade is a signed expiring token, which is a contained change to `authenticate()` and `finaliseLinkFor()`.
 
-2. **`client_email` is editable, and it is half the auth key.** A client who corrects their email locks themselves out of their own link. Task 2 does not address this. The options are to drop it from the whitelist, or to re-issue the link by email on change. **This needs deciding before Task 2 is built** — it is the one place the plan knowingly leaves a trap.
+2. **`client_email` is editable, and it is half the auth key — resolved.** Joe's ruling (2026-08-15): re-issue the link when it changes. Task 1 rejects a malformed address before it can reach the database, Task 2 re-issues to the new address and — more importantly — notifies the OLD one, and Task 4 swaps the key the open page is using so the client's session survives. The notice to the previous address is the security control this flow otherwise lacks: with auth being a reference plus an email, anyone forwarded the original message could otherwise change the contact address and take the booking over silently.
 
 3. **`finaliseLinkFor` is duplicated in `admin.html`.** A static page cannot import a server module. Marked in both places; if a third copy ever appears, that is the signal to serve the link from an endpoint instead.
