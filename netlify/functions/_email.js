@@ -112,7 +112,8 @@ function render(template, booking, stripeLink) {
     .replace(/{{deposit_amount}}/g,    Number(booking.deposit_amount||0).toFixed(2))
     .replace(/{{balance_due}}/g,       Number(booking.balance_due   ||0).toFixed(2))
     .replace(/{{reference}}/g,         booking.reference     || '')
-    .replace(/{{deposit_link}}/g,      depositBtn);
+    .replace(/{{deposit_link}}/g,      depositBtn)
+    .replace(/{{finalise_link}}/g,     finaliseLinkFor(booking));
 }
 
 // ── Email allowlist ───────────────────────────────────────────────────────────
