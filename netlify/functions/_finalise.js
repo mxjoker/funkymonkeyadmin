@@ -29,7 +29,7 @@ const CLIENT_EDITABLE = Object.freeze([
 // later. Deliberately a shape check, not a validity check: we cannot know if an
 // address exists, and rejecting unusual-but-legal addresses would be worse than
 // accepting a typo the re-issue notice will surface anyway.
-const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_SHAPE = /^[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
 
 function sanitiseClientEdit(body) {
   const fields = {};
@@ -37,9 +37,18 @@ function sanitiseClientEdit(body) {
   for (const [k, v] of Object.entries(body || {})) {
     if (!CLIENT_EDITABLE.includes(k)) { rejected.push(k); continue; }
     if (k === 'guest_count') {
-      const n = Number(v);
-      if (!Number.isFinite(n) || n < 0) { rejected.push(k); continue; }
-      fields[k] = Math.trunc(n);
+      // Number('') and Number(null) are both 0 — finite, non-negative, and
+      // silently wrong. Only a genuine integer, as a number or a digit string,
+      // is a guest count. Everything else is a rejection, because this figure
+      // multiplies per-guest add-on prices.
+      if (typeof v !== 'number' && typeof v !== 'string') { rejected.push(k); continue; }
+      const t = String(v).trim();
+      // An empty box is absence, not a rejected edit — the client simply did
+      // not fill it in. Omitted without complaint; anything else non-numeric
+      // is reported.
+      if (t === '') continue;
+      if (!/^\d+$/.test(t)) { rejected.push(k); continue; }
+      fields[k] = Number(t);
       continue;
     }
     if (k === 'client_email') {
@@ -48,6 +57,11 @@ function sanitiseClientEdit(body) {
       fields[k] = e;
       continue;
     }
+    // Everything else is free text. A non-string here is not a user typing
+    // something odd, it is a malformed request — and node-postgres would
+    // stringify an object into the column rather than refusing it, so the
+    // wrong type lands looking plausible.
+    if (typeof v !== 'string') { rejected.push(k); continue; }
     fields[k] = v;
   }
   return { fields, rejected };

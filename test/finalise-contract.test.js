@@ -89,3 +89,55 @@ test('filling in a ZIP that was empty is not a change worth alerting on', () => 
 test('a ZIP+4 matching the stored five digits is not a change', () => {
   assert.strictEqual(zipChanged({ event_zip: '73120' }, { event_zip: '73120-4455' }).changed, false);
 });
+
+// ── Fix 1: guest_count type validation ───────────────────────────────────
+// Number('') and Number(null) are both 0, which silently zeros pricing.
+// An empty box is absence and omitted; anything else non-numeric is rejected.
+test('an empty guest_count is omitted without rejection', () => {
+  const r = sanitiseClientEdit({ guest_count: '', notes: 'A' });
+  assert.deepStrictEqual(r.fields, { notes: 'A' });
+  assert.deepStrictEqual(r.rejected, []);
+});
+
+test('guest_count rejects null, false, true, arrays, and objects', () => {
+  for (const bad of [null, false, true, [], {}]) {
+    const r = sanitiseClientEdit({ guest_count: bad });
+    assert.ok(!('guest_count' in r.fields), `should reject ${JSON.stringify(bad)}`);
+    assert.ok(r.rejected.includes('guest_count'));
+  }
+});
+
+// ── Fix 2: text field type validation ────────────────────────────────────
+// node-postgres would stringify an object into a TEXT column rather than
+// rejecting it, so objects and arrays land looking plausible.
+test('text fields reject arrays and objects', () => {
+  const textFields = ['client_name', 'client_phone', 'event_time', 'event_location', 'venue', 'surface_type', 'child_name', 'guests_of_honour', 'notes', 'event_zip'];
+  for (const field of textFields) {
+    for (const bad of [['array'], { evil: 1 }]) {
+      const r = sanitiseClientEdit({ [field]: bad });
+      assert.ok(!(field in r.fields), `should reject ${field} = ${JSON.stringify(bad)}`);
+      assert.ok(r.rejected.includes(field));
+    }
+  }
+});
+
+test('a genuine text field with an object in a string still passes', () => {
+  const r = sanitiseClientEdit({ notes: '{"not": "code"}' });
+  assert.deepStrictEqual(r.fields, { notes: '{"not": "code"}' });
+  assert.deepStrictEqual(r.rejected, []);
+});
+
+// ── Fix 3: email regex tightened ─────────────────────────────────────────
+test('an email with a quote in the local part is rejected', () => {
+  const r = sanitiseClientEdit({ client_email: '"bad@example.com' });
+  assert.ok(!('client_email' in r.fields));
+  assert.ok(r.rejected.includes('client_email'));
+});
+
+test('legitimate emails with tags and subdomains still pass', () => {
+  for (const good of ['a+tag@sub.example.co.uk', 'o.brien@example.com', 'dana@example.com', 'a.b_c%d@x-y.io']) {
+    const r = sanitiseClientEdit({ client_email: good });
+    assert.ok(good in r.fields || 'client_email' in r.fields, `should accept ${good}`);
+    assert.ok(!r.rejected.includes('client_email'));
+  }
+});
