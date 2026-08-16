@@ -233,3 +233,39 @@ test('STAFFABLE_STATUSES is a real, non-empty allowlist', () => {
   assert.ok(Array.isArray(STAFFABLE_STATUSES) && STAFFABLE_STATUSES.length > 0);
   assert.ok(!STAFFABLE_STATUSES.includes('review'), 'review must stay out of the allowlist');
 });
+
+// ── Day-of checklist is reversible ───────────────────────────────────────────
+// It used to be a one-way ratchet: the portal disabled both the current step
+// AND every past one, so a staff member who tapped Done had no clickable button
+// left and could not walk it back. Stepping backwards must also clear the
+// timestamps of the steps being undone, or a gig keeps a completed_at it never
+// reached and the stamps contradict the status.
+const { buildChecklistTimestampClause } = require('../netlify/functions/staff-assignments.js');
+
+// The clause cannot tell a forward tap from a backward one, and does not need
+// to: later stamps are cleared either way. Moving forward they were already
+// null, so clearing is a no-op; moving back it is the whole point.
+test('entering a step stamps it and clears every stamp after it', () => {
+  assert.strictEqual(
+    buildChecklistTimestampClause('on_my_way'),
+    ', on_my_way_at=NOW(), arrived_at=NULL, completed_at=NULL'
+  );
+});
+
+test('stepping back clears every stamp after the new step', () => {
+  const clause = buildChecklistTimestampClause('arrived');
+  assert.match(clause, /arrived_at=NOW\(\)/, 'the step being entered is stamped');
+  assert.match(clause, /completed_at=NULL/, 'a later step it walked back from is cleared');
+});
+
+test('going all the way back to upcoming clears all three stamps', () => {
+  const clause = buildChecklistTimestampClause('upcoming');
+  assert.match(clause, /on_my_way_at=NULL/);
+  assert.match(clause, /arrived_at=NULL/);
+  assert.match(clause, /completed_at=NULL/);
+  assert.doesNotMatch(clause, /NOW\(\)/, 'upcoming is the start state and stamps nothing');
+});
+
+test('completed stamps itself and clears nothing after it', () => {
+  assert.strictEqual(buildChecklistTimestampClause('completed'), ', completed_at=NOW()');
+});

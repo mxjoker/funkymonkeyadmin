@@ -500,18 +500,11 @@ exports.handler = async (event) => {
             staff_id = auth.staffId;
           }
 
-          const validStatuses = ['upcoming','on_my_way','arrived','completed'];
-          if (!validStatuses.includes(status)) {
+          if (!CHECKLIST_STATUSES.includes(status)) {
             return json(400, { error: 'Invalid status' });
           }
 
-          const tsMap = {
-            on_my_way: 'on_my_way_at',
-            arrived:   'arrived_at',
-            completed: 'completed_at',
-          };
-          const tsCol = tsMap[status];
-          const tsClause = tsCol ? `, ${tsCol}=NOW()` : '';
+          const tsClause = buildChecklistTimestampClause(status);
 
           let rows;
           if (log_id) {
@@ -887,6 +880,26 @@ exports.handler = async (event) => {
 };
 
 // ── Letter-mapped offers ─────────────────────────────────────────────────────
+// ── Day-of checklist timestamps ──────────────────────────────────────────────
+// Stamps the step being entered and clears the stamps of every step after it.
+// The checklist is walkable backwards — a staff member who taps Done by mistake
+// steps back to Arrived — and without the clearing half, a gig would keep a
+// completed_at it never actually reached, leaving the timestamps contradicting
+// the status they exist to describe.
+//
+// Column names come from this fixed map and never from the request. Callers
+// must validate `status` against CHECKLIST_STATUSES before passing it here.
+const CHECKLIST_STATUSES = ['upcoming', 'on_my_way', 'arrived', 'completed'];
+const CHECKLIST_TS_COLS = { upcoming: null, on_my_way: 'on_my_way_at', arrived: 'arrived_at', completed: 'completed_at' };
+
+function buildChecklistTimestampClause(status) {
+  const idx = CHECKLIST_STATUSES.indexOf(status);
+  if (idx === -1) return '';
+  const setCol = CHECKLIST_TS_COLS[status];
+  const clear = CHECKLIST_STATUSES.slice(idx + 1).map(s => CHECKLIST_TS_COLS[s]).filter(Boolean);
+  return (setCol ? `, ${setCol}=NOW()` : '') + clear.map(c => `, ${c}=NULL`).join('');
+}
+
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
 // One letter per role this staff member matched on this booking. The value is
@@ -1033,4 +1046,6 @@ exports.wantsEmail = wantsEmail;
 exports.buildOfferMap = buildOfferMap;
 exports.offerText = offerText;
 exports.expressInterest = expressInterest;
+exports.buildChecklistTimestampClause = buildChecklistTimestampClause;
+exports.CHECKLIST_STATUSES = CHECKLIST_STATUSES;
 exports.ensureTables = ensureTables;

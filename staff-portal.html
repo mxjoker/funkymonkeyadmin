@@ -459,6 +459,11 @@ function gigCard(g, isAssigned) {
         ${checklistStatuses.map((s, i) => {
           const isActive = s === curStatus;
           const isPast   = i < curIdx;
+          // Only the CURRENT step is unclickable — tapping it would do nothing.
+          // Past steps stay live so a mis-tap can be walked back. This used to
+          // disable past steps too, which made the checklist a one-way ratchet:
+          // once someone reached Done every button was disabled, and there was
+          // no way out of it from the portal at all.
           const bg = isActive ? '#7c3aed' : isPast ? '#059669' : 'transparent';
           const border = isActive || isPast ? 'none' : '1.5px solid rgba(168,85,247,.3)';
           const color  = isActive || isPast ? '#fff' : '#c084fc';
@@ -466,9 +471,10 @@ function gigCard(g, isAssigned) {
           const assignId = g.id;
           const bookId   = g.booking_id;
           const staffId  = currentUser.staffId;
-          return `<button style="padding:6px 11px;border-radius:7px;font-size:.75rem;font-weight:700;background:${bg};border:${border};color:${color};cursor:${isActive||isPast?'default':'pointer'}"
-            onclick="${isActive||isPast ? '' : `updateChecklist('${logId}','${assignId}','${bookId}','${staffId}','${s}')`}"
-            ${isActive||isPast ? 'disabled' : ''}>${checklistLabels[s]}</button>`;
+          const title = isActive ? 'Current step' : isPast ? `Go back to ${checklistLabels[s]}` : `Mark ${checklistLabels[s]}`;
+          return `<button title="${title}" style="padding:6px 11px;border-radius:7px;font-size:.75rem;font-weight:700;background:${bg};border:${border};color:${color};cursor:${isActive?'default':'pointer'}"
+            onclick="${isActive ? '' : `updateChecklist('${logId}','${assignId}','${bookId}','${staffId}','${s}')`}"
+            ${isActive ? 'disabled' : ''}>${checklistLabels[s]}</button>`;
         }).join('')}
       </div>
       ${curStatus === 'completed'
