@@ -205,6 +205,21 @@ async function ensureEmailLog(client) {
 }
 
 
+// The one link a client needs to complete their booking. Both the email and
+// the SMS renderer will use this, so the two cannot drift into pointing at
+// different pages.
+//
+// Returns '' when the booking has no client email: the finalisation page
+// authenticates on reference + email, so a link without one 404s the instant
+// it is clicked. An empty token is honest; a dead link is not.
+function finaliseLinkFor(booking) {
+  const site = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
+  const ref = (booking && booking.reference) || '';
+  const email = (booking && booking.client_email) || '';
+  if (!ref || !email) return '';
+  return `${site}/my-booking.html?ref=${encodeURIComponent(ref)}&email=${encodeURIComponent(email)}`;
+}
+
 // ── Log a booking change ───────────────────────────────────────────────────────
 async function logChange(client, bookingId, action, detail) {
   try {
@@ -217,4 +232,4 @@ async function logChange(client, bookingId, action, detail) {
   }
 }
 
-module.exports = { wrap, render, esc, fmtEventDate, reviewLinkFor, sendEmail, logStatus, logEmail, ensureEmailLog, ensureBookingChanges, logChange };
+module.exports = { wrap, render, esc, fmtEventDate, reviewLinkFor, sendEmail, logStatus, logEmail, ensureEmailLog, ensureBookingChanges, logChange, finaliseLinkFor };

@@ -137,7 +137,7 @@ test('an email with a quote in the local part is rejected', () => {
 test('legitimate emails with tags and subdomains still pass', () => {
   for (const good of ['a+tag@sub.example.co.uk', 'o.brien@example.com', 'dana@example.com', 'a.b_c%d@x-y.io']) {
     const r = sanitiseClientEdit({ client_email: good });
-    assert.ok(good in r.fields || 'client_email' in r.fields, `should accept ${good}`);
+    assert.ok('client_email' in r.fields, `should accept ${good}`);
     assert.ok(!r.rejected.includes('client_email'));
   }
 });
