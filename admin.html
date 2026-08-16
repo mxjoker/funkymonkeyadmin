@@ -2815,19 +2815,32 @@ async function sendFinalisationLink(id) {
           client:     b.client_name,
           email:      b.client_email,
           service:    b.service_name,
-          amount:     depositAmount
+          amount:     depositAmount,
+          // create-stripe-link.js emails its own "deposit link is ready"
+          // notice on every successful call. The finalisation email below is
+          // the better one for this flow — it points at the page where the
+          // client completes details AND pays, not just Stripe — so suppress
+          // the built-in one rather than sending both.
+          skip_client_email: true
         })
       });
       if (!linkRes.ok) throw new Error('Could not create the deposit link');
       const linkData = await linkRes.json();
       b.stripe_payment_link = linkData.url;
     }
+    // A $0-deposit booking (school, library, etc.) has nothing to pay — same
+    // invariant as _email.js's {{deposit_amount}} comment, just in the prose
+    // here instead of a number. Don't tell them to pay what isn't owed.
+    const askForDeposit = depositAmount > 0;
+    const bodyText = askForDeposit
+      ? `<p>Please review your details, fill in anything missing, and pay your deposit to secure the date:</p>`
+      : `<p>Please review your details and fill in anything missing so we have everything we need for your event:</p>`;
     const res = await apiFetch('/api/automations', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'send_manual', booking_id: b.id,
         subject: `Finalise your booking — ${b.reference}`,
         html: `<p>Hi ${esc((b.client_name||'').split(' ')[0] || 'there')}!</p>
-               <p>Please review your details, fill in anything missing, and pay your deposit to secure the date:</p>
+               ${bodyText}
                <p><a href="${finaliseLinkClient(b)}">Finalise my booking</a></p>` })
     });
     if (!res.ok) throw new Error((await res.json()).error || 'Send failed');
