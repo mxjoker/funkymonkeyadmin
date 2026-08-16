@@ -5,6 +5,7 @@ const { esc, wrap, sendEmail, fmtEventDate } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
 const { normaliseBrand } = require('./_brand');
 const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems, getItemsForBookings } = require('./_items');
+const { sendSms } = require('./_sms');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -14,6 +15,13 @@ const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stri
 // form's wording changes, change it here in the same commit — a consent record
 // that quotes wording nobody ever saw is worse than no record.
 const SMS_CONSENT_TEXT = "Yes, send me text messages about my booking at the number above. You'll get booking confirmations, deposit and payment links, a reminder before your event, and a review request afterwards — around 2-5 messages per booking. Msg & data rates may apply. Reply STOP to cancel, HELP for help. Consent is not a condition of booking.";
+
+// The opt-in confirmation, sent once, immediately after a customer ticks the
+// consent box. Declared verbatim on the A2P 10DLC campaign, so the registered
+// text and the sent text are the same string by construction. Carrier rules
+// require all four: brand name, message frequency, the rates disclaimer, and
+// both keywords. Two segments.
+const SMS_OPT_IN_MESSAGE = "Funky Monkey Events: you are signed up for text updates about your booking. Around 2-5 msgs per booking. Msg & data rates may apply. Reply STOP to cancel, HELP for help.";
 
 // Public field subset per API contract.
 //
@@ -465,6 +473,18 @@ exports.handler = async (event) => {
       ]);
 
       const booking = rows[0];
+
+      // Opt-in confirmation. Carrier rules require the first message after
+      // consent to name the brand, the frequency, the rates disclaimer and both
+      // keywords — and the campaign registration declares this exact text, so it
+      // has to actually be sent. Fire-and-forget: sendSms does not throw, but a
+      // cold ensureSmsTables can, and nothing here may cost the customer their
+      // booking.
+      if (smsConsent && booking.client_phone) {
+        sendSms(c, booking.client_phone, SMS_OPT_IN_MESSAGE, {
+          booking_id: booking.id, trigger_label: 'Opt-in confirmation'
+        }).catch(e => console.error('opt-in confirmation SMS failed:', e.message));
+      }
 
       // Items are authoritative when supplied. The legacy columns are then
       // derived, never hand-set, so there is one definition of the price.

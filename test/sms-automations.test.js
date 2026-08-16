@@ -239,3 +239,24 @@ test('an admin-recipient rule still sends without a booking consent record', asy
 
   assert.strictEqual(calls.length, 1, 'admin messages are not gated on client consent');
 });
+
+// ── Opt-in confirmation message ──────────────────────────────────────────────
+// The campaign registration declares this exact string, so the registered text
+// and the sent text must stay the same by construction. Carrier rules require
+// all four elements; this pins them so a later reword cannot quietly drop one.
+test('the declared opt-in confirmation carries every required element', () => {
+  const src = require('node:fs').readFileSync(require.resolve('../netlify/functions/bookings.js'), 'utf8');
+  const m = src.match(/const SMS_OPT_IN_MESSAGE = "(.*)";/);
+  assert.ok(m, 'SMS_OPT_IN_MESSAGE must exist — it is what the campaign registration declares');
+  const msg = m[1];
+
+  assert.match(msg, /Funky Monkey Events/,        'must name the brand');
+  assert.match(msg, /msgs? per booking/i,         'must state message frequency');
+  assert.match(msg, /Msg & data rates may apply/, 'must carry the rates disclaimer verbatim');
+  assert.match(msg, /Reply STOP to cancel/,       'must tell them how to opt out');
+  assert.match(msg, /HELP for help/,              'must tell them how to get help');
+
+  const { smsSegments, toGsm7 } = require('../netlify/functions/_sms.js');
+  const segs = smsSegments(toGsm7(msg));
+  assert.ok(segs <= 2, `opt-in confirmation must fit two segments, was ${segs}`);
+});
