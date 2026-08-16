@@ -99,17 +99,20 @@ its own column, never folded into the balance.
    outstanding link. The finalisation page reads this column, so whichever way
    it goes must not leave that page pointing at a paid deposit.
 
-## Open questions for implementation
+## Open questions — closed 2026-08-16
 
-- **Where does the fee percentage live?** A constant is simplest and this
-  codebase prefers that, but a booking Joe wants to waive it on would then need
-  code. A nullable column defaulting to 5% is the alternative.
-- **Should a $0 balance offer a link at all?** It should not — the same shape
-  as the existing `depositAmount > 0` guard.
-- **Does the fee apply to a balance paid *before* the event?** By the rule as
-  stated, no — the trigger is the event date having passed, not the payment
-  being a balance. The implementation needs a date comparison, not just a
-  balance check.
+- **Where does the fee percentage live?** A constant, `SERVICE_FEE_RATE` in
+  `_items.js`. Waiving the fee on one booking would need a code change; the
+  upgrade path (a nullable `service_fee_rate` column) is noted there.
+- **Should a $0 balance offer a link at all?** No. `create-stripe-link.js`
+  400s on a balance of 0, and the admin button is hidden.
+- **Does the fee apply to a balance paid *before* the event?** Yes. Joe,
+  2026-08-16: the trigger is paying the balance through the link, not the
+  event date having passed. No date comparison is implemented.
+- **Which column holds the balance link?** Its own, `stripe_balance_link`.
+  `stripe_payment_link` keeps meaning "the deposit link" — `finalise.js:31`,
+  `my-booking.html:568`, `admin.html:1151` and `admin.html:1874` all read it
+  with that meaning today.
 
 ## What already holds and needs no work
 
