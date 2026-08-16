@@ -139,6 +139,15 @@ async function ensureTables(client) {
     )
   `);
 
+  // Free-text grouping for the add-on picker, which had grown to ~36 chips in
+  // one undifferentiated wall. Deliberately NOT a foreign key to `categories`:
+  // those are service categories ("Foam Parties", "Magic Shows") and add-ons
+  // group on a different axis entirely — food, performers, equipment, seasonal.
+  // Forcing one taxonomy onto both would make each worse. A plain string plus a
+  // datalist of what is already in use lets the grouping settle without a second
+  // CRUD screen to maintain.
+  await client.query("ALTER TABLE addons ADD COLUMN IF NOT EXISTS category VARCHAR(64) DEFAULT ''");
+
   // CREATE TABLE only fires on an empty database; a live one needs the column
   // added explicitly.
   await client.query("ALTER TABLE services ADD COLUMN IF NOT EXISTS short_name VARCHAR(120) DEFAULT ''");
@@ -317,12 +326,13 @@ exports.handler = async (event) => {
           );
         } else if (body.type === 'addon') {
           await client.query(
-            `INSERT INTO addons (addon_id, name, price, active, sort_order)
-             VALUES ($1,$2,$3,$4,$5)
+            `INSERT INTO addons (addon_id, name, price, active, sort_order, category)
+             VALUES ($1,$2,$3,$4,$5,$6)
              ON CONFLICT (addon_id) DO UPDATE SET
                name = EXCLUDED.name, price = EXCLUDED.price,
-               active = EXCLUDED.active, sort_order = EXCLUDED.sort_order`,
-            [body.addon_id, body.name, Number(body.price), body.active !== false, body.sort_order || 0]
+               active = EXCLUDED.active, sort_order = EXCLUDED.sort_order,
+               category = EXCLUDED.category`,
+            [body.addon_id, body.name, Number(body.price), body.active !== false, body.sort_order || 0, (body.category || '').trim()]
           );
         } else {
           // category was absent from this DO UPDATE list until 2026-08-12, so

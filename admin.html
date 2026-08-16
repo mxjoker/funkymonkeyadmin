@@ -4212,11 +4212,24 @@ function renderCatalogue() {
       <button class="btn btn-outline btn-sm" onclick="addNewAddon()">+ Add Add-on</button>
     </div>
     <table class="cat-table">
-      <thead><tr><th>Name</th><th style="width:90px">Price $</th><th style="width:50px;text-align:center">Active</th></tr></thead>
+      <thead><tr><th>Name</th><th style="width:150px">Group</th><th style="width:90px">Price $</th><th style="width:50px;text-align:center">Active</th></tr></thead>
       <tbody id="addons-tbody">`;
+  // Same name on more than one row is almost always a genuine duplicate — the
+  // list had several ("Cotton Candy — $75" twice, "Stilt Walker — $400" twice).
+  // Flagged rather than merged: the addon_ids differ, past bookings may point at
+  // either, and picking a winner is a judgement call, not a migration.
+  const addonNameCounts = {};
   catAddons.forEach(a => {
+    const k = (a.name || '').trim().toLowerCase();
+    addonNameCounts[k] = (addonNameCounts[k] || 0) + 1;
+  });
+  const addonGroups = [...new Set(catAddons.map(a => (a.category || '').trim()).filter(Boolean))].sort();
+  html += `<datalist id="addon-groups">${addonGroups.map(g => `<option value="${esc(g)}"></option>`).join('')}</datalist>`;
+  catAddons.forEach(a => {
+    const dup = addonNameCounts[(a.name || '').trim().toLowerCase()] > 1;
     html += `<tr data-addon-id="${a.addon_id}">
-      <td><input type="text" value="${esc(a.name)}" data-field="name"/></td>
+      <td><input type="text" value="${esc(a.name)}" data-field="name"/>${dup ? ` <span title="Another add-on has this exact name — deactivate whichever you do not use" style="color:#d97706;font-weight:700;font-size:.72rem">⚠ duplicate name</span>` : ''}</td>
+      <td><input type="text" list="addon-groups" placeholder="e.g. Food &amp; Drink" value="${esc(a.category || '')}" data-field="category"/></td>
       <td><input type="number" value="${Number(a.price).toFixed(0)}" data-field="price"/></td>
       <td style="text-align:center"><input type="checkbox" ${a.active?'checked':''} data-field="active"/></td>
     </tr>`;
@@ -4372,6 +4385,47 @@ function addNewAddon() {
   row.querySelector('[data-field="name"]').focus();
 }
 
+// Groups the picker by the add-on's `category`. It had become ~36 chips in one
+// undifferentiated wall, which is unscannable and is how the same add-on ends up
+// added twice. Anything without a group falls into "Other" LAST, so an ungrouped
+// add-on is visible rather than hidden — the point is to make the untidied ones
+// obvious, not to bury them.
+function addonPickerGroups(currentIds, serviceId) {
+  const chip = (a) => {
+    const active = currentIds.includes(a.addon_id);
+    return `<button data-addon-id="${a.addon_id}"
+      onclick="toggleAddonForService(this,'${serviceId}')"
+      style="padding:6px 14px;border-radius:20px;font-size:.8rem;font-weight:700;cursor:pointer;
+        background:${active?'#7c3aed':'#f9fafb'};color:${active?'#fff':'#374151'};
+        border:${active?'none':'1.5px solid #e5e7eb'};transition:all .15s"
+      data-active="${active}">${esc(a.name)} — $${Number(a.price).toFixed(0)}${active?' ✓':''}</button>`;
+  };
+
+  const groups = new Map();
+  (catAddons || []).forEach(a => {
+    const g = (a.category || '').trim() || 'Other';
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(a);
+  });
+  const names = [...groups.keys()].sort((x, y) =>
+    x === 'Other' ? 1 : y === 'Other' ? -1 : x.localeCompare(y));
+
+  // One flat list until groups actually exist — headings over a single "Other"
+  // bucket would be noise pretending to be structure.
+  if (names.length === 1) {
+    return `<div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px">
+      ${groups.get(names[0]).map(chip).join('')}
+    </div>
+    <p style="font-size:.76rem;color:#9ca3af;margin-bottom:14px">Tip: give add-ons a <strong>Group</strong> in the Add-ons table above and they will be sorted into sections here.</p>`;
+  }
+
+  return names.map(g => `
+    <div style="margin-bottom:14px">
+      <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:#7c3aed;font-weight:800;margin-bottom:6px">${esc(g)} <span style="color:#c4b5fd;font-weight:600">(${groups.get(g).length})</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px">${groups.get(g).map(chip).join('')}</div>
+    </div>`).join('') + '<div style="margin-bottom:6px"></div>';
+}
+
 function openAddonPicker(serviceId, btn) {
   // Get current selections from DOM chips
   const container = btn.previousElementSibling;
@@ -4380,17 +4434,7 @@ function openAddonPicker(serviceId, btn) {
   document.getElementById('modal-title').textContent = 'Add-ons for this Service';
   document.getElementById('modal-body').innerHTML = `
     <p style="font-size:.82rem;color:#6b7280;margin-bottom:14px">Click add-ons to toggle them on/off for this service. Clients will only see these when booking.</p>
-    <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px">
-      ${catAddons.map(a => {
-        const active = currentIds.includes(a.addon_id);
-        return `<button data-addon-id="${a.addon_id}"
-          onclick="toggleAddonForService(this,'${serviceId}')"
-          style="padding:6px 14px;border-radius:20px;font-size:.8rem;font-weight:700;cursor:pointer;
-            background:${active?'#7c3aed':'#f9fafb'};color:${active?'#fff':'#374151'};
-            border:${active?'none':'1.5px solid #e5e7eb'};transition:all .15s"
-          data-active="${active}">${esc(a.name)} — $${Number(a.price).toFixed(0)}${active?' ✓':''}</button>`;
-      }).join('')}
-    </div>
+    ${addonPickerGroups(currentIds, serviceId)}
     <div style="display:flex;gap:8px">
       <button class="btn btn-primary btn-sm" onclick="applyAddonPicker('${serviceId}')">Done</button>
     </div>`;
