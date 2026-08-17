@@ -547,8 +547,13 @@ exports.handler = async (event) => {
           if (!adminAuth) return unauthorized();
 
           const { log_id, stage, value } = body;
+          // Check the array before the map: a bare `CHECKLIST_TS_COLS[stage]`
+          // lookup is reachable through the prototype chain (stage:
+          // 'constructor' resolves to a truthy inherited value), and this map
+          // names a SQL column, so a stage that isn't a real array member must
+          // never reach it.
+          if (!isAdjustableStage(stage)) return json(400, { error: 'Unknown stage' });
           const col = CHECKLIST_TS_COLS[stage];
-          if (!col) return json(400, { error: 'Unknown stage' });
 
           // null clears; anything else must parse as a date. A string that does
           // not parse must be refused, not written as NULL — silently clearing
@@ -964,6 +969,15 @@ const STAGE_LABELS = {
   completed: 'completed', clocked_out: 'clock-out',
 };
 
+// A bare `CHECKLIST_TS_COLS[stage]` lookup is reachable through the prototype
+// chain — 'constructor', '__proto__', 'toString' etc. all resolve to a truthy
+// inherited value, so `!col` alone never rejects them. Checking the array
+// first (the same trick buildChecklistTimestampClause already uses) closes
+// that off before a non-column string can be interpolated as one.
+function isAdjustableStage(stage) {
+  return typeof stage === 'string' && stage !== 'upcoming' && CHECKLIST_STATUSES.includes(stage);
+}
+
 function clockAdjustmentLog(stage, before, after) {
   const fmt = (v) => {
     if (!v) return null;
@@ -1130,4 +1144,5 @@ exports.buildChecklistTimestampClause = buildChecklistTimestampClause;
 exports.CHECKLIST_STATUSES = CHECKLIST_STATUSES;
 exports.CHECKLIST_TS_COLS = CHECKLIST_TS_COLS;
 exports.clockAdjustmentLog = clockAdjustmentLog;
+exports.isAdjustableStage = isAdjustableStage;
 exports.ensureTables = ensureTables;

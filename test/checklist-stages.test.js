@@ -71,3 +71,29 @@ test('clearing a stamp is logged as cleared, not as a change to nothing', () => 
   const e = clockAdjustmentLog('arrived', '2026-08-15T10:00:00.000Z', null);
   assert.match(e.detail, /clear|remov/i);
 });
+
+// A bare `CHECKLIST_TS_COLS[stage]` lookup is reachable through the prototype
+// chain — `stage: 'constructor'` resolves to Object's constructor, which is
+// truthy, so a `!col` check alone never rejects it. isAdjustableStage must
+// check the array (like buildChecklistTimestampClause already does) so this
+// can't reach the query with a non-column string interpolated as one.
+const { isAdjustableStage } = require('../netlify/functions/staff-assignments.js');
+
+test('every real stage but upcoming is adjustable', () => {
+  for (const stage of ['clocked_in', 'on_my_way', 'arrived', 'completed', 'clocked_out']) {
+    assert.strictEqual(isAdjustableStage(stage), true, stage);
+  }
+  assert.strictEqual(isAdjustableStage('upcoming'), false);
+});
+
+test('inherited Object.prototype keys are not adjustable stages', () => {
+  for (const stage of ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf']) {
+    assert.strictEqual(isAdjustableStage(stage), false, stage);
+  }
+});
+
+test('non-string stages are not adjustable', () => {
+  for (const stage of [null, undefined, 42, {}]) {
+    assert.strictEqual(isAdjustableStage(stage), false, String(stage));
+  }
+});
