@@ -93,6 +93,29 @@ function paymentEffect(booking, amountPaid, kind, meta) {
   };
 }
 
+// Chooses the balance-receipt subject and framing-sentence tail. Pure and
+// separate from paymentEffect so the copy DECISION — not the HTML — can be
+// tested without a database or SMTP.
+//
+// A balance payment doesn't always zero balance_due (see paymentEffect's
+// comment: a quote raised after the link was minted, or metadata Stripe
+// couldn't confirm, can leave a genuine shortfall). Telling the client
+// "settled in full" while balance_due still shows money owed misleads them
+// into thinking they can stop paying, while the admin email's Balance Due
+// row would show the truth — the same booking, two different stories.
+function balanceReceiptCopy(effect) {
+  if (effect.balance_due === 0) {
+    return {
+      subject: "Payment received — you're all paid up! 🎉 Funky Monkey Events",
+      headline: "is settled in full.",
+    };
+  }
+  return {
+    subject: "Payment received — Funky Monkey Events",
+    headline: `still has $${effect.balance_due.toFixed(2)} outstanding — we'll follow up about the remaining balance.`,
+  };
+}
+
 exports.handler = async (event) => {
   const h = { "Content-Type": "application/json" };
   if (event.httpMethod !== "POST") return { statusCode: 405, headers: h, body: JSON.stringify({ error: "Method not allowed" }) };
@@ -241,7 +264,10 @@ exports.handler = async (event) => {
           // Sending the existing "You're CONFIRMED!" copy to someone settling
           // up after their event reads as if we had lost track of them.
           if (effect.kind === 'balance') {
-            const subject = "Payment received — you're all paid up! 🎉 Funky Monkey Events";
+            // Which subject/framing sentence: "settled in full" is only true
+            // when this payment actually zeroed the balance. See
+            // balanceReceiptCopy's comment for why that isn't guaranteed.
+            const { subject, headline } = balanceReceiptCopy(effect);
             // Only print a Balance / Service-fee breakdown when it came from
             // Stripe-signed metadata. Otherwise state just the amount
             // received — a fabricated split is worse than none.
@@ -253,7 +279,7 @@ exports.handler = async (event) => {
             try {
               const res = await sendEmail(b.client_email, subject,
                 wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${esc(b.client_name)}</strong>! 🎉</p>
-                  <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Thank you — your balance for <strong style="color:#F3E8FF">${esc(b.service_name)}</strong> is settled in full.</p>
+                  <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Thank you — your balance for <strong style="color:#F3E8FF">${esc(b.service_name)}</strong> ${headline}</p>
                   <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
                     <table style="width:100%;border-collapse:collapse;color:#F3E8FF;font-size:14px">
                       ${breakdownRows}
@@ -353,3 +379,4 @@ exports.handler = async (event) => {
 
 // Exported for tests — the handler itself needs Stripe and a database.
 module.exports.paymentEffect = paymentEffect;
+module.exports.balanceReceiptCopy = balanceReceiptCopy;

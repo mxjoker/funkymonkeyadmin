@@ -164,3 +164,30 @@ test('metadata that does not add up to what was charged is treated as untrustwor
   assert.ok(e.warning, 'no warning was set for inconsistent metadata');
   assert.strictEqual(e.balance_due, 0);
 });
+
+const { balanceReceiptCopy } = require('../netlify/functions/stripe-webhook.js');
+
+// A quote raised after the link was minted, or metadata Stripe couldn't
+// confirm, can leave a genuine shortfall after a "balance" payment (see the
+// tests above: balance_due 100 and 580). Telling the client "settled in
+// full" while balance_due still shows money owed misleads them into
+// thinking they can stop paying — the receipt copy must reflect which case
+// this is, not assume every balance payment finishes the booking.
+test('a fully settled balance payment keeps the exact subject and "settled in full" wording', () => {
+  const copy = balanceReceiptCopy({ balance_due: 0 });
+  assert.strictEqual(copy.subject, "Payment received — you're all paid up! 🎉 Funky Monkey Events");
+  assert.match(copy.headline, /settled in full/);
+});
+
+test('a balance payment that leaves a shortfall does not claim to be settled', () => {
+  const copy = balanceReceiptCopy({ balance_due: 580 });
+  assert.ok(!/settled in full/.test(copy.headline), 'a booking still owed $580 was told it was settled in full');
+  assert.notStrictEqual(copy.subject, "Payment received — you're all paid up! 🎉 Funky Monkey Events");
+});
+
+test('the shortfall wording names the amount still owed, matching effect.balance_due exactly', () => {
+  const effect = paymentEffect({ balance_due: 500 }, 420, 'balance', { balance: 400, fee: 20 });
+  assert.strictEqual(effect.balance_due, 100);
+  const copy = balanceReceiptCopy(effect);
+  assert.match(copy.headline, /\$100\.00/);
+});
