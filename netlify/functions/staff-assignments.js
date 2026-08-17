@@ -2,7 +2,7 @@ const { withClient, getPool } = require('./_db');
 const {
   CORS, preflight, requireAuth, unauthorized, forbidden,
 } = require('./_auth');
-const { sendEmail, wrap } = require('./_email');
+const { sendEmail, wrap, logChange, ensureBookingChanges } = require('./_email');
 const { sendSms, ensureSmsTables } = require('./_sms');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
@@ -537,6 +537,47 @@ exports.handler = async (event) => {
           return json(200, rows[0] || { success: true });
         }
 
+        // ── Admin clock adjustment ───────────────────────────────────────
+        // Staff tap stages in real time; only an admin corrects one. This is a
+        // wage record, so every edit is written to booking_changes with both
+        // sides of the change, and the log is flagged as adjusted so a payroll
+        // run can show that the hours it paid were corrected by hand.
+        if (action === 'adjust_clock') {
+          const adminAuth = await requireAuth(event, ['admin']);
+          if (!adminAuth) return unauthorized();
+
+          const { log_id, stage, value } = body;
+          const col = CHECKLIST_TS_COLS[stage];
+          if (!col) return json(400, { error: 'Unknown stage' });
+
+          // null clears; anything else must parse as a date. A string that does
+          // not parse must be refused, not written as NULL — silently clearing
+          // a wage timestamp because of a typo is the worst outcome here.
+          let next = null;
+          if (value !== null && value !== undefined && value !== '') {
+            const d = new Date(value);
+            if (isNaN(d.getTime())) return json(400, { error: 'Invalid timestamp' });
+            next = d.toISOString();
+          }
+
+          const { rows: before } = await client.query('SELECT * FROM gig_logs WHERE id=$1', [parseInt(log_id)]);
+          if (!before.length) return json(404, { error: 'Not found' });
+
+          const { rows } = await client.query(
+            `UPDATE gig_logs SET ${col}=$1, clock_adjusted_at=NOW(), updated_at=NOW() WHERE id=$2 RETURNING *`,
+            [next, parseInt(log_id)]
+          );
+
+          const entry = clockAdjustmentLog(stage, before[0][col], next);
+          try {
+            await ensureBookingChanges(client);
+            await logChange(client, before[0].booking_id, entry.action, entry.detail);
+          } catch (logErr) {
+            console.error('adjust_clock: failed to write the audit line —', logErr.message);
+          }
+          return json(200, rows[0]);
+        }
+
         if (action === 'submit_survey') {
           const auth = await requireAuth(event);
           if (!auth) return unauthorized();
@@ -915,6 +956,30 @@ function buildChecklistTimestampClause(status) {
   return (setCol ? `, ${setCol}=NOW()` : '') + clear.map(c => `, ${c}=NULL`).join('');
 }
 
+// The audit line for an admin's clock edit. Pure, so the wording is testable
+// without a database — a wage record that can be silently rewritten is worth
+// less than no record, so this must never print "null" at someone.
+const STAGE_LABELS = {
+  clocked_in: 'clock-in', on_my_way: 'on my way', arrived: 'arrived',
+  completed: 'completed', clocked_out: 'clock-out',
+};
+
+function clockAdjustmentLog(stage, before, after) {
+  const fmt = (v) => {
+    if (!v) return null;
+    const d = v instanceof Date ? v : new Date(v);
+    return isNaN(d.getTime()) ? null : d.toISOString().slice(11, 16) + ' UTC';
+  };
+  const label = STAGE_LABELS[stage] || stage;
+  const from = fmt(before), to = fmt(after);
+  let detail;
+  if (from && to)       detail = `${label}: ${from} → ${to}`;
+  else if (!from && to) detail = `${label}: not recorded → ${to}`;
+  else if (from && !to) detail = `${label}: ${from} → cleared`;
+  else                  detail = `${label}: nothing to change`;
+  return { action: 'Clock adjusted', detail };
+}
+
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
 // One letter per role this staff member matched on this booking. The value is
@@ -1064,4 +1129,5 @@ exports.expressInterest = expressInterest;
 exports.buildChecklistTimestampClause = buildChecklistTimestampClause;
 exports.CHECKLIST_STATUSES = CHECKLIST_STATUSES;
 exports.CHECKLIST_TS_COLS = CHECKLIST_TS_COLS;
+exports.clockAdjustmentLog = clockAdjustmentLog;
 exports.ensureTables = ensureTables;

@@ -49,3 +49,25 @@ test('an unknown status produces no SQL at all', () => {
   assert.strictEqual(buildChecklistTimestampClause(''), '');
   assert.strictEqual(buildChecklistTimestampClause(undefined), '');
 });
+
+const { clockAdjustmentLog } = require('../netlify/functions/staff-assignments.js');
+
+test('an adjustment records both sides of the change', () => {
+  const e = clockAdjustmentLog('clocked_out', '2026-08-15T15:00:00.000Z', '2026-08-15T16:30:00.000Z');
+  assert.match(e.action, /clock/i);
+  assert.match(e.detail, /clocked_out|clock-out/i);
+  assert.ok(e.detail.includes('15:00') || e.detail.includes('3:00'), 'the old value is missing');
+  assert.ok(e.detail.includes('16:30') || e.detail.includes('4:30'), 'the new value is missing');
+});
+
+// An unset stamp being filled in is the common case: someone forgot to tap.
+test('filling in a stamp that was never set says so rather than printing null', () => {
+  const e = clockAdjustmentLog('clocked_out', null, '2026-08-15T16:30:00.000Z');
+  assert.ok(!/null|undefined/i.test(e.detail), `detail leaked a null: ${e.detail}`);
+  assert.match(e.detail, /not (set|recorded)|—/i);
+});
+
+test('clearing a stamp is logged as cleared, not as a change to nothing', () => {
+  const e = clockAdjustmentLog('arrived', '2026-08-15T10:00:00.000Z', null);
+  assert.match(e.detail, /clear|remov/i);
+});
