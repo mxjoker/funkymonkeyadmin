@@ -1573,6 +1573,16 @@ const CHECKLIST_STATUSES = ['upcoming','clocked_in','on_my_way','arrived','compl
 const CHECKLIST_LABELS   = { upcoming:'📅 Upcoming', clocked_in:'🕐 Clocked In', on_my_way:'🚗 On My Way',
                              arrived:'📍 Arrived', completed:'✅ Done', clocked_out:'🏠 Clocked Out' };
 
+// The post-gig report was gated on `completed` alone, which assumed the
+// report always came before the clock-out. Tapping Clock Out first took the
+// button away, and the only route back was stepping to `completed` — which
+// NULLs clocked_out_at. Mirrors staff-portal.html's reportButtonVisible().
+function reportButtonVisible(g) {
+  if (g && g.survey_submitted_at) return false;
+  const s = (g && g.checklist_status) || 'upcoming';
+  return s === 'completed' || s === 'clocked_out';
+}
+
 // ══ END PURE HELPERS ══
 
 // Default matches the old "Newest Inquiry" dropdown default, so the view the
@@ -4075,7 +4085,7 @@ function gigCard(g, isAssigned) {
             ${isActive||isPast?'disabled':''}>${CHECKLIST_LABELS[s]}</button>`;
         }).join('')}
       </div>
-      ${curStatus === 'completed'
+      ${reportButtonVisible(g)
         ? `<button class="btn btn-outline btn-sm" style="margin-top:8px;border-color:#7c3aed;color:#7c3aed"
              onclick="openSurvey('${g.log_id}','${g.booking_id}')">📋 Submit Post-Gig Report</button>`
         : ''}
@@ -5801,8 +5811,16 @@ async function preflightPayroll() {
             : st.hours_source === 'estimated'
               ? `<span style="color:#1e40af;font-weight:600">estimated</span>`
               : '';
+          // The spec asked that an adjusted log stay flagged as adjusted so a
+          // payroll run can show it — staff-assignments.js writes
+          // clock_adjusted_at, payroll.js selects and carries it through as
+          // st.clock_adjusted, and this is the one place a wage question gets
+          // asked, so it renders here.
+          const adjustedTag = st.clock_adjusted
+            ? `<span style="color:#92400e;font-weight:600">· hand-corrected</span>`
+            : '';
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:.84rem;color:#374151;border-bottom:1px solid #f3f4f6">
-            <span><span style="font-weight:600">${esc(st.staff_name)}</span> <span style="color:#9ca3af">(${payLabel})</span>${sourceTag ? ' · ' + sourceTag : ''}${adj}</span>
+            <span><span style="font-weight:600">${esc(st.staff_name)}</span> <span style="color:#9ca3af">(${payLabel})</span>${sourceTag ? ' · ' + sourceTag : ''}${adjustedTag ? ' ' + adjustedTag : ''}${adj}</span>
             <span style="font-weight:700;color:#1e1b4b">$${Number(st.amount).toFixed(2)}</span>
           </div>`;
         }).join('');
