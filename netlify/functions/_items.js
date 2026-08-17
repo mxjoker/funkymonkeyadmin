@@ -154,7 +154,39 @@ function balanceIsDerivable(row) {
   return Math.abs(derived - Number(row.balance_due || 0)) <= 0.005;
 }
 
+// A balance paid through the Stripe link carries a 5% service fee.
+//
+// One formula, no special cases: balance_due is already
+// total + mileage - deposit, so a booking that never took a deposit has a
+// balance equal to the whole amount and needs no separate rule.
+//
+// It is a SERVICE fee, not a card surcharge (Joe, 2026-08-16). A 5% card-only
+// surcharge would exceed Stripe's ~2.9% + 30¢ cost of acceptance and fall
+// under Visa/Mastercard surcharge rules. Client-facing copy must never call
+// it a card, processing or convenience fee.
+//
+// The fee is computed here at link-creation time and lives only on the Stripe
+// session and in the email. It must NEVER be written into balance_due:
+// balanceIsDerivable() above would fail for this booking forever, and
+// booking.js:269 would refuse every later balance recompute — the exact guard
+// that stops a paid customer being re-billed.
+//
+// ponytail: a constant, not a column. Waiving the fee on one booking needs a
+// code change; if that ever comes up, a nullable bookings.service_fee_rate
+// defaulting to 0.05 is the upgrade path.
+const SERVICE_FEE_RATE = 0.05;
+
+const toCents = (n) => Math.round(n * 100) / 100;
+
+function balanceCharge(row) {
+  const raw = Number(row && row.balance_due);
+  const balance = isFinite(raw) && raw > 0 ? toCents(raw) : 0;
+  const fee = toCents(balance * SERVICE_FEE_RATE);
+  return { balance, fee, total: toCents(balance + fee) };
+}
+
 module.exports = {
   ITEM_KINDS, ensureBookingItems, normaliseItems, rollupItems,
   getItems, getItemsForBookings, replaceItems, balanceIsDerivable,
+  SERVICE_FEE_RATE, balanceCharge,
 };
