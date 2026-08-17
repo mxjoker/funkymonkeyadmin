@@ -179,3 +179,24 @@ test('hours still come from the caller, so the time clock and the 5h floor are u
   const p = paymentForBooking([{ tag_filled: 'A', pay_amount_override: null }], { A: 'hourly' }, HOURLY, 5);
   assert.strictEqual(p.amount, 60);
 });
+
+// The exact case _pay.js goes out of its way to preserve elsewhere: 0 is a
+// deliberate override, not an absent one, and it must not lose to a higher
+// figure just because it shares a booking with a second role.
+test('a $0 override on one role wins over a higher-paying second role', () => {
+  const p = paymentForBooking(
+    [{ tag_filled: 'Foam Crew', pay_amount_override: 0 },
+     { tag_filled: 'Story Doodles', pay_amount_override: null }],
+    { 'Foam Crew': 'hourly', 'Story Doodles': 'flat' },
+    { pay_type: 'hourly', hourly_rate: 20, flat_rate: 80 }, 6);
+  assert.strictEqual(p.amount, 0, 'the $0 override was discarded in favour of the higher role');
+  assert.match(p.basis, /override/i);
+});
+
+test('the higher of two overrides wins when both roles carry one', () => {
+  const p = paymentForBooking(
+    [{ tag_filled: 'Foam Crew', pay_amount_override: 50 },
+     { tag_filled: 'Story Doodles', pay_amount_override: 200 }],
+    { 'Foam Crew': 'hourly', 'Story Doodles': 'flat' }, HOURLY, 6);
+  assert.strictEqual(p.amount, 200);
+});

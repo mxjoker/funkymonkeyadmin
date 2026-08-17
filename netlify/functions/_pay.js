@@ -93,9 +93,16 @@ function paymentForBooking(assignments, rolePayByRole, staff, hours) {
   const candidates = list.map((a) => {
     const payType = resolvePayType(a.tag_filled, rolePayByRole, staff);
     const { amount, basis } = resolveAmount({ payType, hours, staff, override: a.pay_amount_override });
-    return { amount, basis, payType, tag: a.tag_filled };
+    return { amount, basis, payType, tag: a.tag_filled, isOverride: basis === 'per-gig override' };
   });
-  const best = bestPayment(candidates) || { amount: 0, basis: 'no assignment', payType: 'flat', tag: null };
+  // The override is the designated escape hatch for a gig the higher-of rule
+  // prices wrong -- it has to beat the rule outright, not just compete inside
+  // it as one more candidate. A $0 override on one role must still win over a
+  // higher-paying second role. Two overrides on the same booking is a data
+  // oddity, not a policy decision here: the highest of them wins.
+  const overridden = candidates.filter((c) => c.isOverride);
+  const pool = overridden.length ? overridden : candidates;
+  const best = bestPayment(pool) || { amount: 0, basis: 'no assignment', payType: 'flat', tag: null };
   return {
     amount: best.amount, basis: best.basis, payType: best.payType,
     rolesFilled: list.map((a) => a.tag_filled).filter(Boolean),

@@ -85,4 +85,29 @@ function payableHours(log, estimatedHours) {
            measured: null, warning: hasClockData ? measured.reason : null };
 }
 
-module.exports = { MAX_SHIFT_HOURS, workedHours, clockSegments, payableHours, MIN_PAID_HOURS };
+// One person filling two roles on one booking works one continuous shift, not
+// two independent ones — but each role has its own gig_logs row, stamped (or
+// not) independently. Letting one arbitrary row's log stand for the group
+// means the same rerun can pay the measured span or fall back to the 5-hour
+// estimate depending on which row Postgres happened to return first — a
+// non-reproducible dollar figure on a weekly payroll run. The honest span is
+// the union: earliest clock-in, latest clock-out, across every log in the
+// group. A single-row group degrades to exactly that row's own stamps.
+function mergeClockSpan(logs) {
+  const list = Array.isArray(logs) ? logs : [];
+  let inMs = null, outMs = null, adjusted = false;
+  for (const log of list) {
+    const i = ms(log && log.clocked_in_at);
+    const o = ms(log && log.clocked_out_at);
+    if (i !== null && (inMs === null || i < inMs)) inMs = i;
+    if (o !== null && (outMs === null || o > outMs)) outMs = o;
+    if (log && log.clock_adjusted_at) adjusted = true;
+  }
+  return {
+    clocked_in_at: inMs === null ? null : new Date(inMs),
+    clocked_out_at: outMs === null ? null : new Date(outMs),
+    clock_adjusted_at: adjusted,
+  };
+}
+
+module.exports = { MAX_SHIFT_HOURS, workedHours, clockSegments, payableHours, MIN_PAID_HOURS, mergeClockSpan };

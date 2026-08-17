@@ -2,7 +2,7 @@ const { withClient } = require('./_db');
 const {
   CORS, preflight, requireAuth, unauthorized, forbidden,
 } = require('./_auth');
-const { payableHours } = require('./_timeclock');
+const { payableHours, mergeClockSpan } = require('./_timeclock');
 const { paymentForBooking } = require('./_pay');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
@@ -62,6 +62,17 @@ async function ensureTables(client) {
   try {
     await client.query('ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS pay_amount_override NUMERIC(10,2)');
   } catch (_) {}
+
+  // Same reasoning, same guarantee: this function reads role_pay directly
+  // (below), so it cannot rely on staff-assignments.js having run first.
+  // Definition mirrors staff-assignments.js:212-217 exactly.
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS role_pay (
+      role_name  VARCHAR(100) PRIMARY KEY,
+      pay_type   VARCHAR(20) NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 
   // The assignments query below reads gl.clocked_in_at / clocked_out_at /
   // clock_adjusted_at, but those columns — and the unique index that stops the
@@ -333,7 +344,7 @@ exports.handler = async (event) => {
               AND b.event_date <= $2
               AND b.status IN ('confirmed','completed')
               AND sp_paid.id IS NULL
-            ORDER BY s.id, b.event_date
+            ORDER BY s.id, b.event_date, sa.id
           `, [rangeStart, rangeEnd]);
 
           if (assignments.length === 0 && !dryRun) {
@@ -420,6 +431,18 @@ exports.handler = async (event) => {
 
           let noClockCount = 0;
           for (const group of byStaffBooking.values()) {
+            // group[0] is now deterministic — ORDER BY s.id, b.event_date, sa.id
+            // above means "first in the group" always means "lowest assignment
+            // id" — but it is still an arbitrary pick among per-assignment
+            // fields that are NOT guaranteed identical across roles: an admin
+            // can hand-set load/unload/drive minutes on one role's row and not
+            // the other. The choice is deliberate, not incidental: a second
+            // role for the same person on the same booking is not a second
+            // physical trip, so there is one load, one drive, one unload for
+            // the group, and the lowest-id row's figures (or the template
+            // default) are what's used. Clock timestamps are handled
+            // separately below via mergeClockSpan, precisely because a
+            // one-row pick is wrong for those.
             const a = group[0];
             const { rows: existingPayment } = await client.query(
               'SELECT id FROM staff_payments WHERE booking_id=$1 AND staff_id=$2',
@@ -437,9 +460,17 @@ exports.handler = async (event) => {
             const totalMins = load + drive + unload + party + pack + drive + homeUn;
             const rawHours = totalMins / 60;
 
+            // A person who filled two roles worked one continuous shift, and
+            // each role's gig_logs row only stamps its own clock — picking one
+            // row's log arbitrarily made the paid hours (measured vs. the 5h
+            // estimate) depend on unrelated row order. The merged span is
+            // earliest clock-in to latest clock-out across the whole group,
+            // and degrades to a single row's own stamps when there is only one.
+            const clockSpan = mergeClockSpan(group);
+
             // Pay the clock when the record is complete and plausible; otherwise
             // pay the estimate and say so. The 5-hour minimum applies either way.
-            const paid = payableHours(a, Math.round(rawHours * 100) / 100);
+            const paid = payableHours(clockSpan, Math.round(rawHours * 100) / 100);
             const totalHours = paid.hours;
             if (paid.warning) {
               // totalHours may be the 5-hour floor rather than the estimate itself —
@@ -488,7 +519,9 @@ exports.handler = async (event) => {
               // surfaced anywhere — the spec asked that an adjusted log stay
               // flagged so a payroll run can show it. Carried alongside
               // hours_source so the preflight staff line can render both.
-              clock_adjusted: !!a.clock_adjusted_at,
+              // True if any role's log in the group was hand-corrected, not
+              // just the row that happened to be group[0].
+              clock_adjusted: clockSpan.clock_adjusted_at,
               amount,
               drive_minutes: drive,
               total_minutes: totalMins,
@@ -508,7 +541,7 @@ exports.handler = async (event) => {
             }
           }
 
-          const noClockSummary = noClockDataSummary(noClockCount, assignments.length);
+          const noClockSummary = noClockDataSummary(noClockCount, byStaffBooking.size);
           if (noClockSummary) warnings.push(noClockSummary);
 
           // ── preflight: return the review payload, write nothing ──────────
