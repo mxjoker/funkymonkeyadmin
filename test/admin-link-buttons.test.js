@@ -156,3 +156,33 @@ test('a filled-in value always saves, fetched or not', () => {
   assert.strictEqual(clockAdjustAllowed(false, '2026-08-15T09:00'), true);
   assert.strictEqual(clockAdjustAllowed(true, '2026-08-15T09:00'), true);
 });
+
+// The bug: admin.html's page-portal view (gigCard, ~4041) and its assignment
+// badge (renderAssignmentCard's clLabels, ~2341) each carried their own stale
+// four-stage copy of the checklist, frozen before clocked_in/clocked_out were
+// added to CHECKLIST_STATUSES in staff-assignments.js and to staff-portal.html.
+// A stale array's indexOf() on a real clocked_in/clocked_out status returns
+// -1, which makes isActive false and isPast (i < -1) false for every button —
+// so all four render enabled, and one tap on "Done" fires the server's
+// walk-back clause and destroys the clock stamps payroll needs. A stale label
+// map renders the raw string 'clocked_out' in the badge instead of a label.
+// This asserts no four-entry copy of either shape remains, and any checklist
+// array or label map admin.html does contain includes both new stages —
+// so the next person who adds a stage cannot add it to only one copy.
+test('admin.html has no stale four-stage checklist array or label map', () => {
+  const arrays = HTML.match(/\[\s*'upcoming'\s*,[^\]]*\]/g) || [];
+  assert.ok(arrays.length > 0, 'expected at least one checklist array in admin.html');
+  for (const m of arrays) {
+    assert.ok(!/^\[\s*'upcoming'\s*,\s*'on_my_way'\s*,\s*'arrived'\s*,\s*'completed'\s*\]$/.test(m),
+      `stale four-stage checklist array still present: ${m}`);
+    assert.ok(m.includes("'clocked_in'"), `checklist array missing clocked_in: ${m}`);
+    assert.ok(m.includes("'clocked_out'"), `checklist array missing clocked_out: ${m}`);
+  }
+
+  const labelMaps = HTML.match(/\{\s*upcoming:\s*'[^']*'[\s\S]*?\}/g) || [];
+  assert.ok(labelMaps.length > 0, 'expected at least one checklist label map in admin.html');
+  for (const m of labelMaps) {
+    assert.ok(m.includes('clocked_in:'), `checklist label map missing clocked_in: ${m}`);
+    assert.ok(m.includes('clocked_out:'), `checklist label map missing clocked_out: ${m}`);
+  }
+});

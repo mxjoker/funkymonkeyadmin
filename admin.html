@@ -1560,6 +1560,19 @@ function clockAdjustAllowed(known, value) {
   return known || value !== '';
 }
 
+// Must match CHECKLIST_STATUSES in staff-assignments.js — the server rejects
+// any status not in its own list, and these stamps are what pay is computed
+// from. Change one, change both in the same commit. Duplicated from
+// staff-portal.html's copy of the same list for the same reason as
+// balanceLinkAmounts() above: admin.html is a static page with no build step
+// and cannot require or import from another static page. Defined once here
+// and shared by both admin.html's own staff-portal view (gigCard) and its
+// assignment-card checklist badge so there are two copies of this list in
+// the codebase, not three.
+const CHECKLIST_STATUSES = ['upcoming','clocked_in','on_my_way','arrived','completed','clocked_out'];
+const CHECKLIST_LABELS   = { upcoming:'📅 Upcoming', clocked_in:'🕐 Clocked In', on_my_way:'🚗 On My Way',
+                             arrived:'📍 Arrived', completed:'✅ Done', clocked_out:'🏠 Clocked Out' };
+
 // ══ END PURE HELPERS ══
 
 // Default matches the old "Newest Inquiry" dropdown default, so the view the
@@ -2338,9 +2351,8 @@ function renderAssignmentCard(a, payByStaff, bookingId, slotTag = null) {
   
   // Checklist progress badge
   const clStatus = a.checklist_status || 'upcoming';
-  const clLabels = { upcoming:'📅 Upcoming', on_my_way:'🚗 On My Way', arrived:'📍 Arrived', completed:'✅ Done' };
   const clBadge = a.status === 'assigned'
-    ? `<span style="font-size:.68rem;color:#6b7280;background:#f3f4f6;border-radius:10px;padding:1px 7px">${clLabels[clStatus]||clStatus}</span>`
+    ? `<span style="font-size:.68rem;color:#6b7280;background:#f3f4f6;border-radius:10px;padding:1px 7px">${CHECKLIST_LABELS[clStatus]||clStatus}</span>`
     : '';
   
   // Survey data
@@ -4042,22 +4054,25 @@ function gigCard(g, isAssigned) {
   const dateStr = g.event_date
     ? new Date(String(g.event_date).split('T')[0]+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})
     : 'TBD';
-  const checklistStatuses = ['upcoming','on_my_way','arrived','completed'];
-  const checklistLabels   = { upcoming:'📅 Upcoming', on_my_way:'🚗 On My Way', arrived:'📍 Arrived', completed:'✅ Done' };
+  // Must match CHECKLIST_STATUSES in staff-assignments.js — the server rejects
+  // any status not in its own list, and these stamps are what pay is computed
+  // from. Change one, change both in the same commit. Shared with
+  // renderAssignmentCard's badge above via CHECKLIST_STATUSES/CHECKLIST_LABELS
+  // (defined in the PURE HELPERS block) rather than a third local copy.
   const curStatus = g.checklist_status || 'upcoming';
-  const curIdx    = checklistStatuses.indexOf(curStatus);
+  const curIdx    = CHECKLIST_STATUSES.indexOf(curStatus);
 
   const checklistHtml = isAssigned ? `
     <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f3f4f6">
       <div style="font-size:.72rem;text-transform:uppercase;color:#9ca3af;font-weight:700;margin-bottom:8px">Day-of Checklist</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${checklistStatuses.map((s, i) => {
+        ${CHECKLIST_STATUSES.map((s, i) => {
           const isActive = s === curStatus;
           const isPast   = i < curIdx;
           const isNext   = i === curIdx + 1;
           return `<button class="btn btn-sm ${isActive?'btn-primary':isPast?'btn-success':'btn-outline'}"
             onclick="updateChecklist('${g.log_id||''}','${g.id}','${g.booking_id}',${currentUser.staffId},'${s}')"
-            ${isActive||isPast?'disabled':''}>${checklistLabels[s]}</button>`;
+            ${isActive||isPast?'disabled':''}>${CHECKLIST_LABELS[s]}</button>`;
         }).join('')}
       </div>
       ${curStatus === 'completed'
