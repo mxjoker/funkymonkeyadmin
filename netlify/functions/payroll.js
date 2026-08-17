@@ -2,6 +2,7 @@ const { withClient } = require('./_db');
 const {
   CORS, preflight, requireAuth, unauthorized, forbidden,
 } = require('./_auth');
+const { payableHours } = require('./_timeclock');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -215,10 +216,12 @@ exports.handler = async (event) => {
                    b.id as booking_id, b.reference, b.service_name, b.service_id,
                    b.event_date, b.event_time, b.event_zip,
                    s.name as staff_name, s.preferred_name,
-                   s.pay_type, s.flat_rate, s.hourly_rate
+                   s.pay_type, s.flat_rate, s.hourly_rate,
+                   gl.clocked_in_at, gl.clocked_out_at, gl.clock_adjusted_at
             FROM staff_assignments sa
             JOIN bookings b ON b.id = sa.booking_id
             JOIN staff s ON s.id = sa.staff_id
+            LEFT JOIN gig_logs gl ON gl.assignment_id = sa.id
             LEFT JOIN staff_payments sp_paid
               ON sp_paid.booking_id = sa.booking_id
               AND sp_paid.staff_id  = sa.staff_id
@@ -315,7 +318,14 @@ exports.handler = async (event) => {
 
             const totalMins = load + drive + unload + party + pack + drive + homeUn;
             const rawHours = totalMins / 60;
-            const totalHours = Math.max(5, Math.round(rawHours * 100) / 100);
+
+            // Pay the clock when the record is complete and plausible; otherwise
+            // pay the estimate and say so. The 5-hour minimum applies either way.
+            const paid = payableHours(a, Math.round(rawHours * 100) / 100);
+            const totalHours = paid.hours;
+            if (paid.warning) {
+              warnings.push(`${a.preferred_name || a.staff_name} on booking ${a.reference}: ${paid.warning} — paid the estimate (${totalHours}h)`);
+            }
 
             const payType = a.pay_type || 'flat';
             let amount;
@@ -342,6 +352,8 @@ exports.handler = async (event) => {
               pay_type:   payType,
               raw_hours:  Math.round(rawHours * 100) / 100,
               hours:      totalHours,
+              hours_source: paid.source,
+              measured_hours: paid.measured,
               amount,
               drive_minutes: drive,
               total_minutes: totalMins,
@@ -382,6 +394,8 @@ exports.handler = async (event) => {
                 staff_name: a ? (a.preferred_name || a.staff_name) : String(p.staff_id),
                 pay_type: p.pay_type,
                 hours: p.hours,
+                hours_source: p.hours_source,
+                measured_hours: p.measured_hours,
                 amount: p.amount !== null ? p.amount : 0,
                 already_recorded: !!p.existingId,
               });

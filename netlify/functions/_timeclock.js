@@ -59,4 +59,23 @@ function clockSegments(log) {
   };
 }
 
-module.exports = { MAX_SHIFT_HOURS, workedHours, clockSegments };
+// What payroll should pay, and why. Keeping the choice here rather than inline
+// in payroll.js means the fallback rule is testable without a database — the
+// computation loop it lives in cannot be run without one.
+//
+// The 5-hour minimum wraps BOTH branches: it is a floor on what a gig pays, not
+// a property of how the hours were arrived at.
+const MIN_PAID_HOURS = 5;
+
+function payableHours(log, estimatedHours) {
+  const est = Math.round((Number(estimatedHours) || 0) * 100) / 100;
+  const measured = workedHours(log);
+  if (measured.usable) {
+    return { source: 'measured', hours: Math.max(MIN_PAID_HOURS, measured.hours),
+             measured: measured.hours, warning: null };
+  }
+  return { source: 'estimated', hours: Math.max(MIN_PAID_HOURS, est),
+           measured: null, warning: measured.reason };
+}
+
+module.exports = { MAX_SHIFT_HOURS, workedHours, clockSegments, payableHours, MIN_PAID_HOURS };

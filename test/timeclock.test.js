@@ -112,3 +112,50 @@ test('one second over MAX_SHIFT_HOURS is not usable, even if it rounds to 16.00'
   assert.strictEqual(r.usable, false);
   assert.match(r.reason, new RegExp(String(MAX_SHIFT_HOURS)));
 });
+
+const { payableHours } = require('../netlify/functions/_timeclock.js');
+
+const at2 = (h, m = 0) => new Date(Date.UTC(2026, 7, 15, h, m)).toISOString();
+
+test('a sane measured span is what gets paid', () => {
+  const r = payableHours({ clocked_in_at: at2(9), clocked_out_at: at2(15, 30) }, 7.25);
+  assert.strictEqual(r.source, 'measured');
+  assert.strictEqual(r.hours, 6.5);
+  assert.strictEqual(r.warning, null);
+});
+
+test('the 5-hour minimum still applies to a measured span', () => {
+  const r = payableHours({ clocked_in_at: at2(9), clocked_out_at: at2(11) }, 5.5);
+  assert.strictEqual(r.source, 'measured');
+  assert.strictEqual(r.hours, 5, 'the 5-hour floor was lost');
+});
+
+test('the 5-hour minimum still applies to an estimate', () => {
+  const r = payableHours({}, 1.5);
+  assert.strictEqual(r.source, 'estimated');
+  assert.strictEqual(r.hours, 5);
+});
+
+test('an unusable record pays the estimate and explains itself', () => {
+  const r = payableHours({ clocked_in_at: at2(9) }, 7.25);
+  assert.strictEqual(r.source, 'estimated');
+  assert.strictEqual(r.hours, 7.25);
+  assert.match(r.warning, /clock-out/i);
+});
+
+test('a forgotten clock-out pays the estimate, never the 25-hour span', () => {
+  const r = payableHours(
+    { clocked_in_at: at2(8), clocked_out_at: new Date(Date.UTC(2026, 7, 16, 9)).toISOString() }, 7.25);
+  assert.strictEqual(r.source, 'estimated');
+  assert.strictEqual(r.hours, 7.25);
+  assert.match(r.warning, /16h maximum/);
+});
+
+// Every gig_logs row that exists today has neither column.
+test('a booking with no clock record at all pays exactly what it pays now', () => {
+  for (const log of [null, undefined, {}]) {
+    const r = payableHours(log, 7.25);
+    assert.strictEqual(r.hours, 7.25);
+    assert.strictEqual(r.source, 'estimated');
+  }
+});
