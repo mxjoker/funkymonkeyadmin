@@ -2,7 +2,7 @@ const { withClient, getPool } = require('./_db');
 const {
   CORS, preflight, requireAuth, unauthorized, forbidden,
 } = require('./_auth');
-const { sendEmail, wrap } = require('./_email');
+const { sendEmail, wrap, logChange, ensureBookingChanges } = require('./_email');
 const { sendSms, ensureSmsTables } = require('./_sms');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
@@ -223,6 +223,9 @@ async function ensureTables(client) {
       booking_id INTEGER NOT NULL,
       staff_id INTEGER NOT NULL,
       status VARCHAR(32) DEFAULT 'upcoming',
+      clocked_in_at TIMESTAMPTZ,
+      clocked_out_at TIMESTAMPTZ,
+      clock_adjusted_at TIMESTAMPTZ,
       on_my_way_at TIMESTAMPTZ,
       arrived_at TIMESTAMPTZ,
       completed_at TIMESTAMPTZ,
@@ -268,6 +271,11 @@ async function ensureTables(client) {
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS empty_jugs_refilled BOOLEAN",
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS gas_level VARCHAR(50)",
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS survey_submitted_at TIMESTAMPTZ",
+    "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS clocked_in_at TIMESTAMPTZ",
+    "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS clocked_out_at TIMESTAMPTZ",
+    // Set whenever an admin edits a stamp, so a payroll run can show that the
+    // hours it paid were corrected by hand rather than tapped by the worker.
+    "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS clock_adjusted_at TIMESTAMPTZ",
   ];
   for (const sql of migrations) {
     try { await client.query(sql); } catch (_) {}
@@ -343,6 +351,8 @@ exports.handler = async (event) => {
           const { rows: assignments } = await client.query(
             `SELECT sa.*, s.name as staff_name, s.preferred_name, s.color, s.skills,
                     gl.id as log_id, gl.status as checklist_status,
+                    gl.clocked_in_at, gl.on_my_way_at, gl.arrived_at,
+                    gl.completed_at, gl.clocked_out_at,
                     gl.survey_submitted_at, gl.guest_count_actual,
                     gl.balance_collected, gl.balance_amount,
                     gl.gas_level, gl.foam_fluid_needed, gl.empty_jugs_refilled,
@@ -395,6 +405,13 @@ exports.handler = async (event) => {
                     b.total_price, b.deposit_paid, b.balance_due,
                     b.notes as client_notes, b.status as booking_status,
                     gl.status as checklist_status, gl.id as log_id,
+                    gl.clocked_in_at, gl.clocked_out_at,
+                    -- Both portals hide the post-gig report once it has been
+                    -- filed. Without this column that check reads undefined on
+                    -- every row and the button never hides — a rule that can
+                    -- never fire, which is this codebase's documented failure
+                    -- shape.
+                    gl.survey_submitted_at,
                     -- The staff portal shows the party window (event_time +
                     -- duration) alongside the shift window (sa.schedule_start
                     -- + sa.total_minutes, both already computed by
@@ -500,6 +517,25 @@ exports.handler = async (event) => {
             staff_id = auth.staffId;
           }
 
+          // …and scoping the staff_id in the BODY is not the same as scoping the
+          // ROW. log_id/assignment_id name the row directly, so without this a
+          // staff member could POST someone else's log_id with their own
+          // staff_id and be let through. submit_survey twenty lines below has
+          // always checked ownership; this never did, and before this branch the
+          // blast radius was a status badge. These timestamps now decide what
+          // people are paid: `status:'upcoming'` on another worker's log NULLs
+          // every stamp their wage is computed from, and payroll silently falls
+          // back to the estimate. Admins keep their freedom to fix anyone's log.
+          if (auth.role === 'staff') {
+            const { rows: owner } = log_id
+              ? await client.query('SELECT staff_id FROM gig_logs WHERE id=$1', [parseInt(log_id)])
+              // No log_id: the INSERT below upserts on the assignment, so it can
+              // still write an existing log — the assignment is the thing that
+              // has to belong to them.
+              : await client.query('SELECT staff_id FROM staff_assignments WHERE id=$1', [parseInt(assignment_id)]);
+            if (!owner.length || owner[0].staff_id !== auth.staffId) return forbidden();
+          }
+
           if (!CHECKLIST_STATUSES.includes(status)) {
             return json(400, { error: 'Invalid status' });
           }
@@ -527,6 +563,60 @@ exports.handler = async (event) => {
             ));
           }
           return json(200, rows[0] || { success: true });
+        }
+
+        // ── Admin clock adjustment ───────────────────────────────────────
+        // Staff tap stages in real time; only an admin corrects one. This is a
+        // wage record, so every edit is written to booking_changes with both
+        // sides of the change, and the log is flagged as adjusted so a payroll
+        // run can show that the hours it paid were corrected by hand.
+        if (action === 'adjust_clock') {
+          const adminAuth = await requireAuth(event, ['admin']);
+          if (!adminAuth) return unauthorized();
+
+          const { log_id, stage, value } = body;
+          // Check the array before the map: a bare `CHECKLIST_TS_COLS[stage]`
+          // lookup is reachable through the prototype chain (stage:
+          // 'constructor' resolves to a truthy inherited value), and this map
+          // names a SQL column, so a stage that isn't a real array member must
+          // never reach it.
+          if (!isAdjustableStage(stage)) return json(400, { error: 'Unknown stage' });
+          const col = CHECKLIST_TS_COLS[stage];
+
+          // null clears; anything else must parse as a date. A string that does
+          // not parse must be refused, not written as NULL — silently clearing
+          // a wage timestamp because of a typo is the worst outcome here.
+          let next = null;
+          if (value !== null && value !== undefined && value !== '') {
+            const d = new Date(value);
+            if (isNaN(d.getTime())) return json(400, { error: 'Invalid timestamp' });
+            next = d.toISOString();
+          }
+
+          const { rows: before } = await client.query('SELECT * FROM gig_logs WHERE id=$1', [parseInt(log_id)]);
+          if (!before.length) return json(404, { error: 'Not found' });
+
+          // Filling in a stamp for a stage the log has not reached must move the
+          // status with it, or the correction only lives until the worker's next
+          // tap: buildChecklistTimestampClause() for the earlier stage they are
+          // still sitting on clears the stamp again, and an admin's audited
+          // change is undone with nothing written to booking_changes. Clearing
+          // never advances — that is the admin saying it never happened.
+          const nextStatus = advancedStatus(before[0].status, stage, next !== null);
+
+          const { rows } = await client.query(
+            `UPDATE gig_logs SET ${col}=$1${nextStatus ? ', status=$3' : ''}, clock_adjusted_at=NOW(), updated_at=NOW() WHERE id=$2 RETURNING *`,
+            nextStatus ? [next, parseInt(log_id), nextStatus] : [next, parseInt(log_id)]
+          );
+
+          const entry = clockAdjustmentLog(stage, before[0][col], next, nextStatus);
+          try {
+            await ensureBookingChanges(client);
+            await logChange(client, before[0].booking_id, entry.action, entry.detail);
+          } catch (logErr) {
+            console.error('adjust_clock: failed to write the audit line —', logErr.message);
+          }
+          return json(200, rows[0]);
         }
 
         if (action === 'submit_survey') {
@@ -889,8 +979,15 @@ exports.handler = async (event) => {
 //
 // Column names come from this fixed map and never from the request. Callers
 // must validate `status` against CHECKLIST_STATUSES before passing it here.
-const CHECKLIST_STATUSES = ['upcoming', 'on_my_way', 'arrived', 'completed'];
-const CHECKLIST_TS_COLS = { upcoming: null, on_my_way: 'on_my_way_at', arrived: 'arrived_at', completed: 'completed_at' };
+const CHECKLIST_STATUSES = ['upcoming', 'clocked_in', 'on_my_way', 'arrived', 'completed', 'clocked_out'];
+const CHECKLIST_TS_COLS = {
+  upcoming: null,
+  clocked_in: 'clocked_in_at',
+  on_my_way: 'on_my_way_at',
+  arrived: 'arrived_at',
+  completed: 'completed_at',
+  clocked_out: 'clocked_out_at',
+};
 
 function buildChecklistTimestampClause(status) {
   const idx = CHECKLIST_STATUSES.indexOf(status);
@@ -898,6 +995,59 @@ function buildChecklistTimestampClause(status) {
   const setCol = CHECKLIST_TS_COLS[status];
   const clear = CHECKLIST_STATUSES.slice(idx + 1).map(s => CHECKLIST_TS_COLS[s]).filter(Boolean);
   return (setCol ? `, ${setCol}=NOW()` : '') + clear.map(c => `, ${c}=NULL`).join('');
+}
+
+// The audit line for an admin's clock edit. Pure, so the wording is testable
+// without a database — a wage record that can be silently rewritten is worth
+// less than no record, so this must never print "null" at someone.
+const STAGE_LABELS = {
+  clocked_in: 'clock-in', on_my_way: 'on my way', arrived: 'arrived',
+  completed: 'completed', clocked_out: 'clock-out',
+};
+
+// A bare `CHECKLIST_TS_COLS[stage]` lookup is reachable through the prototype
+// chain — 'constructor', '__proto__', 'toString' etc. all resolve to a truthy
+// inherited value, so `!col` alone never rejects them. Checking the array
+// first (the same trick buildChecklistTimestampClause already uses) closes
+// that off before a non-column string can be interpolated as one.
+function isAdjustableStage(stage) {
+  return typeof stage === 'string' && stage !== 'upcoming' && CHECKLIST_STATUSES.includes(stage);
+}
+
+// Whether an adjustment has to carry the log's status forward with it. An
+// admin who fills in a forgotten clocked_out_at on a log still reading
+// `completed` has corrected the wage record; the worker's next tap on the
+// checklist would then re-stamp `completed` and NULL that correction straight
+// back out. Advancing the status keeps the same invariant the checklist itself
+// maintains — the stamps never run ahead of the stage.
+//
+// An unknown current status has index -1, so any real stage advances past it:
+// a log whose status is garbage is better described by the stamp just written
+// than by the garbage.
+function advancedStatus(current, stage, hasValue) {
+  if (!hasValue || !isAdjustableStage(stage)) return null;
+  return CHECKLIST_STATUSES.indexOf(stage) > CHECKLIST_STATUSES.indexOf(current) ? stage : null;
+}
+
+function clockAdjustmentLog(stage, before, after, nextStatus = null) {
+  // Date AND time. Time alone rendered the one correction that most needs an
+  // audit trail — a forgotten clock-out, which is cross-day by definition — as
+  // "clock-out: 15:00 UTC → 15:00 UTC", a whole day moved and logged as no
+  // change at all.
+  const fmt = (v) => {
+    if (!v) return null;
+    const d = v instanceof Date ? v : new Date(v);
+    return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+  };
+  const label = STAGE_LABELS[stage] || stage;
+  const from = fmt(before), to = fmt(after);
+  let detail;
+  if (from && to)       detail = `${label}: ${from} → ${to}`;
+  else if (!from && to) detail = `${label}: not recorded → ${to}`;
+  else if (from && !to) detail = `${label}: ${from} → cleared`;
+  else                  detail = `${label}: nothing to change`;
+  if (nextStatus) detail += ` (status advanced to ${STAGE_LABELS[nextStatus] || nextStatus})`;
+  return { action: 'Clock adjusted', detail };
 }
 
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
@@ -1048,4 +1198,8 @@ exports.offerText = offerText;
 exports.expressInterest = expressInterest;
 exports.buildChecklistTimestampClause = buildChecklistTimestampClause;
 exports.CHECKLIST_STATUSES = CHECKLIST_STATUSES;
+exports.CHECKLIST_TS_COLS = CHECKLIST_TS_COLS;
+exports.clockAdjustmentLog = clockAdjustmentLog;
+exports.isAdjustableStage = isAdjustableStage;
+exports.advancedStatus = advancedStatus;
 exports.ensureTables = ensureTables;

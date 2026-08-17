@@ -1525,6 +1525,64 @@ function balanceLinkEligible(b) {
   return b && (b.deposit_paid === true || depositLinkAmount(b) <= 0);
 }
 
+// Mirrors workedHours() in netlify/functions/_timeclock.js — admin.html is a
+// static page with no build step and cannot require server modules, the same
+// reason balanceLinkAmounts() and finaliseLinkClient() are duplicated. DISPLAY
+// ONLY: payroll computes what it pays from the server module, and the 16-hour
+// rule and the 5-hour minimum live there. If those rules change, change this
+// label with them.
+function clockRowLabel(log) {
+  const t = (v) => { const d = v ? new Date(v) : null; return d && !isNaN(d.getTime()) ? d.getTime() : null; };
+  const a = t(log && log.clocked_in_at), b = t(log && log.clocked_out_at);
+  if (a === null) return 'Not clocked in';
+  if (b === null) return 'No clock-out yet';
+  if (b <= a) return '⚠️ Clock-out is before clock-in — check';
+  // Compare the raw span against the cap BEFORE rounding to minutes for
+  // display. Rounding first (as an earlier version of this function did)
+  // let a span of 16h00m00.001s–16h00m29.999s round down to a clean "16h"
+  // and pass as normal, while _timeclock.js's workedHours() — comparing raw
+  // milliseconds — refuses it. Same bug class as the raw-vs-rounded mistake
+  // already fixed once in _timeclock.js itself.
+  const spanMs = b - a;
+  const mins = Math.round(spanMs / 60000);
+  if (spanMs > 16 * 3600000) return `⚠️ ${Math.floor(mins / 60)}h — check, likely a missed clock-out`;
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
+}
+
+// A field this card never fetched (see renderClockBlock's `known` flag)
+// reads as blank for a reason unrelated to the staff member's actual clock —
+// admin.html simply doesn't have the value. An empty box there must not be
+// treated as "the admin cleared this." A field the card DID fetch and shows
+// blank is a deliberate clear, and is allowed through. This is the guard
+// that keeps that distinction enforced even if a future query change stops
+// selecting a column this one currently does.
+function clockAdjustAllowed(known, value) {
+  return known || value !== '';
+}
+
+// Must match CHECKLIST_STATUSES in staff-assignments.js — the server rejects
+// any status not in its own list, and these stamps are what pay is computed
+// from. Change one, change both in the same commit. Duplicated from
+// staff-portal.html's copy of the same list for the same reason as
+// balanceLinkAmounts() above: admin.html is a static page with no build step
+// and cannot require or import from another static page. Defined once here
+// and shared by both admin.html's own staff-portal view (gigCard) and its
+// assignment-card checklist badge so there are two copies of this list in
+// the codebase, not three.
+const CHECKLIST_STATUSES = ['upcoming','clocked_in','on_my_way','arrived','completed','clocked_out'];
+const CHECKLIST_LABELS   = { upcoming:'📅 Upcoming', clocked_in:'🕐 Clocked In', on_my_way:'🚗 On My Way',
+                             arrived:'📍 Arrived', completed:'✅ Done', clocked_out:'🏠 Clocked Out' };
+
+// The post-gig report was gated on `completed` alone, which assumed the
+// report always came before the clock-out. Tapping Clock Out first took the
+// button away, and the only route back was stepping to `completed` — which
+// NULLs clocked_out_at. Mirrors staff-portal.html's reportButtonVisible().
+function reportButtonVisible(g) {
+  if (g && g.survey_submitted_at) return false;
+  const s = (g && g.checklist_status) || 'upcoming';
+  return s === 'completed' || s === 'clocked_out';
+}
+
 // ══ END PURE HELPERS ══
 
 // Default matches the old "Newest Inquiry" dropdown default, so the view the
@@ -2303,9 +2361,8 @@ function renderAssignmentCard(a, payByStaff, bookingId, slotTag = null) {
   
   // Checklist progress badge
   const clStatus = a.checklist_status || 'upcoming';
-  const clLabels = { upcoming:'📅 Upcoming', on_my_way:'🚗 On My Way', arrived:'📍 Arrived', completed:'✅ Done' };
   const clBadge = a.status === 'assigned'
-    ? `<span style="font-size:.68rem;color:#6b7280;background:#f3f4f6;border-radius:10px;padding:1px 7px">${clLabels[clStatus]||clStatus}</span>`
+    ? `<span style="font-size:.68rem;color:#6b7280;background:#f3f4f6;border-radius:10px;padding:1px 7px">${CHECKLIST_LABELS[clStatus]||clStatus}</span>`
     : '';
   
   // Survey data
@@ -2392,7 +2449,119 @@ function renderAssignmentCard(a, payByStaff, bookingId, slotTag = null) {
       ${surveyHtml}
       ${payHtml}
       ${a.status === 'assigned' ? renderScheduleBlock(a, bookingId) : ''}
+      ${a.status === 'assigned' ? renderClockBlock(a, bookingId) : ''}
     </div>`;
+}
+
+// "2026-08-15T09:00:00.000Z" -> "2026-08-15T09:00" in the browser's local
+// time, which is what a <input type="datetime-local"> needs to prefill
+// correctly. adjustClock() below undoes this with `new Date(value)`, whose
+// no-zone-suffix string is read back as local time by the same rule — so the
+// round trip lands on the original instant rather than drifting by whatever
+// the admin's timezone offset happens to be.
+function isoToLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// The stages adjust_clock accepts, in shift order. Each maps to the gig_logs
+// column CHECKLIST_TS_COLS in staff-assignments.js writes to.
+const CLOCK_STAGES = [
+  { key: 'clocked_in',  label: 'Clock In',  field: 'clocked_in_at'  },
+  { key: 'on_my_way',   label: 'On My Way', field: 'on_my_way_at'   },
+  { key: 'arrived',     label: 'Arrived',   field: 'arrived_at'     },
+  { key: 'completed',   label: 'Completed', field: 'completed_at'   },
+  { key: 'clocked_out', label: 'Clock Out', field: 'clocked_out_at' },
+];
+
+// Admin's view of a staff member's clock, and the five inputs to correct it
+// when someone forgot to tap. Only rendered once a gig_log row exists — before
+// that there is nothing for adjust_clock to attach a correction to (it 404s
+// on an unknown log_id), since the row is created lazily on the staff
+// member's first checklist tap.
+function renderClockBlock(a, bookingId) {
+  if (!a.log_id) {
+    return `
+      <div style="margin-top:10px;border-top:1px dashed #e5e7eb;padding-top:10px;font-size:.75rem;color:#9ca3af;font-style:italic">
+        ⏱ No checklist activity yet — nothing to adjust.
+      </div>`;
+  }
+
+  const label = clockRowLabel(a);
+  const isWarning = /check|⚠/i.test(label);
+
+  // hours_source / measured_hours belong on the payroll preflight's staff
+  // lines (preflightPayroll(), which already renders them), not here — this
+  // card's own query never carries them, so a badge reading them here would
+  // never render. See task-6-report.md, Finding 2.
+  //
+  // clocked_in_at/clocked_out_at/on_my_way_at/arrived_at/completed_at all
+  // come from this card's query (staff-assignments.js, the ?booking_id=
+  // SELECT). `field in a` still guards against a future column being
+  // dropped from that SELECT — if it ever is, that field's row won't be
+  // prefilled, and trySaveClock() below refuses to submit a blank over an
+  // unknown value rather than silently nulling it.
+  let anyUnknown = false;
+  const rows = CLOCK_STAGES.map(s => {
+    const known = s.field in a;
+    if (!known) anyUnknown = true;
+    const val = known ? isoToLocalInput(a[s.field]) : '';
+    const inputId = `clock-${s.key}-${a.log_id}`;
+    return `
+      <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+        <span style="width:78px;font-size:.72rem;color:#6b7280">${s.label}${known ? '' : ' *'}</span>
+        <input type="datetime-local" id="${inputId}" value="${val}"
+          style="flex:1;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:.75rem"/>
+        <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:.7rem"
+          onclick="trySaveClock(${a.log_id},'${s.key}','${inputId}',${known},'${bookingId}')">Save</button>
+      </div>`;
+  }).join('');
+
+  return `
+    <div style="margin-top:10px;border-top:1px dashed #e5e7eb;padding-top:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
+        <span style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:#6b7280;letter-spacing:.04em">⏱ Clock</span>
+        <span style="font-size:.75rem;font-weight:600;color:${isWarning ? '#dc2626' : '#374151'}">${esc(label)}</span>
+        <span class="save-flash" id="assign-flash-${a.log_id}">✓ Updated</span>
+      </div>
+      ${rows}
+      ${anyUnknown ? `<div style="font-size:.66rem;color:#9ca3af;margin-top:4px">* current value isn't returned by this card's query — blank does not mean unset; saving one blank refuses rather than clearing it</div>` : ''}
+    </div>`;
+}
+
+// A datetime-local value is local time with no zone — sending it raw to the
+// server would silently shift the recorded hours by the admin's timezone
+// offset, so the ISO conversion happens here, once, before it leaves the
+// browser.
+async function adjustClock(logId, stage, value) {
+  try {
+    const res = await apiFetch('/api/staff-assignments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'adjust_clock', log_id: logId, stage,
+                             value: value ? new Date(value).toISOString() : null })
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Adjust failed');
+    flash('assign-flash-' + logId);
+  } catch (e) { alert('Could not adjust: ' + e.message); }
+}
+
+// The Save button's actual click handler. Reads the input, refuses via
+// clockAdjustAllowed() when the field's starting value was never fetched and
+// the box is still blank — that combination is "we never asked", not "the
+// admin cleared it" — then defers to adjustClock() for the real save, and
+// refreshes the card so the new value (or the server's rejection) shows up.
+async function trySaveClock(logId, stage, inputId, known, bookingId) {
+  const el = document.getElementById(inputId);
+  const value = el ? el.value : '';
+  if (!clockAdjustAllowed(known, value)) {
+    alert("This field's current value isn't shown by this card yet (see the * note), so an empty box here doesn't mean it's unset. Not saving a blank over it.");
+    return;
+  }
+  await adjustClock(logId, stage, value);
+  await loadStaffAssignments(bookingId);
 }
 
 function renderScheduleBlock(a, bookingId) {
@@ -3895,25 +4064,28 @@ function gigCard(g, isAssigned) {
   const dateStr = g.event_date
     ? new Date(String(g.event_date).split('T')[0]+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})
     : 'TBD';
-  const checklistStatuses = ['upcoming','on_my_way','arrived','completed'];
-  const checklistLabels   = { upcoming:'📅 Upcoming', on_my_way:'🚗 On My Way', arrived:'📍 Arrived', completed:'✅ Done' };
+  // Must match CHECKLIST_STATUSES in staff-assignments.js — the server rejects
+  // any status not in its own list, and these stamps are what pay is computed
+  // from. Change one, change both in the same commit. Shared with
+  // renderAssignmentCard's badge above via CHECKLIST_STATUSES/CHECKLIST_LABELS
+  // (defined in the PURE HELPERS block) rather than a third local copy.
   const curStatus = g.checklist_status || 'upcoming';
-  const curIdx    = checklistStatuses.indexOf(curStatus);
+  const curIdx    = CHECKLIST_STATUSES.indexOf(curStatus);
 
   const checklistHtml = isAssigned ? `
     <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f3f4f6">
       <div style="font-size:.72rem;text-transform:uppercase;color:#9ca3af;font-weight:700;margin-bottom:8px">Day-of Checklist</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${checklistStatuses.map((s, i) => {
+        ${CHECKLIST_STATUSES.map((s, i) => {
           const isActive = s === curStatus;
           const isPast   = i < curIdx;
           const isNext   = i === curIdx + 1;
           return `<button class="btn btn-sm ${isActive?'btn-primary':isPast?'btn-success':'btn-outline'}"
             onclick="updateChecklist('${g.log_id||''}','${g.id}','${g.booking_id}',${currentUser.staffId},'${s}')"
-            ${isActive||isPast?'disabled':''}>${checklistLabels[s]}</button>`;
+            ${isActive||isPast?'disabled':''}>${CHECKLIST_LABELS[s]}</button>`;
         }).join('')}
       </div>
-      ${curStatus === 'completed'
+      ${reportButtonVisible(g)
         ? `<button class="btn btn-outline btn-sm" style="margin-top:8px;border-color:#7c3aed;color:#7c3aed"
              onclick="openSurvey('${g.log_id}','${g.booking_id}')">📋 Submit Post-Gig Report</button>`
         : ''}
@@ -5631,8 +5803,24 @@ async function preflightPayroll() {
           const payLabel = st.pay_type === 'hourly'
             ? `${st.hours}h × hourly`
             : `flat rate`;
+          // Same object payroll.js attached hours_source/measured_hours to
+          // (netlify/functions/payroll.js:455-456) — no new fetch or join,
+          // just reading fields already on this line's own st object.
+          const sourceTag = st.hours_source === 'measured'
+            ? `<span style="color:#166534;font-weight:600">measured${st.measured_hours != null ? ' ' + Number(st.measured_hours).toFixed(2) + 'h' : ''}</span>`
+            : st.hours_source === 'estimated'
+              ? `<span style="color:#1e40af;font-weight:600">estimated</span>`
+              : '';
+          // The spec asked that an adjusted log stay flagged as adjusted so a
+          // payroll run can show it — staff-assignments.js writes
+          // clock_adjusted_at, payroll.js selects and carries it through as
+          // st.clock_adjusted, and this is the one place a wage question gets
+          // asked, so it renders here.
+          const adjustedTag = st.clock_adjusted
+            ? `<span style="color:#92400e;font-weight:600">· hand-corrected</span>`
+            : '';
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:.84rem;color:#374151;border-bottom:1px solid #f3f4f6">
-            <span><span style="font-weight:600">${esc(st.staff_name)}</span> <span style="color:#9ca3af">(${payLabel})</span>${adj}</span>
+            <span><span style="font-weight:600">${esc(st.staff_name)}</span> <span style="color:#9ca3af">(${payLabel})</span>${sourceTag ? ' · ' + sourceTag : ''}${adjustedTag ? ' ' + adjustedTag : ''}${adj}</span>
             <span style="font-weight:700;color:#1e1b4b">$${Number(st.amount).toFixed(2)}</span>
           </div>`;
         }).join('');

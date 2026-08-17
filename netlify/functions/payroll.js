@@ -2,6 +2,7 @@ const { withClient } = require('./_db');
 const {
   CORS, preflight, requireAuth, unauthorized, forbidden,
 } = require('./_auth');
+const { payableHours } = require('./_timeclock');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -41,9 +42,103 @@ async function ensureTables(client) {
       ADD COLUMN IF NOT EXISTS payroll_run_id INTEGER REFERENCES payroll_runs(id)
     `);
   } catch (_) {}
+
+  // Which side of payableHours() paid this row — the DB otherwise keeps no
+  // record of whether a wage was the measured clock or the estimate, which is
+  // the first thing anyone asks when a wage is questioned. paymentNote()
+  // above is a human-readable echo of the same fact; these columns are the
+  // queryable one.
+  try {
+    await client.query(`ALTER TABLE staff_payments ADD COLUMN IF NOT EXISTS hours_source VARCHAR(16)`);
+  } catch (_) {}
+  try {
+    await client.query(`ALTER TABLE staff_payments ADD COLUMN IF NOT EXISTS measured_hours NUMERIC(5,2)`);
+  } catch (_) {}
+
+  // The assignments query below reads gl.clocked_in_at / clocked_out_at /
+  // clock_adjusted_at, but those columns — and the unique index that stops the
+  // LEFT JOIN from doubling a line item — are otherwise only guaranteed by
+  // staff-assignments.js's own migrations. A payroll run invoked before that
+  // function has ever run (a fresh database, or just deploy order) would 500
+  // the whole Pay Review on "column gl.clocked_in_at does not exist". A reader
+  // that depends on another module's migrations is a deploy-order bug waiting
+  // to happen, so this function guarantees what it reads. Full column list
+  // mirrors staff-assignments.js:220-245 exactly (IF NOT EXISTS makes it a
+  // no-op there in the normal case) so a fresh database doesn't end up with
+  // two different ideas of what gig_logs looks like depending on which
+  // function happens to touch it first.
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS gig_logs (
+      id SERIAL PRIMARY KEY,
+      assignment_id INTEGER NOT NULL REFERENCES staff_assignments(id) ON DELETE CASCADE,
+      booking_id INTEGER NOT NULL,
+      staff_id INTEGER NOT NULL,
+      status VARCHAR(32) DEFAULT 'upcoming',
+      clocked_in_at TIMESTAMPTZ,
+      clocked_out_at TIMESTAMPTZ,
+      clock_adjusted_at TIMESTAMPTZ,
+      on_my_way_at TIMESTAMPTZ,
+      arrived_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ,
+      guest_count_actual INTEGER,
+      balance_collected BOOLEAN,
+      balance_amount NUMERIC(10,2),
+      gas_level VARCHAR(50),
+      foam_fluid_needed BOOLEAN,
+      empty_jugs_refilled BOOLEAN,
+      event_rating INTEGER CHECK(event_rating BETWEEN 1 AND 5),
+      notes TEXT DEFAULT '',
+      issues TEXT DEFAULT '',
+      survey_submitted_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  for (const sql of [
+    'ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS clocked_in_at TIMESTAMPTZ',
+    'ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS clocked_out_at TIMESTAMPTZ',
+    'ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS clock_adjusted_at TIMESTAMPTZ',
+  ]) {
+    try { await client.query(sql); } catch (_) {}
+  }
+  // Same guarantee staff-assignments.js:307 relies on for its own ON CONFLICT
+  // target — required here too, since it's what stops this file's LEFT JOIN
+  // gig_logs from multiplying a staff_assignments row into two payments.
+  try {
+    await client.query(
+      'CREATE UNIQUE INDEX IF NOT EXISTS gig_logs_assignment_id_key ON gig_logs (assignment_id)'
+    );
+  } catch (_) {}
+}
+
+// The only record of how an approved payment's hours were derived — the DB
+// row itself doesn't say clock vs. estimate (see hours_source below), so this
+// text is what a wage question gets answered from. p.hours may be MEASURED
+// while raw_hours/total_minutes are still the estimate; comparing p.hours
+// against p.raw_hours regardless of source let a gig where the clock beat the
+// estimate get stamped "(5h min applied)" when no floor applied at all.
+function paymentNote(p) {
+  if (p.hours_source === 'measured') {
+    const floorApplied = p.hours > p.measured_hours;
+    return `Measured ${p.measured_hours}h clocked → ${p.hours}h paid${floorApplied ? ' (5h min applied)' : ''}`;
+  }
+  return `Auto-generated: ${p.total_minutes} min raw (${p.drive_minutes} min drive ea.) → ${p.hours}h paid${p.hours > p.raw_hours ? ' (5h min applied)' : ''}`;
+}
+
+// A consequence of the warning rule in _timeclock.js: it only warns when
+// there IS clock data to be suspicious of, so a team that quietly stops
+// clocking in entirely produces zero warnings and pays estimates forever,
+// silently. One line, not one per row — the whole point of the warning rule
+// is that per-row noise buries the signals that matter.
+function noClockDataSummary(count, total) {
+  if (!count) return null;
+  return `${count} of ${total} assignment${total === 1 ? '' : 's'} had no clock data; ` +
+    `${count === 1 ? 'that was' : 'those were'} paid the estimate`;
 }
 
 module.exports.ensureTables = ensureTables;
+module.exports.paymentNote = paymentNote;
+module.exports.noClockDataSummary = noClockDataSummary;
 
 // Get the Sunday for a given date (week ending).
 // If the date IS a Sunday (day=0), returns that same date;
@@ -215,10 +310,12 @@ exports.handler = async (event) => {
                    b.id as booking_id, b.reference, b.service_name, b.service_id,
                    b.event_date, b.event_time, b.event_zip,
                    s.name as staff_name, s.preferred_name,
-                   s.pay_type, s.flat_rate, s.hourly_rate
+                   s.pay_type, s.flat_rate, s.hourly_rate,
+                   gl.clocked_in_at, gl.clocked_out_at, gl.clock_adjusted_at
             FROM staff_assignments sa
             JOIN bookings b ON b.id = sa.booking_id
             JOIN staff s ON s.id = sa.staff_id
+            LEFT JOIN gig_logs gl ON gl.assignment_id = sa.id
             LEFT JOIN staff_payments sp_paid
               ON sp_paid.booking_id = sa.booking_id
               AND sp_paid.staff_id  = sa.staff_id
@@ -299,6 +396,7 @@ exports.handler = async (event) => {
           const paymentsToCreate = [];
           const warnings = [];
 
+          let noClockCount = 0;
           for (const a of assignments) {
             const { rows: existingPayment } = await client.query(
               'SELECT id FROM staff_payments WHERE booking_id=$1 AND staff_id=$2',
@@ -315,7 +413,21 @@ exports.handler = async (event) => {
 
             const totalMins = load + drive + unload + party + pack + drive + homeUn;
             const rawHours = totalMins / 60;
-            const totalHours = Math.max(5, Math.round(rawHours * 100) / 100);
+
+            // Pay the clock when the record is complete and plausible; otherwise
+            // pay the estimate and say so. The 5-hour minimum applies either way.
+            const paid = payableHours(a, Math.round(rawHours * 100) / 100);
+            const totalHours = paid.hours;
+            if (paid.warning) {
+              // totalHours may be the 5-hour floor rather than the estimate itself —
+              // say what was actually paid, not "the estimate", or a 3.2h estimate
+              // reports the wrong-but-believable "paid the estimate (5h)".
+              warnings.push(`${a.preferred_name || a.staff_name} on booking ${a.reference}: ${paid.warning} — paid ${totalHours}h`);
+            } else if (paid.source === 'estimated') {
+              // hasClockData was false in payableHours() — no warning fired
+              // because there was nothing to be suspicious of, only nothing.
+              noClockCount++;
+            }
 
             const payType = a.pay_type || 'flat';
             let amount;
@@ -342,6 +454,13 @@ exports.handler = async (event) => {
               pay_type:   payType,
               raw_hours:  Math.round(rawHours * 100) / 100,
               hours:      totalHours,
+              hours_source: paid.source,
+              measured_hours: paid.measured,
+              // IMPORTANT 8: written by adjust_clock, selected here, never
+              // surfaced anywhere — the spec asked that an adjusted log stay
+              // flagged so a payroll run can show it. Carried alongside
+              // hours_source so the preflight staff line can render both.
+              clock_adjusted: !!a.clock_adjusted_at,
               amount,
               drive_minutes: drive,
               total_minutes: totalMins,
@@ -358,6 +477,9 @@ exports.handler = async (event) => {
               `, [drive, totalMins, a.assignment_id]);
             }
           }
+
+          const noClockSummary = noClockDataSummary(noClockCount, assignments.length);
+          if (noClockSummary) warnings.push(noClockSummary);
 
           // ── preflight: return the review payload, write nothing ──────────
           if (dryRun) {
@@ -382,6 +504,9 @@ exports.handler = async (event) => {
                 staff_name: a ? (a.preferred_name || a.staff_name) : String(p.staff_id),
                 pay_type: p.pay_type,
                 hours: p.hours,
+                hours_source: p.hours_source,
+                measured_hours: p.measured_hours,
+                clock_adjusted: p.clock_adjusted,
                 amount: p.amount !== null ? p.amount : 0,
                 already_recorded: !!p.existingId,
               });
@@ -412,21 +537,21 @@ exports.handler = async (event) => {
           for (const p of paymentsToCreate) {
             if (p.existingId) {
               await client.query(
-                'UPDATE staff_payments SET hours=$1, updated_at=NOW() WHERE id=$2',
-                [p.hours, p.existingId]
+                'UPDATE staff_payments SET hours=$1, hours_source=$2, measured_hours=$3, updated_at=NOW() WHERE id=$4',
+                [p.hours, p.hours_source, p.measured_hours, p.existingId]
               );
               paymentIds.push({ id: p.existingId, ...p });
             } else {
               const { rows: ins } = await client.query(`
                 INSERT INTO staff_payments
-                  (staff_id, booking_id, amount, pay_type, hours, note)
-                VALUES ($1,$2,$3,$4,$5,$6)
+                  (staff_id, booking_id, amount, pay_type, hours, hours_source, measured_hours, note)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
                 RETURNING *
               `, [
                 p.staff_id, p.booking_id,
                 p.amount !== null ? p.amount : 0,
-                p.pay_type, p.hours,
-                `Auto-generated: ${p.total_minutes} min raw (${p.drive_minutes} min drive ea.) → ${p.hours}h paid${p.hours > p.raw_hours ? ' (5h min applied)' : ''}`
+                p.pay_type, p.hours, p.hours_source, p.measured_hours,
+                paymentNote(p)
               ]);
               paymentIds.push({ id: ins[0].id, ...p });
             }
