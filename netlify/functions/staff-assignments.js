@@ -223,6 +223,9 @@ async function ensureTables(client) {
       booking_id INTEGER NOT NULL,
       staff_id INTEGER NOT NULL,
       status VARCHAR(32) DEFAULT 'upcoming',
+      clocked_in_at TIMESTAMPTZ,
+      clocked_out_at TIMESTAMPTZ,
+      clock_adjusted_at TIMESTAMPTZ,
       on_my_way_at TIMESTAMPTZ,
       arrived_at TIMESTAMPTZ,
       completed_at TIMESTAMPTZ,
@@ -268,6 +271,11 @@ async function ensureTables(client) {
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS empty_jugs_refilled BOOLEAN",
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS gas_level VARCHAR(50)",
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS survey_submitted_at TIMESTAMPTZ",
+    "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS clocked_in_at TIMESTAMPTZ",
+    "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS clocked_out_at TIMESTAMPTZ",
+    // Set whenever an admin edits a stamp, so a payroll run can show that the
+    // hours it paid were corrected by hand rather than tapped by the worker.
+    "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS clock_adjusted_at TIMESTAMPTZ",
   ];
   for (const sql of migrations) {
     try { await client.query(sql); } catch (_) {}
@@ -889,8 +897,15 @@ exports.handler = async (event) => {
 //
 // Column names come from this fixed map and never from the request. Callers
 // must validate `status` against CHECKLIST_STATUSES before passing it here.
-const CHECKLIST_STATUSES = ['upcoming', 'on_my_way', 'arrived', 'completed'];
-const CHECKLIST_TS_COLS = { upcoming: null, on_my_way: 'on_my_way_at', arrived: 'arrived_at', completed: 'completed_at' };
+const CHECKLIST_STATUSES = ['upcoming', 'clocked_in', 'on_my_way', 'arrived', 'completed', 'clocked_out'];
+const CHECKLIST_TS_COLS = {
+  upcoming: null,
+  clocked_in: 'clocked_in_at',
+  on_my_way: 'on_my_way_at',
+  arrived: 'arrived_at',
+  completed: 'completed_at',
+  clocked_out: 'clocked_out_at',
+};
 
 function buildChecklistTimestampClause(status) {
   const idx = CHECKLIST_STATUSES.indexOf(status);
@@ -1048,4 +1063,5 @@ exports.offerText = offerText;
 exports.expressInterest = expressInterest;
 exports.buildChecklistTimestampClause = buildChecklistTimestampClause;
 exports.CHECKLIST_STATUSES = CHECKLIST_STATUSES;
+exports.CHECKLIST_TS_COLS = CHECKLIST_TS_COLS;
 exports.ensureTables = ensureTables;

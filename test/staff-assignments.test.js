@@ -248,7 +248,7 @@ const { buildChecklistTimestampClause } = require('../netlify/functions/staff-as
 test('entering a step stamps it and clears every stamp after it', () => {
   assert.strictEqual(
     buildChecklistTimestampClause('on_my_way'),
-    ', on_my_way_at=NOW(), arrived_at=NULL, completed_at=NULL'
+    ', on_my_way_at=NOW(), arrived_at=NULL, completed_at=NULL, clocked_out_at=NULL'
   );
 });
 
@@ -266,6 +266,6 @@ test('going all the way back to upcoming clears all three stamps', () => {
   assert.doesNotMatch(clause, /NOW\(\)/, 'upcoming is the start state and stamps nothing');
 });
 
-test('completed stamps itself and clears nothing after it', () => {
-  assert.strictEqual(buildChecklistTimestampClause('completed'), ', completed_at=NOW()');
+test('completed stamps itself and clears clocked_out, the stage now after it', () => {
+  assert.strictEqual(buildChecklistTimestampClause('completed'), ', completed_at=NOW(), clocked_out_at=NULL');
 });
