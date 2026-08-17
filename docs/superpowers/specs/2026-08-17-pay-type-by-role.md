@@ -130,9 +130,16 @@ real list first.
 3. **The override lives on the assignment**, not the payroll line — it survives
    re-runs and reads as "this gig pays X". Taken as the default; not contested.
 
-## Still open
+4. **Two roles on one booking pay once, at whichever resolution is higher.**
+   Joe, 2026-08-17: *"whichever is higher pay, once not doubled. Rare cases can be
+   resolved on a case by case basis if editing/altering the pay per event is easy
+   to do."* So the per-gig override is not a nicety — it is the designated escape
+   hatch for the cases this rule gets wrong, and it has to be obvious and quick to
+   reach, not buried in a sub-panel.
 
-4. **Stackable roles on one booking can double-pay hours.** Support roles stack on
+## Background to that decision
+
+**Stackable roles on one booking can double-pay hours, today.** Support roles stack on
    top of a performer (`STACKABLE_TAGS`, `admin.html:901`), and
    `staff_assignments` is unique on `(booking_id, staff_id, tag_filled)` — so one
    person filling two roles on one gig is two assignment rows, and `payroll.js`
