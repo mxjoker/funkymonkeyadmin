@@ -682,6 +682,26 @@ test('a balance session itemises balance and fee as separate lines', () => {
   assert.strictEqual(p.get('metadata[payment_kind]'), 'balance');
 });
 
+// stripe-webhook.js's paymentEffect reads these back to itemise the receipt
+// and to work out how much of the payment went to the balance. Without them it
+// falls back to a non-itemised receipt and logs loudly, so their absence is a
+// real regression even though nothing throws.
+test('a balance session carries the balance and fee it was minted with', () => {
+  const p = buildSessionParams({ ...BASE, kind: 'balance', amount: 400, fee: 20 });
+  assert.strictEqual(p.get('metadata[balance_amount]'), '400.00');
+  assert.strictEqual(p.get('metadata[fee_amount]'), '20.00');
+});
+
+test('a zero fee is still stamped, so the webhook can tell it from a missing one', () => {
+  const p = buildSessionParams({ ...BASE, kind: 'balance', amount: 400, fee: 0 });
+  assert.strictEqual(p.get('metadata[fee_amount]'), '0.00');
+});
+
+test('a deposit session carries no balance metadata', () => {
+  const p = buildSessionParams({ ...BASE, kind: 'deposit', amount: 100, fee: 0 });
+  assert.strictEqual(p.get('metadata[balance_amount]'), null);
+});
+
 // The one word this must never say. A 5% card-only surcharge exceeds Stripe's
 // cost of acceptance and falls under Visa/Mastercard surcharge rules; a
 // service fee on every payment method does not.
@@ -762,6 +782,16 @@ function buildSessionParams({ kind, amount, fee, service, client, email, booking
     "line_items[0][quantity]": "1",
     "payment_method_types[0]": "card",
   });
+  // The webhook reads these two back to itemise the client's receipt. It must
+  // NOT re-derive the fee from the booking row: that row's balance_due is
+  // zeroed by the payment itself, and a quote edited between minting this link
+  // and the client paying would move it — either way the receipt would print a
+  // wrong-but-believable number. Stripe signs the whole session payload, so
+  // what is set here is exactly what comes back.
+  if (isBalance) {
+    params.set("metadata[balance_amount]", Number(amount).toFixed(2));
+    params.set("metadata[fee_amount]", Number(fee).toFixed(2));
+  }
   if (isBalance && Number(fee) > 0) {
     params.set("line_items[1][price_data][currency]", "usd");
     params.set("line_items[1][price_data][unit_amount]", String(Math.round(Number(fee) * 100)));
