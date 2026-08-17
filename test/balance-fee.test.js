@@ -115,3 +115,52 @@ test('overpaying a deposit never produces a negative balance', () => {
                 deposit_paid: false, payment_method: '', status: 'accepted' };
   assert.strictEqual(paymentEffect(row, 150, 'deposit').balance_due, 0);
 });
+
+// booking.balance_due is exactly the column a balance payment zeroes, so it
+// can't be trusted to reconstruct what was fee vs. balance after the fact.
+// create-stripe-link.js stamps the split into session metadata instead —
+// Stripe signs the whole payload, so it can't go stale in transit.
+test('metadata present and consistent: itemised from metadata, balance cleared', () => {
+  const e = paymentEffect(PAID_DEPOSIT, 420, 'balance', { balance: 400, fee: 20 });
+  assert.strictEqual(e.itemised, true);
+  assert.strictEqual(e.balance_due, 0);
+  assert.strictEqual(e.balance, 400);
+  assert.strictEqual(e.fee, 20);
+});
+
+// A second webhook delivery for the same balance (retry, or genuinely a
+// repeat) must not read the itemisation off the row's CURRENT balance_due,
+// which is already 0 by the time this fires a second time.
+test('a repeat balance payment still itemises from metadata, not from the already-zeroed row', () => {
+  const row = { ...PAID_DEPOSIT, balance_due: 0 };
+  const e = paymentEffect(row, 420, 'balance', { balance: 400, fee: 20 });
+  assert.strictEqual(e.balance_due, 0);
+  assert.strictEqual(e.itemised, true);
+  assert.strictEqual(e.balance, 400, 'itemisation read $0 off the row instead of metadata');
+  assert.strictEqual(e.fee, 20, 'itemisation read $420 off the row instead of metadata');
+});
+
+// The link was minted for $400 owed; before it was paid, the quote grew to
+// $500 owed. The $420 payment covers the old balance and fee but leaves $100
+// of the new balance owing — that shortfall must not be written off.
+test('a quote raised after the link was minted leaves the shortfall owing', () => {
+  const row = { ...PAID_DEPOSIT, balance_due: 500 };
+  const e = paymentEffect(row, 420, 'balance', { balance: 400, fee: 20 });
+  assert.strictEqual(e.balance_due, 100);
+  assert.strictEqual(e.itemised, true);
+});
+
+test('missing metadata falls back to treating the whole payment as balance, unitemised', () => {
+  const row = { ...PAID_DEPOSIT, balance_due: 1000 };
+  const e = paymentEffect(row, 420, 'balance', null);
+  assert.strictEqual(e.itemised, false);
+  assert.ok(e.warning, 'no warning was set for an unitemised balance payment');
+  assert.strictEqual(e.balance_due, 580, 'balance was not reduced by the amount actually paid');
+});
+
+test('metadata that does not add up to what was charged is treated as untrustworthy', () => {
+  const e = paymentEffect(PAID_DEPOSIT, 420, 'balance', { balance: 400, fee: 5 });
+  assert.strictEqual(e.itemised, false);
+  assert.ok(e.warning, 'no warning was set for inconsistent metadata');
+  assert.strictEqual(e.balance_due, 0);
+});

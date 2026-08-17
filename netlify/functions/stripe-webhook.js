@@ -14,6 +14,18 @@ const verifySig = (payload, sigHeader, secret) => {
   } catch(e) { return false; }
 };
 
+// Same rounding idiom used below for totalCents/mileageCents — kept local
+// rather than imported since it's one line.
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// Parses a Stripe metadata value (always a string, or absent) into a finite
+// number, or null if it's missing/blank/not a number.
+const numOrNull = (v) => {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
 // What a completed checkout session does to the booking row. Pure, so both
 // kinds can be tested without Stripe or a database.
 //
@@ -25,23 +37,47 @@ const verifySig = (payload, sigHeader, secret) => {
 // record of their $100 deposit and was still shown $80 owed after paying in
 // full — and got a "Deposit received!" email after their event.
 //
-// The balance branch sets balance_due to 0 rather than subtracting what was
-// paid: the payment includes the service fee, so subtracting it would leave a
-// negative. Zeroing deliberately makes the balance un-derivable, which is
-// correct — it is exactly the "settled out-of-band" state that
-// _items.js:151 detects and booking.js:269 protects.
-function paymentEffect(booking, amountPaid, kind) {
+// The balance branch does NOT trust booking.balance_due to reconstruct what
+// was fee vs. balance: that's exactly the column a balance payment zeroes,
+// so a retried/repeat delivery of the same session would read it back as
+// $0, and a quote raised after the link was minted would make it read too
+// high. It prefers the balance/fee split create-stripe-link.js stamps into
+// session metadata — Stripe signs the whole payload, so that split can't
+// have been tampered with — and only falls back to "the whole payment covers
+// the balance" when that metadata is absent or doesn't add up to what was
+// actually charged. In the fallback case it does NOT itemise a Balance /
+// Service-fee breakdown it can't stand behind, and it does not zero the
+// balance outright: it subtracts what was paid, so a genuine shortfall stays
+// owing instead of being silently written off.
+function paymentEffect(booking, amountPaid, kind, meta) {
   const b = booking || {};
   if (kind === 'balance') {
-    return {
+    const owed = Math.max(0, Number(b.balance_due) || 0);
+    const metaUsable = !!meta
+      && Number.isFinite(meta.balance) && meta.balance >= 0
+      && Number.isFinite(meta.fee) && meta.fee >= 0
+      && Math.abs(meta.balance + meta.fee - amountPaid) <= 0.005;
+
+    const result = {
       kind: 'balance',
       deposit_paid: b.deposit_paid === true,
       deposit_amount: Number(b.deposit_amount) || 0,
       payment_method: b.payment_method || '',
       status: b.status || 'confirmed',
-      balance_due: 0,
       logAction: 'Balance paid via Stripe',
     };
+    if (metaUsable) {
+      result.balance_due = Math.max(0, round2(owed - meta.balance));
+      result.itemised = true;
+      result.balance = meta.balance;
+      result.fee = meta.fee;
+    } else {
+      result.balance_due = Math.max(0, round2(owed - amountPaid));
+      result.itemised = false;
+      result.warning = `balance payment metadata unusable — amountPaid=${amountPaid} owed=${owed} ` +
+        `meta.balance=${meta?.balance} meta.fee=${meta?.fee}`;
+    }
+    return result;
   }
   const totalCents   = Math.round((parseFloat(b.total_price)  || 0) * 100);
   const mileageCents = Math.round((parseFloat(b.mileage_cost) || 0) * 100);
@@ -91,6 +127,14 @@ exports.handler = async (event) => {
       // Ensure idempotency columns exist
       await c.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)");
       await c.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_payment_intent_id VARCHAR(255)");
+      // Separate pair for balance payments — sharing the deposit's pair meant
+      // a balance payment overwrote the deposit's session/intent id, so a
+      // retried deposit-webhook delivery (Stripe retries up to ~3 days) would
+      // pass the idempotency guard and re-run the deposit branch on an
+      // already-paid, already-completed booking. It also destroyed the
+      // pointer used to refund the deposit.
+      await c.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_balance_session_id VARCHAR(255)");
+      await c.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_balance_payment_intent_id VARCHAR(255)");
 
       // ── Checkout completed (deposit paid) ──────
       if (ev.type === "checkout.session.completed") {
@@ -133,8 +177,10 @@ exports.handler = async (event) => {
         }
 
         if (booking) {
-          // IDEMPOTENT: if we've already processed this session, skip
-          if (booking.stripe_session_id === sessionId) {
+          // IDEMPOTENT: if we've already processed this session, skip.
+          // Checks both pairs — a balance session id lives in its own
+          // columns now, not the deposit's.
+          if (booking.stripe_session_id === sessionId || booking.stripe_balance_session_id === sessionId) {
             console.log(`Webhook: already processed session ${sessionId} for booking ${booking.reference}`);
             return { statusCode: 200, headers: h, body: JSON.stringify({ received: true, note: "already processed" }) };
           }
@@ -143,14 +189,23 @@ exports.handler = async (event) => {
           // else — including every session minted before that existed — is a
           // deposit, which is what this handler always assumed.
           const kind = session.metadata?.payment_kind === 'balance' ? 'balance' : 'deposit';
-          const effect = paymentEffect(booking, amountPaid, kind);
-          const balanceDue = effect.balance_due;
 
-          // The balance owed BEFORE this payment, so the receipt can itemise
-          // what was actually charged. Read from the row, not from the
-          // session, so a tampered session cannot rewrite the arithmetic.
-          const balanceBefore = Math.max(0, Number(booking.balance_due) || 0);
-          const feePaid = Math.max(0, Math.round((amountPaid - balanceBefore) * 100) / 100);
+          // create-stripe-link.js also stamps the balance/fee split into
+          // metadata.balance_amount / metadata.fee_amount for a balance
+          // link. Parsed here rather than derived from booking.balance_due,
+          // which paymentEffect() cannot trust for this (see its comment).
+          const metaBalance = numOrNull(session.metadata?.balance_amount);
+          const metaFee     = numOrNull(session.metadata?.fee_amount);
+          const meta = (metaBalance !== null && metaFee !== null)
+            ? { balance: metaBalance, fee: metaFee } : null;
+
+          const effect = paymentEffect(booking, amountPaid, kind, meta);
+          const balanceDue = effect.balance_due;
+          const isDeposit = effect.kind === 'deposit';
+
+          if (effect.kind === 'balance' && !effect.itemised) {
+            console.error(`Webhook: balance payment ${sessionId} for booking ${booking.reference} (id:${booking.id}) could not be itemised — ${effect.warning}`);
+          }
 
           const updated = await c.query(
             `UPDATE bookings
@@ -159,19 +214,23 @@ exports.handler = async (event) => {
                  deposit_amount=$3,
                  payment_method=$4,
                  status=$5,
-                 stripe_session_id=$6,
-                 stripe_payment_intent_id=$7,
+                 stripe_session_id = CASE WHEN $2::boolean THEN $6 ELSE stripe_session_id END,
+                 stripe_payment_intent_id = CASE WHEN $2::boolean THEN $7 ELSE stripe_payment_intent_id END,
+                 stripe_balance_session_id = CASE WHEN $2::boolean THEN stripe_balance_session_id ELSE $6 END,
+                 stripe_balance_payment_intent_id = CASE WHEN $2::boolean THEN stripe_balance_payment_intent_id ELSE $7 END,
                  balance_due=$8
              WHERE id=$9
              RETURNING *`,
-            [effect.deposit_paid, effect.kind === 'deposit', effect.deposit_amount,
+            [effect.deposit_paid, isDeposit, effect.deposit_amount,
              effect.payment_method, effect.status, sessionId, paymentIntentId,
              balanceDue, booking.id]
           );
           const b = updated.rows[0];
           await logChange(c, b.id, effect.logAction,
             effect.kind === 'balance'
-              ? `$${amountPaid.toFixed(2)} (balance $${balanceBefore.toFixed(2)} + service fee $${feePaid.toFixed(2)})`
+              ? (effect.itemised
+                  ? `$${amountPaid.toFixed(2)} (balance $${effect.balance.toFixed(2)} + service fee $${effect.fee.toFixed(2)})`
+                  : `$${amountPaid.toFixed(2)} (not itemised: ${effect.warning})`)
               : `$${amountPaid.toFixed(2)}`);
 
           const dateStr  = fmtEventDate(b.event_date);
@@ -183,15 +242,21 @@ exports.handler = async (event) => {
           // up after their event reads as if we had lost track of them.
           if (effect.kind === 'balance') {
             const subject = "Payment received — you're all paid up! 🎉 Funky Monkey Events";
+            // Only print a Balance / Service-fee breakdown when it came from
+            // Stripe-signed metadata. Otherwise state just the amount
+            // received — a fabricated split is worse than none.
+            const breakdownRows = effect.itemised
+              ? `<tr><td style="padding:4px 0;color:#A78BCA">Balance</td><td style="padding:4px 0;text-align:right">$${effect.balance.toFixed(2)}</td></tr>
+                 <tr><td style="padding:4px 0;color:#A78BCA">Service fee (5%)</td><td style="padding:4px 0;text-align:right">$${effect.fee.toFixed(2)}</td></tr>
+                 <tr><td style="padding:8px 0 0;border-top:1px solid #3D2460;font-weight:900">Total paid</td><td style="padding:8px 0 0;border-top:1px solid #3D2460;text-align:right;color:#10B981;font-size:18px;font-weight:900">$${amountPaid.toFixed(2)}</td></tr>`
+              : `<tr><td style="padding:4px 0;font-weight:900">Amount received</td><td style="padding:4px 0;text-align:right;color:#10B981;font-size:18px;font-weight:900">$${amountPaid.toFixed(2)}</td></tr>`;
             try {
               const res = await sendEmail(b.client_email, subject,
                 wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${esc(b.client_name)}</strong>! 🎉</p>
                   <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Thank you — your balance for <strong style="color:#F3E8FF">${esc(b.service_name)}</strong> is settled in full.</p>
                   <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
                     <table style="width:100%;border-collapse:collapse;color:#F3E8FF;font-size:14px">
-                      <tr><td style="padding:4px 0;color:#A78BCA">Balance</td><td style="padding:4px 0;text-align:right">$${balanceBefore.toFixed(2)}</td></tr>
-                      <tr><td style="padding:4px 0;color:#A78BCA">Service fee (5%)</td><td style="padding:4px 0;text-align:right">$${feePaid.toFixed(2)}</td></tr>
-                      <tr><td style="padding:8px 0 0;border-top:1px solid #3D2460;font-weight:900">Total paid</td><td style="padding:8px 0 0;border-top:1px solid #3D2460;text-align:right;color:#10B981;font-size:18px;font-weight:900">$${amountPaid.toFixed(2)}</td></tr>
+                      ${breakdownRows}
                     </table>
                   </div>
                   <p style="color:#A78BCA;font-size:13px;text-align:center">Booking ref: ${esc(b.reference)} · Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`));
@@ -235,13 +300,13 @@ exports.handler = async (event) => {
             const res = await sendEmail(
               NOTIFY,
               adminSubject,
-              wrap(`<p style="font-size:15px;font-weight:700;color:#10B981;margin-bottom:16px">💰 Stripe deposit received — booking auto-confirmed!</p>
+              wrap(`<p style="font-size:15px;font-weight:700;color:#10B981;margin-bottom:16px">💰 Stripe ${effect.kind === 'balance' ? 'balance payment received!' : 'deposit received — booking auto-confirmed!'}</p>
                 <table style="width:100%;border-collapse:collapse">
                   <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700;width:130px">Ref</td><td style="padding:7px 0;color:#FFD600;font-weight:700">${esc(b.reference)}</td></tr>
                   <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Client</td><td style="padding:7px 0;font-weight:700">${esc(b.client_name)}</td></tr>
                   <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</td><td style="padding:7px 0">${esc(b.service_name)}</td></tr>
                   <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date</td><td style="padding:7px 0">${dateStr}${timeStr ? " at " + esc(timeStr) : ""}</td></tr>
-                  <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Deposit Paid</td><td style="padding:7px 0;color:#10B981;font-size:18px;font-weight:900">$${amountPaid.toFixed(2)}</td></tr>
+                  <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">${effect.kind === 'balance' ? 'Balance Paid' : 'Deposit Paid'}</td><td style="padding:7px 0;color:#10B981;font-size:18px;font-weight:900">$${amountPaid.toFixed(2)}</td></tr>
                   <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Balance Due</td><td style="padding:7px 0;color:#FFD600;font-weight:700">$${balanceDue.toFixed(2)}</td></tr>
                 </table>
                 <div style="margin-top:20px;text-align:center">
