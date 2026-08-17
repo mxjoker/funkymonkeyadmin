@@ -1496,6 +1496,22 @@ function depositLinkAmount(b) {
   return isFinite(n) && n > 0 ? n : 0;
 }
 
+// Mirrors balanceCharge() and SERVICE_FEE_RATE in _items.js. Duplicated
+// deliberately — admin.html is a static page with no access to server modules,
+// the same reason finaliseLinkClient() below is duplicated — so if the rate or
+// the rounding changes there, change it here in the same commit.
+// test/admin-link-buttons.test.js asserts the two agree to the cent.
+//
+// This only labels the button. create-stripe-link.js recomputes the charge
+// from the database and its answer is the one that bills.
+function balanceLinkAmounts(b) {
+  const raw = Number(b && b.balance_due);
+  const cents = (n) => Math.round(n * 100) / 100;
+  const balance = isFinite(raw) && raw > 0 ? cents(raw) : 0;
+  const fee = cents(balance * 0.05);
+  return { balance, fee, total: cents(balance + fee) };
+}
+
 // ══ END PURE HELPERS ══
 
 // Default matches the old "Newest Inquiry" dropdown default, so the view the
@@ -1885,6 +1901,18 @@ function openBooking(id) {
       </div>
       ${b.stripe_payment_link?`<div class="stripe-result">Last link: <a href="${b.stripe_payment_link}" target="_blank" style="color:#7c3aed">Open →</a></div>`:''}
       <div class="stripe-result" id="stripe-msg-${b.id}"></div>
+    </div>`}
+
+    ${isNew || balanceLinkAmounts(b).balance <= 0 ? '' : `
+    <!-- Balance link -->
+    <div class="stripe-block">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <strong style="font-size:.875rem">💰 Balance Link</strong>
+        <button class="btn btn-primary btn-sm" onclick="sendBalanceLink('${b.id}')">Send $${balanceLinkAmounts(b).total.toFixed(2)} balance link</button>
+      </div>
+      <div style="font-size:.75rem;color:#6b7280;margin-top:6px">Balance $${balanceLinkAmounts(b).balance.toFixed(2)} + service fee $${balanceLinkAmounts(b).fee.toFixed(2)} (5%).</div>
+      ${b.stripe_balance_link?`<div class="stripe-result">Last balance link: <a href="${b.stripe_balance_link}" target="_blank" style="color:#7c3aed">Open →</a></div>`:''}
+      <div class="stripe-result" id="balance-msg-${b.id}"></div>
     </div>`}
 
     ${isNew ? '' : `
@@ -2795,6 +2823,51 @@ async function sendStripeLink(id) {
       el.textContent = '❌ ' + (data.error || 'Unknown error');
     }
   } catch(e) { el.textContent = '❌ ' + e.message; }
+}
+
+// ── Balance link — the amount is confirmed here but decided by the server:
+// create-stripe-link.js reads balance_due from the database and recomputes the
+// fee, so a stale allBookings row can never bill the wrong figure. ──
+async function sendBalanceLink(id) {
+  const b = allBookings.find(x => String(x.id) === String(id));
+  if (!b) return;
+  const el = document.getElementById('balance-msg-' + id);
+  const { balance, fee, total } = balanceLinkAmounts(b);
+  if (balance <= 0) { el.textContent = '❌ This booking has no balance due.'; return; }
+  if (!b.client_email) { el.textContent = '❌ No client email on this booking.'; return; }
+  if (!confirm(`Email ${b.client_email} a balance link?\n\n`
+      + `Balance          $${balance.toFixed(2)}\n`
+      + `Service fee (5%)  $${fee.toFixed(2)}\n`
+      + `Total due        $${total.toFixed(2)}`)) return;
+  el.textContent = 'Generating…';
+  try {
+    const res = await apiFetch('/api/create-stripe-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind:       'balance',
+        bookingId:  b.id,
+        bookingRef: b.reference,
+        client:     b.client_name,
+        email:      b.client_email,
+        service:    b.service_name,
+      })
+    });
+    const data = await res.json();
+    if (data.url) {
+      if (!String(data.url).startsWith('https://')) {
+        el.textContent = '❌ Invalid payment link URL returned';
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = encodeURI(data.url); a.target = '_blank'; a.style.color = '#7c3aed'; a.textContent = 'Open →';
+      el.textContent = `✅ Sent — $${Number(data.total).toFixed(2)} ($${Number(data.balance).toFixed(2)} + $${Number(data.fee).toFixed(2)} fee). `;
+      el.appendChild(a);
+      b.stripe_balance_link = data.url;
+    } else {
+      el.textContent = '❌ ' + (data.error || 'Unknown error');
+    }
+  } catch (e) { el.textContent = '❌ ' + e.message; }
 }
 
 // ── Send finalisation link — creates the deposit link first (if one is
