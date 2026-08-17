@@ -109,7 +109,17 @@ function paymentForBooking(assignments, rolePayByRole, staff, hours) {
   };
 }
 
+// The assign-time refusal message. payabilityError supplies "what is missing";
+// this adds "who" and "which role", because a message that isn't actionable
+// without going and looking is no better than the $0 line item it replaces.
+function assignmentRefusal(staff, payType, roleName) {
+  const why = payabilityError(payType, staff);
+  if (!why) return null;
+  const who = (staff && (staff.preferred_name || staff.name)) || 'This staff member';
+  return `${who} ${why} (${roleName}). Set their rate on the staff record, then assign again.`;
+}
+
 module.exports = {
   PAY_TYPES, isValidPayType, resolvePayType, resolveAmount, bestPayment, payabilityError,
-  paymentForBooking,
+  paymentForBooking, assignmentRefusal,
 };

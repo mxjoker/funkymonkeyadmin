@@ -4,7 +4,7 @@ const {
 } = require('./_auth');
 const { sendEmail, wrap, logChange, ensureBookingChanges } = require('./_email');
 const { sendSms, ensureSmsTables } = require('./_sms');
-const { isValidPayType } = require('./_pay');
+const { isValidPayType, resolvePayType, assignmentRefusal } = require('./_pay');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -801,6 +801,19 @@ exports.handler = async (event) => {
             return json(400, { error: 'booking_id, staff_id, tag_filled required' });
           }
 
+          // Refused here, before the row exists, not discovered as a $0 line
+          // item in payroll after the week is already worked. Resolved the
+          // same way payroll.js resolves it -- role first, staff second --
+          // so this check and the eventual payment never disagree.
+          const { rows: assignStaffRows } = await client.query('SELECT * FROM staff WHERE id=$1', [parseInt(staff_id)]);
+          const assignStaff = assignStaffRows[0];
+          const { rows: rolePayRows } = await client.query('SELECT role_name, pay_type FROM role_pay');
+          const rolePayByRole = {};
+          for (const r of rolePayRows) rolePayByRole[r.role_name] = r.pay_type;
+          const payType = resolvePayType(tag_filled, rolePayByRole, assignStaff);
+          const refusal = assignmentRefusal(assignStaff, payType, tag_filled);
+          if (refusal) return json(400, { error: refusal });
+
           const { rows } = await client.query(
             `INSERT INTO staff_assignments (booking_id, staff_id, tag_filled, status, slot_id, assigned_at)
              VALUES ($1,$2,$3,'assigned',$4,NOW())
@@ -826,9 +839,8 @@ exports.handler = async (event) => {
           );
           const fa = freshAssignment || assignment;
 
-          const { rows: staffRows }   = await client.query('SELECT * FROM staff WHERE id=$1', [parseInt(staff_id)]);
           const { rows: bookingRows } = await client.query('SELECT * FROM bookings WHERE id=$1', [parseInt(booking_id)]);
-          const s = staffRows[0];
+          const s = assignStaff;
           const b = bookingRows[0];
 
           if (s && b) {

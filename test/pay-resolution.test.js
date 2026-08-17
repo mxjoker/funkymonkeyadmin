@@ -200,3 +200,16 @@ test('the higher of two overrides wins when both roles carry one', () => {
     { 'Foam Crew': 'hourly', 'Story Doodles': 'flat' }, HOURLY, 6);
   assert.strictEqual(p.amount, 200);
 });
+
+const { assignmentRefusal } = require('../netlify/functions/_pay.js');
+
+test('the refusal names the person and what is missing', () => {
+  const m = assignmentRefusal({ name: 'Noah Drews', preferred_name: 'Noah', hourly_rate: 0 }, 'hourly', 'Foam Crew');
+  assert.match(m, /Noah/);
+  assert.match(m, /Foam Crew/);
+  assert.match(m, /hourly rate/i);
+});
+
+test('a payable assignment produces no refusal', () => {
+  assert.strictEqual(assignmentRefusal({ name: 'A', hourly_rate: 12 }, 'hourly', 'Foam Crew'), null);
+});
