@@ -12,7 +12,7 @@ function loadHelpers() {
   assert.ok(a !== -1 && b !== -1, 'pure-helper sentinels missing from admin.html');
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, balanceLinkAmounts, balanceLinkEligible, clockRowLabel };', ctx);
+  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed };', ctx);
   return ctx.out;
 }
 
@@ -119,4 +119,40 @@ test('an incomplete clock says what is missing rather than showing a number', ()
 test('an implausible span is flagged, not displayed as fact', () => {
   const s = clockRowLabel({ clocked_in_at: '2026-08-15T08:00:00Z', clocked_out_at: '2026-08-16T09:00:00Z' });
   assert.match(s, /check|⚠/i);
+});
+
+// Regression: rounding to minutes before comparing against the 16h cap let a
+// span of 16h00m00.001s-16h00m29.999s round DOWN to a clean "16h" and read
+// as normal, while _timeclock.js's workedHours() — which compares raw
+// milliseconds — refuses the same span. Same bug class fixed once already
+// in _timeclock.js; the cap check here must compare raw ms too.
+test('one millisecond over the 16h cap is flagged, not rounded down to a clean 16h', () => {
+  const s = clockRowLabel({ clocked_in_at: '2026-08-15T00:00:00.000Z', clocked_out_at: '2026-08-15T16:00:00.001Z' });
+  assert.match(s, /check|⚠/i);
+});
+
+test('exactly 16h is still a normal day, the boundary is inclusive like workedHours()', () => {
+  const s = clockRowLabel({ clocked_in_at: '2026-08-15T00:00:00.000Z', clocked_out_at: '2026-08-15T16:00:00.000Z' });
+  assert.doesNotMatch(s, /check|⚠/i);
+  assert.match(s, /16h 00m/);
+});
+
+const { clockAdjustAllowed } = loadHelpers();
+
+// The bug this predicate exists for: a stage this card's query never
+// selected (on_my_way_at/arrived_at/completed_at before the SELECT was
+// fixed to carry them) renders its input blank not because the stage was
+// never stamped, but because admin.html was never given the value. Saving
+// that blank must not silently NULL a real timestamp.
+test('a field the card never fetched refuses to save while its input is still blank', () => {
+  assert.strictEqual(clockAdjustAllowed(false, ''), false);
+});
+
+test('a field the card did fetch may be cleared deliberately', () => {
+  assert.strictEqual(clockAdjustAllowed(true, ''), true);
+});
+
+test('a filled-in value always saves, fetched or not', () => {
+  assert.strictEqual(clockAdjustAllowed(false, '2026-08-15T09:00'), true);
+  assert.strictEqual(clockAdjustAllowed(true, '2026-08-15T09:00'), true);
 });

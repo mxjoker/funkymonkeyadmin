@@ -351,7 +351,8 @@ exports.handler = async (event) => {
           const { rows: assignments } = await client.query(
             `SELECT sa.*, s.name as staff_name, s.preferred_name, s.color, s.skills,
                     gl.id as log_id, gl.status as checklist_status,
-                    gl.clocked_in_at, gl.clocked_out_at,
+                    gl.clocked_in_at, gl.on_my_way_at, gl.arrived_at,
+                    gl.completed_at, gl.clocked_out_at,
                     gl.survey_submitted_at, gl.guest_count_actual,
                     gl.balance_collected, gl.balance_amount,
                     gl.gas_level, gl.foam_fluid_needed, gl.empty_jugs_refilled,

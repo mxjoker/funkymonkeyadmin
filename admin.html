@@ -1537,9 +1537,27 @@ function clockRowLabel(log) {
   if (a === null) return 'Not clocked in';
   if (b === null) return 'No clock-out yet';
   if (b <= a) return '⚠️ Clock-out is before clock-in — check';
-  const mins = Math.round((b - a) / 60000);
-  if (mins > 16 * 60) return `⚠️ ${Math.floor(mins / 60)}h — check, likely a missed clock-out`;
+  // Compare the raw span against the cap BEFORE rounding to minutes for
+  // display. Rounding first (as an earlier version of this function did)
+  // let a span of 16h00m00.001s–16h00m29.999s round down to a clean "16h"
+  // and pass as normal, while _timeclock.js's workedHours() — comparing raw
+  // milliseconds — refuses it. Same bug class as the raw-vs-rounded mistake
+  // already fixed once in _timeclock.js itself.
+  const spanMs = b - a;
+  const mins = Math.round(spanMs / 60000);
+  if (spanMs > 16 * 3600000) return `⚠️ ${Math.floor(mins / 60)}h — check, likely a missed clock-out`;
   return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
+}
+
+// A field this card never fetched (see renderClockBlock's `known` flag)
+// reads as blank for a reason unrelated to the staff member's actual clock —
+// admin.html simply doesn't have the value. An empty box there must not be
+// treated as "the admin cleared this." A field the card DID fetch and shows
+// blank is a deliberate clear, and is allowed through. This is the guard
+// that keeps that distinction enforced even if a future query change stops
+// selecting a column this one currently does.
+function clockAdjustAllowed(known, value) {
+  return known || value !== '';
 }
 
 // ══ END PURE HELPERS ══
@@ -2453,23 +2471,21 @@ function renderClockBlock(a, bookingId) {
   const label = clockRowLabel(a);
   const isWarning = /check|⚠/i.test(label);
 
-  // hours_source / measured_hours come from the payroll preflight response,
-  // not this card's own query — present only when the caller has merged them
-  // in. Absent here today; see report.
-  const sourceBadge = a.hours_source
-    ? `<span style="background:${a.hours_source === 'measured' ? '#f0fdf4' : '#eff6ff'};color:${a.hours_source === 'measured' ? '#166534' : '#1e40af'};border-radius:10px;padding:1px 7px;font-size:.68rem;font-weight:700">
-         ${a.hours_source === 'measured' ? '📊 Measured' : '📐 Estimated'}${a.measured_hours != null ? ' ' + Number(a.measured_hours).toFixed(2) + 'h' : ''}
-       </span>`
-    : '';
-
-  // clocked_in_at/clocked_out_at are the only two of the five stage columns
-  // this card's query (staff-assignments.js, the ?booking_id= SELECT) carries
-  // — on_my_way_at/arrived_at/completed_at are not selected there, so those
-  // three inputs cannot be prefilled with what's on file. `field in a` tells
-  // the two apart rather than guessing from a null, which would be
-  // indistinguishable from "not selected".
+  // hours_source / measured_hours belong on the payroll preflight's staff
+  // lines (preflightPayroll(), which already renders them), not here — this
+  // card's own query never carries them, so a badge reading them here would
+  // never render. See task-6-report.md, Finding 2.
+  //
+  // clocked_in_at/clocked_out_at/on_my_way_at/arrived_at/completed_at all
+  // come from this card's query (staff-assignments.js, the ?booking_id=
+  // SELECT). `field in a` still guards against a future column being
+  // dropped from that SELECT — if it ever is, that field's row won't be
+  // prefilled, and trySaveClock() below refuses to submit a blank over an
+  // unknown value rather than silently nulling it.
+  let anyUnknown = false;
   const rows = CLOCK_STAGES.map(s => {
     const known = s.field in a;
+    if (!known) anyUnknown = true;
     const val = known ? isoToLocalInput(a[s.field]) : '';
     const inputId = `clock-${s.key}-${a.log_id}`;
     return `
@@ -2478,7 +2494,7 @@ function renderClockBlock(a, bookingId) {
         <input type="datetime-local" id="${inputId}" value="${val}"
           style="flex:1;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:.75rem"/>
         <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:.7rem"
-          onclick="adjustClock(${a.log_id},'${s.key}',document.getElementById('${inputId}').value).then(()=>loadStaffAssignments('${bookingId}'))">Save</button>
+          onclick="trySaveClock(${a.log_id},'${s.key}','${inputId}',${known},'${bookingId}')">Save</button>
       </div>`;
   }).join('');
 
@@ -2487,11 +2503,10 @@ function renderClockBlock(a, bookingId) {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
         <span style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:#6b7280;letter-spacing:.04em">⏱ Clock</span>
         <span style="font-size:.75rem;font-weight:600;color:${isWarning ? '#dc2626' : '#374151'}">${esc(label)}</span>
-        ${sourceBadge}
         <span class="save-flash" id="assign-flash-${a.log_id}">✓ Updated</span>
       </div>
       ${rows}
-      <div style="font-size:.66rem;color:#9ca3af;margin-top:4px">* current value isn't returned by this card's query yet — blank does not mean unset, see stamp on the staff portal instead</div>
+      ${anyUnknown ? `<div style="font-size:.66rem;color:#9ca3af;margin-top:4px">* current value isn't returned by this card's query — blank does not mean unset; saving one blank refuses rather than clearing it</div>` : ''}
     </div>`;
 }
 
@@ -2509,6 +2524,22 @@ async function adjustClock(logId, stage, value) {
     if (!res.ok) throw new Error((await res.json()).error || 'Adjust failed');
     flash('assign-flash-' + logId);
   } catch (e) { alert('Could not adjust: ' + e.message); }
+}
+
+// The Save button's actual click handler. Reads the input, refuses via
+// clockAdjustAllowed() when the field's starting value was never fetched and
+// the box is still blank — that combination is "we never asked", not "the
+// admin cleared it" — then defers to adjustClock() for the real save, and
+// refreshes the card so the new value (or the server's rejection) shows up.
+async function trySaveClock(logId, stage, inputId, known, bookingId) {
+  const el = document.getElementById(inputId);
+  const value = el ? el.value : '';
+  if (!clockAdjustAllowed(known, value)) {
+    alert("This field's current value isn't shown by this card yet (see the * note), so an empty box here doesn't mean it's unset. Not saving a blank over it.");
+    return;
+  }
+  await adjustClock(logId, stage, value);
+  await loadStaffAssignments(bookingId);
 }
 
 function renderScheduleBlock(a, bookingId) {
@@ -5747,8 +5778,16 @@ async function preflightPayroll() {
           const payLabel = st.pay_type === 'hourly'
             ? `${st.hours}h × hourly`
             : `flat rate`;
+          // Same object payroll.js attached hours_source/measured_hours to
+          // (netlify/functions/payroll.js:455-456) — no new fetch or join,
+          // just reading fields already on this line's own st object.
+          const sourceTag = st.hours_source === 'measured'
+            ? `<span style="color:#166534;font-weight:600">measured${st.measured_hours != null ? ' ' + Number(st.measured_hours).toFixed(2) + 'h' : ''}</span>`
+            : st.hours_source === 'estimated'
+              ? `<span style="color:#1e40af;font-weight:600">estimated</span>`
+              : '';
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:.84rem;color:#374151;border-bottom:1px solid #f3f4f6">
-            <span><span style="font-weight:600">${esc(st.staff_name)}</span> <span style="color:#9ca3af">(${payLabel})</span>${adj}</span>
+            <span><span style="font-weight:600">${esc(st.staff_name)}</span> <span style="color:#9ca3af">(${payLabel})</span>${sourceTag ? ' · ' + sourceTag : ''}${adj}</span>
             <span style="font-weight:700;color:#1e1b4b">$${Number(st.amount).toFixed(2)}</span>
           </div>`;
         }).join('');
