@@ -12,7 +12,7 @@ function loadHelpers() {
   assert.ok(a !== -1 && b !== -1, 'pure-helper sentinels missing from admin.html');
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS };', ctx);
+  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS, reportButtonVisible };', ctx);
   return ctx.out;
 }
 
@@ -210,4 +210,31 @@ test('staff-portal.html checklist array matches the server exactly', () => {
   const stages = JSON.parse(m[1].replace(/'/g, '"'));
   assert.deepStrictEqual(stages, SERVER_CHECKLIST_STATUSES,
     'staff-portal.html checklistStatuses has drifted from staff-assignments.js CHECKLIST_STATUSES');
+});
+
+// Same rule as staff-portal.html's copy (IMPORTANT 5): clocking out must not
+// take the report button away — a worker who taps Clock Out before submitting
+// the report used to lose the button, and the only way back was stepping to
+// `completed`, which NULLs clocked_out_at. Both end-of-gig states offer it,
+// and a filed report is not asked for twice.
+const { reportButtonVisible } = loadHelpers();
+
+test('the post-gig report survives clocking out here too', () => {
+  assert.strictEqual(reportButtonVisible({ checklist_status: 'completed' }), true);
+  assert.strictEqual(reportButtonVisible({ checklist_status: 'clocked_out' }), true);
+  assert.strictEqual(reportButtonVisible({ checklist_status: 'arrived' }), false);
+  assert.strictEqual(reportButtonVisible({ checklist_status: 'clocked_out', survey_submitted_at: '2026-08-15T21:00:00Z' }), false);
+});
+
+// The spec asked that an adjusted log stay flagged as adjusted so a payroll run
+// can show it. staff-assignments.js wrote clock_adjusted_at and payroll.js
+// selected it, and nothing ever rendered it — a flag that existed only as a
+// column. The preflight staff line is where a wage question gets asked.
+test('the pay review marks hours a human corrected by hand', () => {
+  const start = HTML.indexOf('const staffLines = ev.staff.map');
+  assert.notStrictEqual(start, -1, 'preflight staff lines not found');
+  const block = HTML.slice(start, HTML.indexOf('const evTotal', start));
+  assert.match(block, /clock_adjusted/, 'the preflight line never reads the adjusted flag');
+  assert.match(block, /corrected|adjusted by hand|hand-corrected/i,
+    'nothing tells the reviewer the hours were corrected by hand');
 });

@@ -97,3 +97,73 @@ test('non-string stages are not adjustable', () => {
     assert.strictEqual(isAdjustableStage(stage), false, String(stage));
   }
 });
+
+// ── The audit line has to survive being read a month later ───────────────────
+// The correction that most needs an audit trail is a forgotten clock-out, which
+// is cross-day by definition: the worker taps out the next morning, or not at
+// all and the admin fills it in. A time-only line renders exactly that case
+// invisible — "clock-out: 15:00 UTC → 15:00 UTC" for a change of a whole day.
+test('a cross-day correction does not read as no change at all', () => {
+  const a = clockAdjustmentLog('clocked_out', '2026-08-15T15:00:00.000Z', '2026-08-16T15:00:00.000Z');
+  const [from, to] = a.detail.split('→').map(s => s.trim());
+  assert.notStrictEqual(from, to, `a one-day move logged identical sides: ${a.detail}`);
+  assert.match(a.detail, /2026-08-15/, 'the old date is missing');
+  assert.match(a.detail, /2026-08-16/, 'the new date is missing');
+});
+
+// ── An admin's correction must not be erasable by the next tap ───────────────
+// adjust_clock writes one column and used to leave `status` alone. Filling in a
+// missing clocked_out_at on a log still reading `completed` left the worker's
+// next checklist tap re-running buildChecklistTimestampClause('completed'),
+// which NULLs clocked_out_at — an audited change undone with nothing audited.
+const { advancedStatus } = require('../netlify/functions/staff-assignments.js');
+
+test('setting a stamp later than the current status advances the status', () => {
+  assert.strictEqual(advancedStatus('completed', 'clocked_out', true), 'clocked_out');
+  assert.strictEqual(advancedStatus('upcoming', 'arrived', true), 'arrived');
+});
+
+test('setting a stamp for a stage already passed leaves the status alone', () => {
+  assert.strictEqual(advancedStatus('clocked_out', 'arrived', true), null);
+  assert.strictEqual(advancedStatus('completed', 'completed', true), null);
+});
+
+// Clearing is the admin saying "this never happened". Advancing the status on a
+// clear would claim the opposite.
+test('clearing a stamp never advances the status', () => {
+  assert.strictEqual(advancedStatus('completed', 'clocked_out', false), null);
+});
+
+test('a stage that is not a real stage never becomes a status', () => {
+  for (const stage of ['constructor', '__proto__', 'upcoming', null, 42]) {
+    assert.strictEqual(advancedStatus('upcoming', stage, true), null, String(stage));
+  }
+});
+
+test('the audit line says so when the status moved with the stamp', () => {
+  const e = clockAdjustmentLog('clocked_out', null, '2026-08-16T16:30:00.000Z', 'clocked_out');
+  assert.match(e.detail, /status/i, `the status change is not in the audit line: ${e.detail}`);
+  // An adjustment that moved nothing must not claim it did.
+  const plain = clockAdjustmentLog('arrived', null, '2026-08-16T10:00:00.000Z', null);
+  assert.ok(!/status/i.test(plain.detail), `claimed a status change that never happened: ${plain.detail}`);
+});
+
+// ── update_checklist must be scoped to the staff member who owns the log ─────
+// Source-level, because the rule lives in a handler that cannot run without a
+// database. The guard is what stops one authenticated staff member POSTing
+// another's log_id and wiping the timestamps their wage is computed from, so
+// it must not be deletable without a test going red.
+const fs = require('node:fs');
+const path = require('node:path');
+const SA_SRC = fs.readFileSync(path.join(__dirname, '../netlify/functions/staff-assignments.js'), 'utf8');
+
+test('update_checklist refuses a log that belongs to someone else', () => {
+  const start = SA_SRC.indexOf("if (action === 'update_checklist')");
+  const end   = SA_SRC.indexOf("if (action === 'adjust_clock')");
+  assert.ok(start !== -1 && end > start, 'update_checklist block not found');
+  const block = SA_SRC.slice(start, end);
+  assert.match(block, /SELECT[^;]*staff_id[^;]*FROM gig_logs/i,
+    'update_checklist does not look the log owner up — any staff id can wipe any clock');
+  assert.match(block, /return forbidden\(\)/,
+    'update_checklist never refuses a mismatch');
+});

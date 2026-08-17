@@ -130,17 +130,6 @@ function fmtDateShort(d) {
   return dt.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'});
 }
 
-// Display only — payroll recomputes this server-side and the 5-hour minimum is
-// applied there, not here. Showing a bare span keeps the portal honest about
-// what was worked rather than what will be paid.
-function clockedHoursLabel(g) {
-  const a = new Date(g.clocked_in_at).getTime();
-  const b = new Date(g.clocked_out_at).getTime();
-  if (!isFinite(a) || !isFinite(b) || b <= a) return '—';
-  const mins = Math.round((b - a) / 60000);
-  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
-}
-
 function fmtTime(t) {
   if (!t) return '';
   try {
@@ -152,6 +141,39 @@ function fmtTime(t) {
 
 // ══ PURE TIME HELPERS — extracted verbatim by test/staff-portal-times.test.js ══
 // Nothing in this block may touch the DOM or page state.
+
+// Display only — payroll recomputes this server-side and the 5-hour minimum is
+// applied there, not here. Showing a bare span keeps the portal honest about
+// what was worked rather than what will be paid.
+//
+// The one exception is the 16-hour cap, and it has to be mirrored: this is the
+// display the person being PAID reads. Without it a forgotten clock-out showed
+// "⏱ Worked 25h 00m" as fact while workedHours() in _timeclock.js refused the
+// same span and payroll quietly paid the estimate — the worker believing one
+// number and the payslip carrying another, with nothing anywhere saying why.
+// Raw milliseconds against the cap, not rounded minutes, for the same reason
+// clockRowLabel in admin.html does it that way.
+function clockedHoursLabel(g) {
+  const a = new Date(g && g.clocked_in_at).getTime();
+  const b = new Date(g && g.clocked_out_at).getTime();
+  if (!isFinite(a) || !isFinite(b) || b <= a) return '—';
+  const spanMs = b - a;
+  if (spanMs > 16 * 3600000) return '⚠️ Check with Joe — clock-out looks missed';
+  const mins = Math.round(spanMs / 60000);
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
+}
+
+// The post-gig report was gated on `completed` alone, which assumed the report
+// always came before the clock-out. Tapping Clock Out first took the button
+// away, and the only route back was stepping to `completed` — which NULLs
+// clocked_out_at, so recovering the button cost the worker their clock-out and
+// they had to remember to tap it again. Both end-of-gig states offer it, and
+// a report already filed does not ask twice.
+function reportButtonVisible(g) {
+  if (g && g.survey_submitted_at) return false;
+  const s = (g && g.checklist_status) || 'upcoming';
+  return s === 'completed' || s === 'clocked_out';
+}
 
 // "14:00" + 90 -> "15:30". Accepts the "14:00:00" Postgres hands back.
 // Returns '' rather than a wrong time when the input is unusable, because a
@@ -496,7 +518,7 @@ function gigCard(g, isAssigned) {
       <div style="margin-top:10px;font-size:.75rem;color:#a78bca">
         ⏱ Worked <strong style="color:#c084fc">${clockedHoursLabel(g)}</strong>
       </div>` : ''}
-      ${curStatus === 'completed'
+      ${reportButtonVisible(g)
         ? `<button class="btn btn-outline btn-sm" style="margin-top:10px;border-color:#a855f7;color:#c084fc" onclick="openSurvey('${g.log_id}','${g.booking_id}')">📋 Submit Post-Gig Report</button>`
         : ''}
     </div>` : '';
