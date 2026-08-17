@@ -93,7 +93,7 @@ exports.handler = async (event) => {
   }
 
   // Validate the referenced booking exists
-  const COLS = 'id, reference, balance_due, total_price, mileage_cost, deposit_amount';
+  const COLS = 'id, reference, balance_due, total_price, mileage_cost, deposit_amount, deposit_paid';
   const bookingRow = await withClient(async (c) => {
     if (bookingId) {
       const { rows } = await c.query(`SELECT ${COLS} FROM bookings WHERE id=$1 LIMIT 1`, [parseInt(bookingId)]);
@@ -119,6 +119,17 @@ exports.handler = async (event) => {
   if (kind === 'balance') {
     if (charge.balance <= 0) {
       return json(400, { error: "This booking has no balance due." });
+    }
+    // Both links live at once is a money bug, not a tidiness one. The balance
+    // payment zeroes balance_due; the still-live deposit link's webhook then
+    // recomputes it as total + mileage - deposit, so a client who has paid
+    // $520 on a $500 booking is shown $400 owing. admin.html's
+    // balanceLinkEligible() hides the button, but the button is not the only
+    // possible caller and this codebase's documented recurring failure mode is
+    // trusting that it is. A deposit_amount of 0 is the deliberate no-deposit
+    // booking (school, library) — nothing to settle first.
+    if (bookingRow.deposit_paid !== true && Number(bookingRow.deposit_amount) > 0) {
+      return json(400, { error: "This booking's deposit has not been paid yet — send the deposit link first." });
     }
     // The deposit cap of 10000 was written for a browser-supplied figure. A
     // balance comes from the database, so the cap is only a sanity bound on a
@@ -168,11 +179,21 @@ exports.handler = async (event) => {
     // "Last link" — and overwriting it with a balance link would point a client
     // at a balance demand from the page that asks them to pay their deposit.
     const linkCol = kind === 'balance' ? 'stripe_balance_link' : 'stripe_payment_link';
+    // The ALTER gets its OWN try/catch. Sharing one with the UPDATE meant a
+    // DDL failure — lock timeout, a role without DDL rights — took the persist
+    // down with it, producing exactly the returned-but-unsaved link this
+    // comment exists to prevent. bookings.js:129 adds the column on every
+    // bookings request anyway, so this one is belt-and-braces.
+    try {
+      if (kind === 'balance') {
+        await withClient((c) =>
+          c.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_balance_link TEXT DEFAULT ''"));
+      }
+    } catch (ddlErr) {
+      console.error('create-stripe-link: could not ensure stripe_balance_link column |', ddlErr.message);
+    }
     try {
       await withClient(async (c) => {
-        if (kind === 'balance') {
-          await c.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_balance_link TEXT DEFAULT ''");
-        }
         await c.query(
           `UPDATE bookings SET ${linkCol}=$1, updated_at=NOW() WHERE id=$2`,
           [url, bookingRow.id]
@@ -197,7 +218,7 @@ exports.handler = async (event) => {
             <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:24px">
               <table style="width:100%;border-collapse:collapse;color:#F3E8FF;font-size:14px">
                 <tr><td style="padding:4px 0;color:#A78BCA">Balance</td><td style="padding:4px 0;text-align:right">$${charge.balance.toFixed(2)}</td></tr>
-                <tr><td style="padding:4px 0;color:#A78BCA">Service fee (5%)</td><td style="padding:4px 0;text-align:right">$${charge.fee.toFixed(2)}</td></tr>
+                <tr><td style="padding:4px 0;color:#A78BCA">Service fee (${Math.round(SERVICE_FEE_RATE * 100)}%)</td><td style="padding:4px 0;text-align:right">$${charge.fee.toFixed(2)}</td></tr>
                 <tr><td style="padding:8px 0 0;border-top:1px solid #3D2460;font-weight:900">Total due</td><td style="padding:8px 0 0;border-top:1px solid #3D2460;text-align:right;color:#10B981;font-size:20px;font-weight:900">$${charge.total.toFixed(2)}</td></tr>
               </table>
             </div>

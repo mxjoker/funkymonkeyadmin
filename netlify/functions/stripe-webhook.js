@@ -1,6 +1,11 @@
 const crypto = require("crypto");
 const { withClient } = require('./_db');
 const { esc, sendEmail, logStatus, wrap, fmtEventDate, logEmail, logChange, ensureEmailLog, ensureBookingChanges } = require('./_email');
+// _items.js is the single definition of the rate. The receipt states the
+// percentage the client was charged, so it must read it from there rather than
+// restate it — a literal here would print 5% beside a page charging something
+// else the day the rate moves.
+const { SERVICE_FEE_RATE } = require('./_items');
 
 const NOTIFY = process.env.NOTIFY_EMAIL || "Joe.Coover@gmail.com";
 
@@ -25,6 +30,16 @@ const numOrNull = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
+
+// Promote a pre-payment status once nothing is owed: accounting-export.js counts
+// revenue only for confirmed/completed and staff-assignments.js staffs only
+// accepted/confirmed, so a booking that paid in full by balance link would
+// otherwise be invisible to both. Never move a booking backwards, and never
+// promote while a shortfall remains. These are exactly the statuses that sort
+// before 'confirmed' in create-bookings.js's ALLOWED_STATUS, so promotion can
+// only ever move a booking forwards — 'completed' and 'cancelled' are absent
+// on purpose.
+const PRE_PAYMENT = ['draft', 'review', 'quoted', 'accepted'];
 
 // What a completed checkout session does to the booking row. Pure, so both
 // kinds can be tested without Stripe or a database.
@@ -64,6 +79,11 @@ function paymentEffect(booking, amountPaid, kind, meta) {
       deposit_amount: Number(b.deposit_amount) || 0,
       payment_method: b.payment_method || '',
       status: b.status || 'confirmed',
+      // What this payment contributed to bookings.service_fee_collected. Always
+      // a number so the UPDATE needs no branching — 0 in the fallback below,
+      // where the split is genuinely unknown and a guess would be worse than
+      // nothing.
+      fee: 0,
       logAction: 'Balance paid via Stripe',
     };
     if (metaUsable) {
@@ -77,6 +97,13 @@ function paymentEffect(booking, amountPaid, kind, meta) {
       result.warning = `balance payment metadata unusable — amountPaid=${amountPaid} owed=${owed} ` +
         `meta.balance=${meta?.balance} meta.fee=${meta?.fee}`;
     }
+    // Reference the balance this branch just computed, not b.balance_due — they
+    // differ precisely in the shortfall cases, which are the ones that must not
+    // promote. deposit_paid is deliberately left alone: there was no deposit,
+    // and claiming one was paid would be a second untruth.
+    if (result.balance_due === 0 && PRE_PAYMENT.includes(b.status)) {
+      result.status = 'confirmed';
+    }
     return result;
   }
   const totalCents   = Math.round((parseFloat(b.total_price)  || 0) * 100);
@@ -89,6 +116,9 @@ function paymentEffect(booking, amountPaid, kind, meta) {
     payment_method: 'stripe',
     status: 'confirmed',
     balance_due: Math.max(0, totalCents + mileageCents - paidCents) / 100,
+    // A deposit carries no service fee. Present so the UPDATE can accumulate
+    // effect.fee unconditionally.
+    fee: 0,
     logAction: 'Deposit paid via Stripe',
   };
 }
@@ -158,6 +188,15 @@ exports.handler = async (event) => {
       // pointer used to refund the deposit.
       await c.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_balance_session_id VARCHAR(255)");
       await c.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_balance_payment_intent_id VARCHAR(255)");
+      // The service fee is charged and shown to the client but was stored
+      // nowhere queryable, so Stripe payouts could not be reconciled against
+      // the books — they differ by exactly the fee on every balance payment.
+      // bookings.js also adds it, but the UPDATE below writes it and a webhook
+      // can fire before any bookings request has ever run.
+      //
+      // A record, never an input: it must not appear in any balance, total or
+      // derivability calculation.
+      await c.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS service_fee_collected NUMERIC(10,2) DEFAULT 0");
 
       // ── Checkout completed (deposit paid) ──────
       if (ev.type === "checkout.session.completed") {
@@ -241,12 +280,13 @@ exports.handler = async (event) => {
                  stripe_payment_intent_id = CASE WHEN $2::boolean THEN $7 ELSE stripe_payment_intent_id END,
                  stripe_balance_session_id = CASE WHEN $2::boolean THEN stripe_balance_session_id ELSE $6 END,
                  stripe_balance_payment_intent_id = CASE WHEN $2::boolean THEN stripe_balance_payment_intent_id ELSE $7 END,
-                 balance_due=$8
-             WHERE id=$9
+                 balance_due=$8,
+                 service_fee_collected = COALESCE(service_fee_collected, 0) + $9
+             WHERE id=$10
              RETURNING *`,
             [effect.deposit_paid, isDeposit, effect.deposit_amount,
              effect.payment_method, effect.status, sessionId, paymentIntentId,
-             balanceDue, booking.id]
+             balanceDue, effect.fee, booking.id]
           );
           const b = updated.rows[0];
           await logChange(c, b.id, effect.logAction,
@@ -273,7 +313,7 @@ exports.handler = async (event) => {
             // received — a fabricated split is worse than none.
             const breakdownRows = effect.itemised
               ? `<tr><td style="padding:4px 0;color:#A78BCA">Balance</td><td style="padding:4px 0;text-align:right">$${effect.balance.toFixed(2)}</td></tr>
-                 <tr><td style="padding:4px 0;color:#A78BCA">Service fee (5%)</td><td style="padding:4px 0;text-align:right">$${effect.fee.toFixed(2)}</td></tr>
+                 <tr><td style="padding:4px 0;color:#A78BCA">Service fee (${Math.round(SERVICE_FEE_RATE * 100)}%)</td><td style="padding:4px 0;text-align:right">$${effect.fee.toFixed(2)}</td></tr>
                  <tr><td style="padding:8px 0 0;border-top:1px solid #3D2460;font-weight:900">Total paid</td><td style="padding:8px 0 0;border-top:1px solid #3D2460;text-align:right;color:#10B981;font-size:18px;font-weight:900">$${amountPaid.toFixed(2)}</td></tr>`
               : `<tr><td style="padding:4px 0;font-weight:900">Amount received</td><td style="padding:4px 0;text-align:right;color:#10B981;font-size:18px;font-weight:900">$${amountPaid.toFixed(2)}</td></tr>`;
             try {
@@ -292,29 +332,29 @@ exports.handler = async (event) => {
               await logEmail(c, b.id, null, 'Balance Paid', subject, b.client_email, 'client', 'failed', emailErr.message);
             }
           } else {
-          // Client confirmation email
-          try {
-            const res = await sendEmail(
-              b.client_email,
-              "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events",
-              wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${esc(b.client_name)}</strong>! 🎉</p>
-                <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">We got your deposit and your event is officially <strong style="color:#10B981">CONFIRMED!</strong></p>
-                <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
-                  <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</span><br><span style="font-weight:600">${esc(b.service_name)}</span></div>
-                  <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date &amp; Time</span><br><span style="font-weight:600">${dateStr}${timeStr ? " at " + esc(timeStr) : ""}</span></div>
-                  <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Location</span><br><span style="font-weight:600">${esc(locStr)}</span></div>
-                  <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #3D246044">
-                    <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Deposit Paid ✓</span><br><span style="color:#10B981;font-size:20px;font-weight:900">$${amountPaid.toFixed(2)}</span></div>
-                    <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Balance Due Day-Of</span><br><span style="color:#FFD600;font-size:20px;font-weight:900">$${balanceDue.toFixed(2)}</span></div>
+            // Client confirmation email
+            try {
+              const res = await sendEmail(
+                b.client_email,
+                "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events",
+                wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${esc(b.client_name)}</strong>! 🎉</p>
+                  <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">We got your deposit and your event is officially <strong style="color:#10B981">CONFIRMED!</strong></p>
+                  <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
+                    <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</span><br><span style="font-weight:600">${esc(b.service_name)}</span></div>
+                    <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date &amp; Time</span><br><span style="font-weight:600">${dateStr}${timeStr ? " at " + esc(timeStr) : ""}</span></div>
+                    <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Location</span><br><span style="font-weight:600">${esc(locStr)}</span></div>
+                    <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #3D246044">
+                      <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Deposit Paid ✓</span><br><span style="color:#10B981;font-size:20px;font-weight:900">$${amountPaid.toFixed(2)}</span></div>
+                      <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Balance Due Day-Of</span><br><span style="color:#FFD600;font-size:20px;font-weight:900">$${balanceDue.toFixed(2)}</span></div>
+                    </div>
                   </div>
-                </div>
-                <p style="color:#A78BCA;font-size:13px;text-align:center">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`)
-            );
-            await logEmail(c, b.id, null, 'Deposit Paid', "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events", b.client_email, 'client', logStatus(res));
-          } catch(emailErr) {
-            console.error("Webhook: client email failed:", emailErr.message);
-            await logEmail(c, b.id, null, 'Deposit Paid', "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events", b.client_email, 'client', 'failed', emailErr.message);
-          }
+                  <p style="color:#A78BCA;font-size:13px;text-align:center">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`)
+              );
+              await logEmail(c, b.id, null, 'Deposit Paid', "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events", b.client_email, 'client', logStatus(res));
+            } catch(emailErr) {
+              console.error("Webhook: client email failed:", emailErr.message);
+              await logEmail(c, b.id, null, 'Deposit Paid', "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events", b.client_email, 'client', 'failed', emailErr.message);
+            }
           }
 
           // Admin notification email
@@ -345,7 +385,10 @@ exports.handler = async (event) => {
             await logEmail(c, b.id, null, adminTrigger, adminSubject, NOTIFY, 'admin', 'failed', emailErr.message);
           }
 
-          console.log(`Webhook: confirmed booking ${b.reference} (id:${b.id}) — deposit $${amountPaid} balance_due $${balanceDue}`);
+          // Names what it actually moved. This log is the first thing read when
+          // a payment goes missing, and calling every payment a deposit is how
+          // a balance bug hides in it.
+          console.log(`Webhook: confirmed booking ${b.reference} (id:${b.id}) — ${effect.kind} $${amountPaid} balance_due $${balanceDue}`);
 
         } else {
           console.warn(`Webhook: no booking matched — dbId:${bookingDbId} ref:${bookingRef} email:${customerEmail}`);

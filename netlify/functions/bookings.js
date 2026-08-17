@@ -122,6 +122,10 @@ async function ensureTable(client) {
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_amount NUMERIC(10,2) DEFAULT 100",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS balance_due NUMERIC(10,2) DEFAULT 0",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_paid BOOLEAN DEFAULT FALSE",
+    // A record of the service fee Stripe collected on balance payments, so
+    // payouts reconcile against the books. Never an input: it is deliberately
+    // absent from balance_due, total_price and balanceIsDerivable()'s formula.
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS service_fee_collected NUMERIC(10,2) DEFAULT 0",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_paid_at TIMESTAMPTZ",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_payment_intent_id VARCHAR(255)",

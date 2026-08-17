@@ -1512,6 +1512,19 @@ function balanceLinkAmounts(b) {
   return { balance, fee, total: cents(balance + fee) };
 }
 
+// A balance link may only be sent once the deposit is settled. Sending both at
+// once lets a client pay $520 and then be shown $400 owing: the balance payment
+// zeroes balance_due, and the still-live deposit link's webhook recomputes it
+// from total - deposit. The `<= 0` arm is the deliberate no-deposit booking
+// (school, library), which has nothing to settle first.
+//
+// create-stripe-link.js carries the same guard. This one only hides the
+// button; that one is what actually refuses to bill.
+function balanceLinkEligible(b) {
+  if (balanceLinkAmounts(b).balance <= 0) return false;
+  return b && (b.deposit_paid === true || depositLinkAmount(b) <= 0);
+}
+
 // ══ END PURE HELPERS ══
 
 // Default matches the old "Newest Inquiry" dropdown default, so the view the
@@ -1903,7 +1916,7 @@ function openBooking(id) {
       <div class="stripe-result" id="stripe-msg-${b.id}"></div>
     </div>`}
 
-    ${isNew || balanceLinkAmounts(b).balance <= 0 ? '' : `
+    ${isNew || !balanceLinkEligible(b) ? '' : `
     <!-- Balance link -->
     <div class="stripe-block">
       <div style="display:flex;align-items:center;justify-content:space-between">

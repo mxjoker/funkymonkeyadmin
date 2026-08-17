@@ -69,6 +69,33 @@ test('a zero fee produces no fee line even in balance mode', () => {
   assert.strictEqual(p.get('line_items[1][price_data][unit_amount]'), null);
 });
 
+const fs = require('node:fs');
+const path = require('node:path');
+const read = (f) => fs.readFileSync(path.join(__dirname, '../netlify/functions', f), 'utf8');
+
+// Change SERVICE_FEE_RATE and a hardcoded literal sends the client an email
+// saying 5% beside a Stripe page charging something else — on the one
+// document they would use to check the arithmetic. _items.js is the single
+// definition of the rate; nothing may re-derive or restate it.
+test('no client-facing copy hardcodes the fee percentage', () => {
+  for (const f of ['create-stripe-link.js', 'stripe-webhook.js']) {
+    assert.ok(!/Service fee \(\d+%\)/.test(read(f)),
+      `${f} hardcodes the fee percentage instead of deriving it from SERVICE_FEE_RATE`);
+  }
+});
+
+// The button is not the only possible caller of this endpoint, and this
+// codebase's documented recurring failure mode is trusting that it is. The
+// server must refuse a balance link while the deposit is outstanding, or a
+// client can pay $520 and be shown $400 owing.
+test('the balance branch refuses to bill while a deposit is unpaid', () => {
+  const src = read('create-stripe-link.js');
+  assert.match(src, /bookingRow\.deposit_paid !== true && Number\(bookingRow\.deposit_amount\) > 0/,
+    'the server-side unpaid-deposit guard is gone');
+  assert.match(src, /const COLS = '[^']*\bdeposit_paid\b/,
+    'deposit_paid is not selected, so the guard can never see it');
+});
+
 test('both kinds carry the ids the webhook matches on', () => {
   for (const kind of ['deposit', 'balance']) {
     const p = buildSessionParams({ ...BASE, kind, amount: 100, fee: kind === 'balance' ? 5 : 0 });

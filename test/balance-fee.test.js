@@ -165,6 +165,99 @@ test('metadata that does not add up to what was charged is treated as untrustwor
   assert.strictEqual(e.balance_due, 0);
 });
 
+// accounting-export.js counts revenue only for status IN
+// ('confirmed','completed') and staff-assignments.js staffs only
+// accepted/confirmed. A $0-deposit booking that pays its whole amount by
+// balance link used to stay at 'quoted' with deposit_paid=false — the client
+// told they were paid up for a booking the books never saw and nobody was
+// scheduled to work.
+test('a pre-payment booking that pays in full by balance link is promoted to confirmed', () => {
+  const row = { total_price: 300, mileage_cost: 25, deposit_amount: 0, balance_due: 325,
+                deposit_paid: false, payment_method: '', status: 'quoted' };
+  const e = paymentEffect(row, 341.25, 'balance', { balance: 325, fee: 16.25 });
+  assert.strictEqual(e.balance_due, 0);
+  assert.strictEqual(e.status, 'confirmed', 'a fully paid booking stayed invisible to revenue and staffing');
+  // There was no deposit. Claiming one was paid would be a second untruth.
+  assert.strictEqual(e.deposit_paid, false);
+  assert.strictEqual(e.deposit_amount, 0);
+});
+
+test('every pre-payment status is promoted, and only those', () => {
+  for (const status of ['draft', 'review', 'quoted', 'accepted']) {
+    const row = { deposit_amount: 0, balance_due: 325, deposit_paid: false, status };
+    assert.strictEqual(paymentEffect(row, 341.25, 'balance', { balance: 325, fee: 16.25 }).status,
+      'confirmed', `status=${status} was not promoted`);
+  }
+});
+
+// Promotion only ever moves forward.
+test('a completed booking is never dragged backwards to confirmed', () => {
+  const e = paymentEffect(PAID_DEPOSIT, 420, 'balance', { balance: 400, fee: 20 });
+  assert.strictEqual(e.balance_due, 0);
+  assert.strictEqual(e.status, 'completed');
+});
+
+test('an unrecognised status is left exactly as it was', () => {
+  const row = { ...PAID_DEPOSIT, status: 'cancelled' };
+  assert.strictEqual(paymentEffect(row, 420, 'balance', { balance: 400, fee: 20 }).status, 'cancelled');
+});
+
+// The shortfall cases are precisely where b.balance_due and the computed
+// balance disagree, so the promotion must read the computed one.
+test('a shortfall left owing does not promote the status', () => {
+  const row = { total_price: 600, mileage_cost: 0, deposit_amount: 0, balance_due: 500,
+                deposit_paid: false, payment_method: '', status: 'quoted' };
+  const e = paymentEffect(row, 420, 'balance', { balance: 400, fee: 20 });
+  assert.strictEqual(e.balance_due, 100);
+  assert.strictEqual(e.status, 'quoted', 'a booking still owing $100 was promoted to confirmed');
+});
+
+test('an unitemised balance payment that clears the balance still promotes', () => {
+  const row = { deposit_amount: 0, balance_due: 325, deposit_paid: false, status: 'accepted' };
+  const e = paymentEffect(row, 325, 'balance', null);
+  assert.strictEqual(e.itemised, false);
+  assert.strictEqual(e.balance_due, 0);
+  assert.strictEqual(e.status, 'confirmed');
+});
+
+test('a deposit payment still confirms, promotion or not', () => {
+  const row = { total_price: 500, mileage_cost: 0, deposit_amount: 0, balance_due: 500,
+                deposit_paid: false, payment_method: '', status: 'quoted' };
+  assert.strictEqual(paymentEffect(row, 100, 'deposit').status, 'confirmed');
+});
+
+// The fee is charged and shown to the client but was stored in no queryable
+// column, so Stripe payouts could not reconcile against the books by exactly
+// the fee on every balance payment. effect.fee is what the webhook's UPDATE
+// accumulates into service_fee_collected — it must always be a number.
+test('a deposit payment contributes no service fee', () => {
+  const row = { total_price: 500, mileage_cost: 0, deposit_amount: 0, balance_due: 500,
+                deposit_paid: false, payment_method: '', status: 'accepted' };
+  assert.strictEqual(paymentEffect(row, 100, 'deposit').fee, 0);
+});
+
+test('an itemised balance payment contributes exactly the fee Stripe collected', () => {
+  assert.strictEqual(paymentEffect(PAID_DEPOSIT, 420, 'balance', { balance: 400, fee: 20 }).fee, 20);
+});
+
+// In the fallback the split is genuinely unknown, so recording a guessed fee
+// would be worse than recording none.
+test('an unitemised balance payment contributes 0, never a guess', () => {
+  assert.strictEqual(paymentEffect(PAID_DEPOSIT, 420, 'balance', null).fee, 0);
+  assert.strictEqual(paymentEffect(PAID_DEPOSIT, 420, 'balance', { balance: 400, fee: 5 }).fee, 0);
+});
+
+// The fee is a record, never an input. It must not leak into any column the
+// balance is derived from.
+test('recording the fee never moves the money columns', () => {
+  const e = paymentEffect(PAID_DEPOSIT, 420, 'balance', { balance: 400, fee: 20 });
+  assert.strictEqual(e.balance_due, 0);
+  assert.strictEqual(e.deposit_amount, 100);
+  assert.strictEqual(e.balance_due, 0);
+  assert.ok(!('total_price' in e), 'paymentEffect started writing total_price');
+  assert.ok(!('mileage_cost' in e), 'paymentEffect started writing mileage_cost');
+});
+
 const { balanceReceiptCopy } = require('../netlify/functions/stripe-webhook.js');
 
 // A quote raised after the link was minted, or metadata Stripe couldn't
