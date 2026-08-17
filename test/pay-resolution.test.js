@@ -30,6 +30,15 @@ test('an unrecognised stored value falls through rather than inventing a type', 
   assert.strictEqual(resolvePayType('X', {}, {}), 'flat', 'no staff pay_type should default to flat, as payroll.js:388 does');
 });
 
+// A future edit that swaps the PAY_TYPES.includes allowlist for a truthiness or
+// hasOwnProperty check would let a role name reach into Object.prototype and pass
+// this suite silently. This codebase has been bitten by exactly that shape before.
+test('prototype-chain role names fall through to the staff setting, not the prototype', () => {
+  assert.strictEqual(resolvePayType('__proto__', {}, STAFF), 'hourly');
+  assert.strictEqual(resolvePayType('constructor', {}, STAFF), 'hourly');
+  assert.strictEqual(resolvePayType('toString', {}, STAFF), 'hourly');
+});
+
 test('hourly pays hours times the person rate; flat pays the person flat rate', () => {
   assert.deepStrictEqual(resolveAmount({ payType: 'hourly', hours: 6, staff: STAFF }),
     { amount: 72, basis: '6h × $12.00/hr' });
@@ -39,6 +48,23 @@ test('hourly pays hours times the person rate; flat pays the person flat rate', 
 
 test('money is rounded to cents', () => {
   assert.strictEqual(resolveAmount({ payType: 'hourly', hours: 5.33, staff: { hourly_rate: 12.5 } }).amount, 66.63);
+});
+
+// 3.1 * 12.35 is really 38.285 (round half up -> 38.29), but the naive
+// Math.round(n * 100) / 100 stores the product as 38.284999999999996 and rounds
+// it down to 38.28 -- silent underpayment on an entirely ordinary rate and span.
+test('a realistic hourly product does not lose a cent to floating point', () => {
+  assert.strictEqual(resolveAmount({ payType: 'hourly', hours: 3.1, staff: { hourly_rate: 12.35 } }).amount, 38.29);
+});
+
+// Hand-verified: 1.14h * $8.25 = 9.405 exactly, which rounds up to 9.41. The naive
+// rounder gives 9.40 here too (Math.round(1.14 * 8.25 * 100) / 100 === 9.4) -- this
+// is not a one-off; ordinary rate/span pairs land on a floating .xx5 boundary often
+// enough to be a live payroll risk, not an edge case.
+test('a spread of realistic rate/span pairs round correctly, including a second naive-rounder failure', () => {
+  assert.strictEqual(resolveAmount({ payType: 'hourly', hours: 1.14, staff: { hourly_rate: 8.25 } }).amount, 9.41);
+  assert.strictEqual(resolveAmount({ payType: 'hourly', hours: 1.1, staff: { hourly_rate: 8.55 } }).amount, 9.41);
+  assert.strictEqual(resolveAmount({ payType: 'hourly', hours: 6.5, staff: { hourly_rate: 14.15 } }).amount, 91.98);
 });
 
 test('an override wins outright and says so', () => {

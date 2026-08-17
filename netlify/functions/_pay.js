@@ -11,7 +11,14 @@
 
 const PAY_TYPES = ['hourly', 'flat'];
 
-const round2 = (n) => Math.round(n * 100) / 100;
+// A naive Math.round(n * 100) / 100 mis-rounds real inputs: 3.1 * 12.35 is really
+// 38.285 (round half up -> 38.29), but JS stores the product as 38.284999999999996,
+// so the naive rounder lands on 38.28 instead -- silent underpayment on an entirely
+// ordinary rate and span, not an edge case (1.14h * $8.25 = 9.405 hits the same wall).
+// Nudging by an epsilon far bigger than that floating noise (~1e-13 here) but far
+// smaller than half a cent (0.005) pushes a genuine .xx5 boundary back over the line
+// without moving anything that wasn't already sitting on one.
+const round2 = (n) => Math.round((n + (n >= 0 ? 1 : -1) * 1e-9) * 100) / 100;
 
 // A role with no row, or a stored value we do not recognise, falls through to the
 // staff member's own setting — which is what every assignment did before role_pay
@@ -28,6 +35,11 @@ function resolvePayType(roleName, rolePayByRole, staff) {
 // null/undefined/'' rather than falsiness — treating 0 as absent would silently
 // pay the standard rate on a gig someone decided was free.
 function resolveAmount({ payType, hours, staff, override }) {
+  // ponytail: any finite override is accepted here, negative included -- 0 is a
+  // deliberate legitimate override (see above), so a blanket "reject non-positive"
+  // guard would break that case too, and this module doesn't have enough context to
+  // tell a correction from a mistake. The sign is validated at the API that stores
+  // the override, not here; do not assume it's covered by this module.
   if (override !== null && override !== undefined && override !== '' && isFinite(Number(override))) {
     return { amount: round2(Number(override)), basis: 'per-gig override' };
   }
