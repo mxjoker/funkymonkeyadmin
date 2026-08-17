@@ -31,10 +31,12 @@ function workedHours(log) {
   if (inMs === null)  return { usable: false, hours: null, reason: 'no clock-in recorded' };
   if (outMs === null) return { usable: false, hours: null, reason: 'no clock-out recorded' };
   if (outMs <= inMs)  return { usable: false, hours: null, reason: 'clock-out is before clock-in' };
-  const hours = round2((outMs - inMs) / 3600000);
-  if (hours > MAX_SHIFT_HOURS) {
+  const spanMs = outMs - inMs;
+  if (spanMs > MAX_SHIFT_HOURS * 3600000) {
+    const hours = round2(spanMs / 3600000);
     return { usable: false, hours: null, reason: `${hours}h exceeds the ${MAX_SHIFT_HOURS}h maximum — likely a missed clock-out` };
   }
+  const hours = round2(spanMs / 3600000);
   return { usable: true, hours, reason: null };
 }
 

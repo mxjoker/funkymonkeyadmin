@@ -87,3 +87,28 @@ test('a backwards segment reads null rather than negative minutes', () => {
   const s = clockSegments({ clocked_in_at: at(10), on_my_way_at: at(9) });
   assert.strictEqual(s.loading, null);
 });
+
+// The cap is enforced against raw milliseconds, not after rounding. A span that
+// rounds to 16.00 but is slightly over must still be rejected, or rounding can
+// make an over-cap span usable.
+test('exactly MAX_SHIFT_HOURS in milliseconds is usable', () => {
+  const inMs = new Date(at(0)).getTime();
+  const outMs = inMs + (MAX_SHIFT_HOURS * 3600000);
+  const r = workedHours({
+    clocked_in_at: new Date(inMs).toISOString(),
+    clocked_out_at: new Date(outMs).toISOString(),
+  });
+  assert.strictEqual(r.usable, true);
+  assert.strictEqual(r.hours, MAX_SHIFT_HOURS);
+});
+
+test('one second over MAX_SHIFT_HOURS is not usable, even if it rounds to 16.00', () => {
+  const inMs = new Date(at(0)).getTime();
+  const outMs = inMs + (MAX_SHIFT_HOURS * 3600000) + 1000;
+  const r = workedHours({
+    clocked_in_at: new Date(inMs).toISOString(),
+    clocked_out_at: new Date(outMs).toISOString(),
+  });
+  assert.strictEqual(r.usable, false);
+  assert.match(r.reason, new RegExp(String(MAX_SHIFT_HOURS)));
+});
