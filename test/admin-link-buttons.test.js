@@ -12,7 +12,7 @@ function loadHelpers() {
   assert.ok(a !== -1 && b !== -1, 'pure-helper sentinels missing from admin.html');
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed };', ctx);
+  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS };', ctx);
   return ctx.out;
 }
 
@@ -166,23 +166,48 @@ test('a filled-in value always saves, fetched or not', () => {
 // so all four render enabled, and one tap on "Done" fires the server's
 // walk-back clause and destroys the clock stamps payroll needs. A stale label
 // map renders the raw string 'clocked_out' in the badge instead of a label.
-// This asserts no four-entry copy of either shape remains, and any checklist
-// array or label map admin.html does contain includes both new stages —
-// so the next person who adds a stage cannot add it to only one copy.
-test('admin.html has no stale four-stage checklist array or label map', () => {
-  const arrays = HTML.match(/\[\s*'upcoming'\s*,[^\]]*\]/g) || [];
-  assert.ok(arrays.length > 0, 'expected at least one checklist array in admin.html');
-  for (const m of arrays) {
-    assert.ok(!/^\[\s*'upcoming'\s*,\s*'on_my_way'\s*,\s*'arrived'\s*,\s*'completed'\s*\]$/.test(m),
-      `stale four-stage checklist array still present: ${m}`);
-    assert.ok(m.includes("'clocked_in'"), `checklist array missing clocked_in: ${m}`);
-    assert.ok(m.includes("'clocked_out'"), `checklist array missing clocked_out: ${m}`);
+//
+// Comparing against string literals (as an earlier version of this test did)
+// only pins today's six stages — a seventh stage added to the server's
+// CHECKLIST_STATUSES tomorrow and forgotten here would still pass. Compare
+// against the server's actual exported array instead, so admin.html's copy
+// is pinned to whatever the server currently says, not to a snapshot of it.
+// Do NOT loosen this back to a literal comparison if it starts failing —
+// failing is the point; go update the html file that drifted.
+const { CHECKLIST_STATUSES: SERVER_CHECKLIST_STATUSES } = require('../netlify/functions/staff-assignments.js');
+
+test('admin.html has one checklist array/label map, matching the server exactly', () => {
+  const helpers = loadHelpers();
+  // The vm context is a separate realm — its Array/Object are not === the
+  // outer realm's, so deepStrictEqual sees even identical-looking arrays as
+  // "not reference-equal" and fails. Round-trip through JSON, same as
+  // balanceLinkAmounts() above, to compare values instead of realms.
+  const CHECKLIST_STATUSES = JSON.parse(JSON.stringify(helpers.CHECKLIST_STATUSES));
+  const CHECKLIST_LABELS = JSON.parse(JSON.stringify(helpers.CHECKLIST_LABELS));
+  assert.deepStrictEqual(CHECKLIST_STATUSES, SERVER_CHECKLIST_STATUSES,
+    'admin.html CHECKLIST_STATUSES has drifted from staff-assignments.js CHECKLIST_STATUSES');
+  for (const stage of SERVER_CHECKLIST_STATUSES) {
+    assert.ok(CHECKLIST_LABELS[stage], `admin.html CHECKLIST_LABELS is missing a label for '${stage}'`);
   }
 
+  // No second, un-shared copy left anywhere else in the file.
+  const arrays = HTML.match(/\[\s*'upcoming'\s*,[^\]]*\]/g) || [];
+  assert.strictEqual(arrays.length, 1,
+    `expected exactly one checklist array literal in admin.html, found ${arrays.length}: ${arrays.join(' | ')}`);
   const labelMaps = HTML.match(/\{\s*upcoming:\s*'[^']*'[\s\S]*?\}/g) || [];
-  assert.ok(labelMaps.length > 0, 'expected at least one checklist label map in admin.html');
-  for (const m of labelMaps) {
-    assert.ok(m.includes('clocked_in:'), `checklist label map missing clocked_in: ${m}`);
-    assert.ok(m.includes('clocked_out:'), `checklist label map missing clocked_out: ${m}`);
-  }
+  assert.strictEqual(labelMaps.length, 1,
+    `expected exactly one checklist label map in admin.html, found ${labelMaps.length}: ${labelMaps.join(' | ')}`);
+});
+
+// staff-portal.html is an independent static page (no build step, cannot
+// require admin.html or the server module) with its own third copy of the
+// same list. It has no PURE HELPERS sentinel to lift code out of, so pull the
+// array literal out of the file text directly and compare it the same way.
+test('staff-portal.html checklist array matches the server exactly', () => {
+  const portalHtml = fs.readFileSync(path.join(__dirname, '../staff-portal.html'), 'utf8');
+  const m = /const checklistStatuses\s*=\s*(\[[^\]]*\])/.exec(portalHtml);
+  assert.ok(m, 'could not find checklistStatuses array in staff-portal.html');
+  const stages = JSON.parse(m[1].replace(/'/g, '"'));
+  assert.deepStrictEqual(stages, SERVER_CHECKLIST_STATUSES,
+    'staff-portal.html checklistStatuses has drifted from staff-assignments.js CHECKLIST_STATUSES');
 });
