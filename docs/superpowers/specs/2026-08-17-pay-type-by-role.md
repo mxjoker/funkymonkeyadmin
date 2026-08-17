@@ -24,26 +24,36 @@ So there is no rates matrix. One field moves.
 
 ## Where it goes
 
-`staff_slots` already exists and is already exactly one row per (service, role):
+**Revised 2026-08-17 after Joe's answer.** He wants the pay type on the **role
+itself**, not on the (service, role) pair — *"having the role being assigned either
+flat rate or hourly would handle this... I can always make a new role if I need to
+to differentiate."* That is fewer rows and one fact per role: Foam Crew is hourly
+everywhere, Professor Buckets is flat everywhere.
+
+**The obstacle: roles are not stored anywhere.** `skillTags()`
+(`admin.html:911`) derives the list at runtime from the hardcoded `SKILL_PRESETS`
+array, unioned with every tag found on a staff record or a service slot.
+`addSkillTag` only pushes onto that in-memory array — the comment above it records
+that custom tags used to vanish on reload, and that the union is the workaround.
+`tag_required` and `tag_filled` are bare `VARCHAR` strings. There is no role row.
+
+**Do not build a role registry to answer a pay question.** One small table keyed by
+role name, carrying only the pay decision, leaves tag handling exactly as it is:
 
 ```sql
-staff_slots (id, service_id, tag_required, slot_count, exclusive, sort_order)
+CREATE TABLE IF NOT EXISTS role_pay (
+  role_name  VARCHAR(100) PRIMARY KEY,
+  pay_type   VARCHAR(20) NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+)
 ```
 
-Add one nullable column:
-
-```sql
-ALTER TABLE staff_slots ADD COLUMN IF NOT EXISTS pay_type VARCHAR(20)
-```
-
-`NULL` means "no opinion — use the staff member's own setting", which is today's
-behaviour. Nothing changes until a slot is given a value.
+A role with no row has no opinion, which is today's behaviour.
 
 **Resolution order in `payroll.js:388`**, which currently reads `a.pay_type`
 straight off the staff record:
 
-1. `staff_slots.pay_type` for this booking's `service_id` and this assignment's
-   `tag_filled`, when set
+1. `role_pay.pay_type` for this assignment's `tag_filled`, when a row exists
 2. otherwise `staff.pay_type`, exactly as now
 
 The rate is unchanged in both cases: `staff.hourly_rate` for hourly,
@@ -103,21 +113,38 @@ real list first.
   row per (service, role) with a tag select and a count; pay type is one more
   select in that row.
 
-## Open questions
+## Answered 2026-08-17
 
-1. **What should a slot's pay type do when the person has no matching rate?** An
-   hourly slot filled by someone whose `hourly_rate` is 0 currently produces a $0
-   line item and a warning. Should it fall back to their flat rate instead, or
-   stay a loud $0?
-2. **Is "main performer vs not" a distinct role, or a distinct service?** Joe's
-   phrasing — "dependent on the event if they are the main performer or not" —
-   suggests a booking where one person is flat and another hourly on the *same*
-   service. That works if the two are different `tag_required` values on the
-   slot; it does not if both fill the same role. Worth confirming against a real
-   booking before building.
-3. **Should the override live on the assignment or on the payroll line?** On the
-   assignment it survives re-runs and reads as "this gig pays X". On the payroll
-   line it is a per-run correction. The assignment is proposed here.
+1. **Main performer vs not** is a **role** distinction, not a service one. Joe
+   will create a new role where he needs to differentiate. This is what moved
+   `pay_type` from `staff_slots` to `role_pay`.
+2. **No hourly rate on an hourly role must be an error, caught at assignment.**
+   Joe believed this was already checked. It is not: `staff-assignments.js`
+   contains no reference to `pay_type`, `hourly_rate` or `flat_rate`, so nothing
+   validates a rate when someone is assigned. The only existing signal is the
+   `$0` line-item warning at `payroll.js:396`, which fires after the week is over.
+   **New requirement:** the assign action refuses — with a message naming the
+   person and the missing rate — when the resolved pay type is hourly and the
+   staff member's `hourly_rate` is 0 or null. Same rule for a flat role with no
+   `flat_rate`. Joe can then fix the rate and assign again.
+3. **The override lives on the assignment**, not the payroll line — it survives
+   re-runs and reads as "this gig pays X". Taken as the default; not contested.
+
+## Still open
+
+4. **Stackable roles on one booking can double-pay hours.** Support roles stack on
+   top of a performer (`STACKABLE_TAGS`, `admin.html:901`), and
+   `staff_assignments` is unique on `(booking_id, staff_id, tag_filled)` — so one
+   person filling two roles on one gig is two assignment rows, and `payroll.js`
+   iterates assignments. The flat branch is protected: `amount = existingPayment
+   .length > 0 ? null : flat_rate` (`payroll.js:393`) pays the second row nothing.
+   **The hourly branch has no such guard** (`payroll.js:391`) — it computes
+   `hours × rate` on every row, so today someone hourly on two roles at one gig is
+   paid the full span twice. Per-role pay types make that combination far more
+   likely, because one role can now be hourly while the other is flat. This is a
+   pre-existing defect that this change would promote from rare to routine, and it
+   should be fixed in the same pass: hours for one person on one booking must be
+   paid once.
 
 ## Files this touches
 
