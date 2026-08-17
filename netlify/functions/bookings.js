@@ -126,6 +126,7 @@ async function ensureTable(client) {
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(255)",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_payment_intent_id VARCHAR(255)",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_payment_link TEXT DEFAULT ''",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_balance_link TEXT DEFAULT ''",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_date DATE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_time VARCHAR(10)",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_zip VARCHAR(10)",
