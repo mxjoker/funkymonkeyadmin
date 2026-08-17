@@ -11,6 +11,12 @@
 
 const PAY_TYPES = ['hourly', 'flat'];
 
+// A stored pay type must be one of exactly two strings. Written as an array
+// membership test, not an object lookup: a bare lookup on an object literal
+// resolves prototype keys like 'constructor' as truthy, which is how a stage
+// guard on this codebase was bypassed in August 2026.
+const isValidPayType = (v) => typeof v === 'string' && PAY_TYPES.includes(v);
+
 // A naive Math.round(n * 100) / 100 mis-rounds real inputs: 3.1 * 12.35 is really
 // 38.285 (round half up -> 38.29), but JS stores the product as 38.284999999999996,
 // so the naive rounder lands on 38.28 instead -- silent underpayment on an entirely
@@ -75,4 +81,4 @@ function payabilityError(payType, staff) {
   return null;
 }
 
-module.exports = { PAY_TYPES, resolvePayType, resolveAmount, bestPayment, payabilityError };
+module.exports = { PAY_TYPES, isValidPayType, resolvePayType, resolveAmount, bestPayment, payabilityError };

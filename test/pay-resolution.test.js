@@ -122,3 +122,18 @@ test('a payable combination returns null', () => {
   assert.strictEqual(payabilityError('hourly', { hourly_rate: 12 }), null);
   assert.strictEqual(payabilityError('flat', { flat_rate: 80 }), null);
 });
+
+const { isValidPayType } = require('../netlify/functions/_pay.js');
+
+test('only the two real pay types are storable', () => {
+  assert.strictEqual(isValidPayType('hourly'), true);
+  assert.strictEqual(isValidPayType('flat'), true);
+  for (const bad of ['weekly', 'HOURLY', '', 'constructor', '__proto__', 42, {}, [], undefined]) {
+    assert.strictEqual(isValidPayType(bad), false, `${JSON.stringify(bad)} was accepted`);
+  }
+});
+
+// null is how a role's opinion is removed, and must be distinguishable from junk.
+test('null is a valid instruction to clear, and is not a pay type', () => {
+  assert.strictEqual(isValidPayType(null), false);
+});

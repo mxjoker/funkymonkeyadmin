@@ -4,6 +4,7 @@ const {
 } = require('./_auth');
 const { sendEmail, wrap, logChange, ensureBookingChanges } = require('./_email');
 const { sendSms, ensureSmsTables } = require('./_sms');
+const { isValidPayType } = require('./_pay');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -200,6 +201,21 @@ async function ensureTables(client) {
     )
   `);
 
+  // Pay type belongs to the role, not to the person and not to the service:
+  // Foam Crew is hourly wherever it appears, Story Doodles is flat. Roles are not
+  // stored anywhere else — skillTags() in admin.html derives the list at runtime
+  // from SKILL_PRESETS plus whatever tags are in use — so this table carries the
+  // pay decision only and deliberately does NOT try to become a role registry.
+  // A role with no row here has no opinion, and resolution falls through to the
+  // staff member's own pay_type, which is what every assignment did before this.
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS role_pay (
+      role_name  VARCHAR(100) PRIMARY KEY,
+      pay_type   VARCHAR(20) NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
   await client.query(`
     CREATE TABLE IF NOT EXISTS staff_assignments (
       id SERIAL PRIMARY KEY,
@@ -380,6 +396,13 @@ exports.handler = async (event) => {
             'SELECT * FROM staff_slots ORDER BY service_id, sort_order'
           );
           return json(200, { slots });
+        }
+
+        if (params.role_pay) {
+          const { rows } = await client.query('SELECT role_name, pay_type FROM role_pay');
+          const map = {};
+          for (const r of rows) map[r.role_name] = r.pay_type;
+          return json(200, { role_pay: map });
         }
 
         if (params.time_templates === 'true') {
@@ -727,6 +750,34 @@ exports.handler = async (event) => {
           }
 
           return json(200, { success: true, saved: realSlots.length });
+        }
+
+        // Admin-only: set or clear a role's pay type. This decides whether every
+        // future assignment to that role is paid by the hour or by the event, so
+        // it is not a staff-editable field.
+        if (action === 'save_role_pay') {
+          const adminAuth = await requireAuth(event, ['admin']);
+          if (!adminAuth) return unauthorized();
+
+          const roleName = String(body.role_name || '').trim();
+          if (!roleName || roleName.length > 100) return json(400, { error: 'role_name required' });
+
+          // null clears the row; anything else must be one of the two real types.
+          // An unrecognised value must be refused rather than stored, or
+          // resolvePayType would silently fall through and the UI would show a
+          // setting that does nothing.
+          if (body.pay_type === null || body.pay_type === '') {
+            await client.query('DELETE FROM role_pay WHERE role_name=$1', [roleName]);
+            return json(200, { role_name: roleName, pay_type: null });
+          }
+          if (!isValidPayType(body.pay_type)) return json(400, { error: 'pay_type must be "hourly" or "flat"' });
+
+          await client.query(
+            `INSERT INTO role_pay (role_name, pay_type, updated_at) VALUES ($1,$2,NOW())
+             ON CONFLICT (role_name) DO UPDATE SET pay_type=EXCLUDED.pay_type, updated_at=NOW()`,
+            [roleName, body.pay_type]
+          );
+          return json(200, { role_name: roleName, pay_type: body.pay_type });
         }
 
         if (action === 'notify_staff') {
