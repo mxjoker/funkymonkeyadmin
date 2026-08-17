@@ -159,3 +159,22 @@ test('a booking with no clock record at all pays exactly what it pays now', () =
     assert.strictEqual(r.source, 'estimated');
   }
 });
+
+// A normal week is 20-40 assignments, none of which have touched the clock
+// yet — warning on every one of them would bury the two warnings that matter
+// (a $0 line item, a genuine forgotten clock-out) under a wall of expected
+// noise. Only warn when there is clock data to be suspicious of.
+test('a clock-in with no clock-out still warns', () => {
+  const r = payableHours({ clocked_in_at: at2(9) }, 7.25);
+  assert.strictEqual(r.hours, 7.25);
+  assert.ok(r.warning, 'partial clock data should still warn');
+});
+
+test('no clock data at all does not warn, and still pays the estimate', () => {
+  for (const log of [null, undefined, {}]) {
+    const r = payableHours(log, 7.25);
+    assert.strictEqual(r.hours, 7.25);
+    assert.strictEqual(r.source, 'estimated');
+    assert.strictEqual(r.warning, null, 'a booking that never touched the clock should not warn');
+  }
+});

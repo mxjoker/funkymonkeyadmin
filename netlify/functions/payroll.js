@@ -42,6 +42,61 @@ async function ensureTables(client) {
       ADD COLUMN IF NOT EXISTS payroll_run_id INTEGER REFERENCES payroll_runs(id)
     `);
   } catch (_) {}
+
+  // The assignments query below reads gl.clocked_in_at / clocked_out_at /
+  // clock_adjusted_at, but those columns — and the unique index that stops the
+  // LEFT JOIN from doubling a line item — are otherwise only guaranteed by
+  // staff-assignments.js's own migrations. A payroll run invoked before that
+  // function has ever run (a fresh database, or just deploy order) would 500
+  // the whole Pay Review on "column gl.clocked_in_at does not exist". A reader
+  // that depends on another module's migrations is a deploy-order bug waiting
+  // to happen, so this function guarantees what it reads. Full column list
+  // mirrors staff-assignments.js:220-245 exactly (IF NOT EXISTS makes it a
+  // no-op there in the normal case) so a fresh database doesn't end up with
+  // two different ideas of what gig_logs looks like depending on which
+  // function happens to touch it first.
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS gig_logs (
+      id SERIAL PRIMARY KEY,
+      assignment_id INTEGER NOT NULL REFERENCES staff_assignments(id) ON DELETE CASCADE,
+      booking_id INTEGER NOT NULL,
+      staff_id INTEGER NOT NULL,
+      status VARCHAR(32) DEFAULT 'upcoming',
+      clocked_in_at TIMESTAMPTZ,
+      clocked_out_at TIMESTAMPTZ,
+      clock_adjusted_at TIMESTAMPTZ,
+      on_my_way_at TIMESTAMPTZ,
+      arrived_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ,
+      guest_count_actual INTEGER,
+      balance_collected BOOLEAN,
+      balance_amount NUMERIC(10,2),
+      gas_level VARCHAR(50),
+      foam_fluid_needed BOOLEAN,
+      empty_jugs_refilled BOOLEAN,
+      event_rating INTEGER CHECK(event_rating BETWEEN 1 AND 5),
+      notes TEXT DEFAULT '',
+      issues TEXT DEFAULT '',
+      survey_submitted_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  for (const sql of [
+    'ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS clocked_in_at TIMESTAMPTZ',
+    'ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS clocked_out_at TIMESTAMPTZ',
+    'ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS clock_adjusted_at TIMESTAMPTZ',
+  ]) {
+    try { await client.query(sql); } catch (_) {}
+  }
+  // Same guarantee staff-assignments.js:307 relies on for its own ON CONFLICT
+  // target — required here too, since it's what stops this file's LEFT JOIN
+  // gig_logs from multiplying a staff_assignments row into two payments.
+  try {
+    await client.query(
+      'CREATE UNIQUE INDEX IF NOT EXISTS gig_logs_assignment_id_key ON gig_logs (assignment_id)'
+    );
+  } catch (_) {}
 }
 
 module.exports.ensureTables = ensureTables;
@@ -324,7 +379,10 @@ exports.handler = async (event) => {
             const paid = payableHours(a, Math.round(rawHours * 100) / 100);
             const totalHours = paid.hours;
             if (paid.warning) {
-              warnings.push(`${a.preferred_name || a.staff_name} on booking ${a.reference}: ${paid.warning} — paid the estimate (${totalHours}h)`);
+              // totalHours may be the 5-hour floor rather than the estimate itself —
+              // say what was actually paid, not "the estimate", or a 3.2h estimate
+              // reports the wrong-but-believable "paid the estimate (5h)".
+              warnings.push(`${a.preferred_name || a.staff_name} on booking ${a.reference}: ${paid.warning} — paid ${totalHours}h`);
             }
 
             const payType = a.pay_type || 'flat';

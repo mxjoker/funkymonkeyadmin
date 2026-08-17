@@ -74,8 +74,15 @@ function payableHours(log, estimatedHours) {
     return { source: 'measured', hours: Math.max(MIN_PAID_HOURS, measured.hours),
              measured: measured.hours, warning: null };
   }
+  // Most assignments today have never touched the clock at all — that is the
+  // expected, silent case, and warning on it would bury the two warnings that
+  // matter (a $0 line item, a genuine forgotten clock-out) under one copy of
+  // "no clock-in recorded" per booking every week. Only warn when there is
+  // clock data to be suspicious of: a clock-in with no clock-out, a backwards
+  // pair, or an over-cap span.
+  const hasClockData = !!(log && (log.clocked_in_at || log.clocked_out_at));
   return { source: 'estimated', hours: Math.max(MIN_PAID_HOURS, est),
-           measured: null, warning: measured.reason };
+           measured: null, warning: hasClockData ? measured.reason : null };
 }
 
 module.exports = { MAX_SHIFT_HOURS, workedHours, clockSegments, payableHours, MIN_PAID_HOURS };
