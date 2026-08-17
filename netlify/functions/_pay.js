@@ -81,4 +81,28 @@ function payabilityError(payType, staff) {
   return null;
 }
 
-module.exports = { PAY_TYPES, isValidPayType, resolvePayType, resolveAmount, bestPayment, payabilityError };
+// Everything one staff member is owed for one booking, as one payment.
+//
+// `assignments` is every row that person holds on that booking — usually one, but
+// a performer who also drives is two. Each is resolved independently and the
+// highest wins (Joe, 2026-08-17: "whichever is higher pay, once not doubled").
+// An override on any of them wins outright; the per-gig override is the
+// designated escape hatch for cases the higher-of rule gets wrong.
+function paymentForBooking(assignments, rolePayByRole, staff, hours) {
+  const list = Array.isArray(assignments) ? assignments : [];
+  const candidates = list.map((a) => {
+    const payType = resolvePayType(a.tag_filled, rolePayByRole, staff);
+    const { amount, basis } = resolveAmount({ payType, hours, staff, override: a.pay_amount_override });
+    return { amount, basis, payType, tag: a.tag_filled };
+  });
+  const best = bestPayment(candidates) || { amount: 0, basis: 'no assignment', payType: 'flat', tag: null };
+  return {
+    amount: best.amount, basis: best.basis, payType: best.payType,
+    rolesFilled: list.map((a) => a.tag_filled).filter(Boolean),
+  };
+}
+
+module.exports = {
+  PAY_TYPES, isValidPayType, resolvePayType, resolveAmount, bestPayment, payabilityError,
+  paymentForBooking,
+};

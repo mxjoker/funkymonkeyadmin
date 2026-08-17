@@ -3,6 +3,7 @@ const {
   CORS, preflight, requireAuth, unauthorized, forbidden,
 } = require('./_auth');
 const { payableHours } = require('./_timeclock');
+const { paymentForBooking } = require('./_pay');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -53,6 +54,13 @@ async function ensureTables(client) {
   } catch (_) {}
   try {
     await client.query(`ALTER TABLE staff_payments ADD COLUMN IF NOT EXISTS measured_hours NUMERIC(5,2)`);
+  } catch (_) {}
+
+  // The escape hatch for a gig the higher-of rule prices wrong. Guaranteed here
+  // because this is the function that reads it — a reader depending on another
+  // module's migrations is a deploy-order bug, which this file already hit once.
+  try {
+    await client.query('ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS pay_amount_override NUMERIC(10,2)');
   } catch (_) {}
 
   // The assignments query below reads gl.clocked_in_at / clocked_out_at /
@@ -304,7 +312,7 @@ exports.handler = async (event) => {
           }
 
           const { rows: assignments } = await client.query(`
-            SELECT sa.id as assignment_id, sa.staff_id, sa.tag_filled,
+            SELECT sa.id as assignment_id, sa.staff_id, sa.tag_filled, sa.pay_amount_override,
                    sa.load_minutes, sa.unload_minutes, sa.pack_out_minutes,
                    sa.home_unload_minutes, sa.drive_minutes_each_way, sa.total_minutes,
                    b.id as booking_id, b.reference, b.service_name, b.service_id,
@@ -393,11 +401,26 @@ exports.handler = async (event) => {
             return Math.max(10, Math.round((miles / 35) * 60)) + 15;
           }
 
+          const { rows: rolePayRows } = await client.query('SELECT role_name, pay_type FROM role_pay');
+          const rolePayByRole = {};
+          for (const r of rolePayRows) rolePayByRole[r.role_name] = r.pay_type;
+
           const paymentsToCreate = [];
           const warnings = [];
 
-          let noClockCount = 0;
+          // One person on one booking is one payment, however many roles they
+          // filled. Iterating raw assignment rows paid an hourly staff member the
+          // whole span once per role.
+          const byStaffBooking = new Map();
           for (const a of assignments) {
+            const key = `${a.staff_id}:${a.booking_id}`;
+            if (!byStaffBooking.has(key)) byStaffBooking.set(key, []);
+            byStaffBooking.get(key).push(a);
+          }
+
+          let noClockCount = 0;
+          for (const group of byStaffBooking.values()) {
+            const a = group[0];
             const { rows: existingPayment } = await client.query(
               'SELECT id FROM staff_payments WHERE booking_id=$1 AND staff_id=$2',
               [a.booking_id, a.staff_id]
@@ -429,13 +452,16 @@ exports.handler = async (event) => {
               noClockCount++;
             }
 
-            const payType = a.pay_type || 'flat';
-            let amount;
-            if (payType === 'hourly') {
-              amount = Math.round(totalHours * (Number(a.hourly_rate) || 0) * 100) / 100;
-            } else {
-              amount = existingPayment.length > 0 ? null : (Number(a.flat_rate) || 0);
-            }
+            const bookingPaid = paymentForBooking(group, rolePayByRole, a, totalHours);
+            const payType = bookingPaid.payType;
+            // Preserves the old behaviour exactly: a repeat run never overwrites
+            // an existing flat-rate payment's amount with a freshly computed
+            // default (the UPDATE below deliberately doesn't touch `amount`).
+            // An override or an hourly result always carries its real figure —
+            // hourly can legitimately change on a re-run (updated clock data),
+            // and an override is a deliberate figure that should always show.
+            const amount = existingPayment.length > 0 && payType === 'flat' && bookingPaid.basis === 'flat rate'
+              ? null : bookingPaid.amount;
 
             // Warn about $0 line items (flat_rate=0 staff)
             const resolvedAmount = amount !== null ? amount : 0;
@@ -452,6 +478,8 @@ exports.handler = async (event) => {
               service_name: a.service_name,
               event_date: a.event_date,
               pay_type:   payType,
+              pay_basis:  bookingPaid.basis,
+              roles_filled: bookingPaid.rolesFilled,
               raw_hours:  Math.round(rawHours * 100) / 100,
               hours:      totalHours,
               hours_source: paid.source,
@@ -467,14 +495,16 @@ exports.handler = async (event) => {
             });
 
             if (!dryRun) {
-              await client.query(`
-                UPDATE staff_assignments SET
-                  drive_minutes_each_way = $1,
-                  total_minutes = $2,
-                  updated_at = NOW()
-                WHERE id = $3
-                  AND (drive_minutes_each_way IS NULL OR total_minutes IS NULL)
-              `, [drive, totalMins, a.assignment_id]);
+              for (const row of group) {
+                await client.query(`
+                  UPDATE staff_assignments SET
+                    drive_minutes_each_way = $1,
+                    total_minutes = $2,
+                    updated_at = NOW()
+                  WHERE id = $3
+                    AND (drive_minutes_each_way IS NULL OR total_minutes IS NULL)
+                `, [drive, totalMins, row.assignment_id]);
+              }
             }
           }
 

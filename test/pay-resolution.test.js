@@ -137,3 +137,45 @@ test('only the two real pay types are storable', () => {
 test('null is a valid instruction to clear, and is not a pay type', () => {
   assert.strictEqual(isValidPayType(null), false);
 });
+
+const { paymentForBooking } = require('../netlify/functions/_pay.js');
+
+const HOURLY = { pay_type: 'hourly', hourly_rate: 12, flat_rate: 80 };
+
+test('one role, no role_pay row, no override — identical to the old behaviour', () => {
+  const p = paymentForBooking([{ tag_filled: 'Foam Crew', pay_amount_override: null }], {}, HOURLY, 6);
+  assert.strictEqual(p.amount, 72);
+  assert.strictEqual(p.payType, 'hourly');
+  assert.deepStrictEqual(p.rolesFilled, ['Foam Crew']);
+});
+
+// The live defect: hourly staff on two roles were paid the whole span twice.
+test('two roles pay once, at the higher figure', () => {
+  const p = paymentForBooking(
+    [{ tag_filled: 'Foam Crew', pay_amount_override: null },
+     { tag_filled: 'Story Doodles', pay_amount_override: null }],
+    { 'Foam Crew': 'hourly', 'Story Doodles': 'flat' }, HOURLY, 6);
+  assert.strictEqual(p.amount, 80, 'should pay the higher of $72 hourly and $80 flat, once');
+  assert.deepStrictEqual(p.rolesFilled.sort(), ['Foam Crew', 'Story Doodles']);
+});
+
+test('two hourly roles are never paid twice for the same hours', () => {
+  const p = paymentForBooking(
+    [{ tag_filled: 'A', pay_amount_override: null }, { tag_filled: 'B', pay_amount_override: null }],
+    { A: 'hourly', B: 'hourly' }, HOURLY, 6);
+  assert.strictEqual(p.amount, 72, 'the span was paid twice');
+});
+
+test('an override on any role wins for the booking', () => {
+  const p = paymentForBooking(
+    [{ tag_filled: 'Foam Crew', pay_amount_override: null },
+     { tag_filled: 'Story Doodles', pay_amount_override: 200 }],
+    { 'Foam Crew': 'hourly', 'Story Doodles': 'flat' }, HOURLY, 6);
+  assert.strictEqual(p.amount, 200);
+  assert.match(p.basis, /override/i);
+});
+
+test('hours still come from the caller, so the time clock and the 5h floor are untouched', () => {
+  const p = paymentForBooking([{ tag_filled: 'A', pay_amount_override: null }], { A: 'hourly' }, HOURLY, 5);
+  assert.strictEqual(p.amount, 60);
+});
