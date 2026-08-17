@@ -130,6 +130,17 @@ function fmtDateShort(d) {
   return dt.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'});
 }
 
+// Display only — payroll recomputes this server-side and the 5-hour minimum is
+// applied there, not here. Showing a bare span keeps the portal honest about
+// what was worked rather than what will be paid.
+function clockedHoursLabel(g) {
+  const a = new Date(g.clocked_in_at).getTime();
+  const b = new Date(g.clocked_out_at).getTime();
+  if (!isFinite(a) || !isFinite(b) || b <= a) return '—';
+  const mins = Math.round((b - a) / 60000);
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
+}
+
 function fmtTime(t) {
   if (!t) return '';
   try {
@@ -445,8 +456,12 @@ function sectionHeader(label, color) {
 
 function gigCard(g, isAssigned) {
   const dateStr = fmtDate(g.event_date);
-  const checklistStatuses = ['upcoming','on_my_way','arrived','completed'];
-  const checklistLabels   = { upcoming:'📅 Upcoming', on_my_way:'🚗 On My Way', arrived:'📍 Arrived', completed:'✅ Done' };
+  // Must match CHECKLIST_STATUSES in staff-assignments.js — the server rejects
+  // any status not in its own list, and these stamps are what pay is computed
+  // from. Change one, change both in the same commit.
+  const checklistStatuses = ['upcoming','clocked_in','on_my_way','arrived','completed','clocked_out'];
+  const checklistLabels   = { upcoming:'📅 Upcoming', clocked_in:'🕐 Clocked In', on_my_way:'🚗 On My Way',
+                              arrived:'📍 Arrived', completed:'✅ Done', clocked_out:'🏠 Clocked Out' };
   const curStatus = g.checklist_status || 'upcoming';
   const curIdx    = checklistStatuses.indexOf(curStatus);
 
@@ -477,6 +492,10 @@ function gigCard(g, isAssigned) {
             ${isActive ? 'disabled' : ''}>${checklistLabels[s]}</button>`;
         }).join('')}
       </div>
+      ${g.clocked_in_at && g.clocked_out_at ? `
+      <div style="margin-top:10px;font-size:.75rem;color:#a78bca">
+        ⏱ Worked <strong style="color:#c084fc">${clockedHoursLabel(g)}</strong>
+      </div>` : ''}
       ${curStatus === 'completed'
         ? `<button class="btn btn-outline btn-sm" style="margin-top:10px;border-color:#a855f7;color:#c084fc" onclick="openSurvey('${g.log_id}','${g.booking_id}')">📋 Submit Post-Gig Report</button>`
         : ''}

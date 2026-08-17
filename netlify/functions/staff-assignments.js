@@ -351,6 +351,7 @@ exports.handler = async (event) => {
           const { rows: assignments } = await client.query(
             `SELECT sa.*, s.name as staff_name, s.preferred_name, s.color, s.skills,
                     gl.id as log_id, gl.status as checklist_status,
+                    gl.clocked_in_at, gl.clocked_out_at,
                     gl.survey_submitted_at, gl.guest_count_actual,
                     gl.balance_collected, gl.balance_amount,
                     gl.gas_level, gl.foam_fluid_needed, gl.empty_jugs_refilled,
@@ -403,6 +404,7 @@ exports.handler = async (event) => {
                     b.total_price, b.deposit_paid, b.balance_due,
                     b.notes as client_notes, b.status as booking_status,
                     gl.status as checklist_status, gl.id as log_id,
+                    gl.clocked_in_at, gl.clocked_out_at,
                     -- The staff portal shows the party window (event_time +
                     -- duration) alongside the shift window (sa.schedule_start
                     -- + sa.total_minutes, both already computed by
