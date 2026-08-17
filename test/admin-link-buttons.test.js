@@ -12,7 +12,7 @@ function loadHelpers() {
   assert.ok(a !== -1 && b !== -1, 'pure-helper sentinels missing from admin.html');
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, balanceLinkAmounts, balanceLinkEligible };', ctx);
+  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, balanceLinkAmounts, balanceLinkEligible, clockRowLabel };', ctx);
   return ctx.out;
 }
 
@@ -102,4 +102,21 @@ test('a row missing the fields is not eligible rather than defaulting to yes', (
   // deposit_paid arriving as anything other than true (a pg 't', a null) must
   // not be read as settled.
   assert.strictEqual(balanceLinkEligible({ deposit_amount: 100, balance_due: 400, deposit_paid: 't' }), false);
+});
+
+const { clockRowLabel } = loadHelpers();
+
+test('a complete clock reads as hours and minutes', () => {
+  const s = clockRowLabel({ clocked_in_at: '2026-08-15T09:00:00Z', clocked_out_at: '2026-08-15T15:30:00Z' });
+  assert.match(s, /6h 30m/);
+});
+
+test('an incomplete clock says what is missing rather than showing a number', () => {
+  assert.match(clockRowLabel({ clocked_in_at: '2026-08-15T09:00:00Z' }), /no clock-out|not clocked out/i);
+  assert.match(clockRowLabel({}), /not clocked in|no clock-in/i);
+});
+
+test('an implausible span is flagged, not displayed as fact', () => {
+  const s = clockRowLabel({ clocked_in_at: '2026-08-15T08:00:00Z', clocked_out_at: '2026-08-16T09:00:00Z' });
+  assert.match(s, /check|⚠/i);
 });

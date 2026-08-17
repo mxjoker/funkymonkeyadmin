@@ -1525,6 +1525,23 @@ function balanceLinkEligible(b) {
   return b && (b.deposit_paid === true || depositLinkAmount(b) <= 0);
 }
 
+// Mirrors workedHours() in netlify/functions/_timeclock.js — admin.html is a
+// static page with no build step and cannot require server modules, the same
+// reason balanceLinkAmounts() and finaliseLinkClient() are duplicated. DISPLAY
+// ONLY: payroll computes what it pays from the server module, and the 16-hour
+// rule and the 5-hour minimum live there. If those rules change, change this
+// label with them.
+function clockRowLabel(log) {
+  const t = (v) => { const d = v ? new Date(v) : null; return d && !isNaN(d.getTime()) ? d.getTime() : null; };
+  const a = t(log && log.clocked_in_at), b = t(log && log.clocked_out_at);
+  if (a === null) return 'Not clocked in';
+  if (b === null) return 'No clock-out yet';
+  if (b <= a) return '⚠️ Clock-out is before clock-in — check';
+  const mins = Math.round((b - a) / 60000);
+  if (mins > 16 * 60) return `⚠️ ${Math.floor(mins / 60)}h — check, likely a missed clock-out`;
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
+}
+
 // ══ END PURE HELPERS ══
 
 // Default matches the old "Newest Inquiry" dropdown default, so the view the
@@ -2392,7 +2409,106 @@ function renderAssignmentCard(a, payByStaff, bookingId, slotTag = null) {
       ${surveyHtml}
       ${payHtml}
       ${a.status === 'assigned' ? renderScheduleBlock(a, bookingId) : ''}
+      ${a.status === 'assigned' ? renderClockBlock(a, bookingId) : ''}
     </div>`;
+}
+
+// "2026-08-15T09:00:00.000Z" -> "2026-08-15T09:00" in the browser's local
+// time, which is what a <input type="datetime-local"> needs to prefill
+// correctly. adjustClock() below undoes this with `new Date(value)`, whose
+// no-zone-suffix string is read back as local time by the same rule — so the
+// round trip lands on the original instant rather than drifting by whatever
+// the admin's timezone offset happens to be.
+function isoToLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// The stages adjust_clock accepts, in shift order. Each maps to the gig_logs
+// column CHECKLIST_TS_COLS in staff-assignments.js writes to.
+const CLOCK_STAGES = [
+  { key: 'clocked_in',  label: 'Clock In',  field: 'clocked_in_at'  },
+  { key: 'on_my_way',   label: 'On My Way', field: 'on_my_way_at'   },
+  { key: 'arrived',     label: 'Arrived',   field: 'arrived_at'     },
+  { key: 'completed',   label: 'Completed', field: 'completed_at'   },
+  { key: 'clocked_out', label: 'Clock Out', field: 'clocked_out_at' },
+];
+
+// Admin's view of a staff member's clock, and the five inputs to correct it
+// when someone forgot to tap. Only rendered once a gig_log row exists — before
+// that there is nothing for adjust_clock to attach a correction to (it 404s
+// on an unknown log_id), since the row is created lazily on the staff
+// member's first checklist tap.
+function renderClockBlock(a, bookingId) {
+  if (!a.log_id) {
+    return `
+      <div style="margin-top:10px;border-top:1px dashed #e5e7eb;padding-top:10px;font-size:.75rem;color:#9ca3af;font-style:italic">
+        ⏱ No checklist activity yet — nothing to adjust.
+      </div>`;
+  }
+
+  const label = clockRowLabel(a);
+  const isWarning = /check|⚠/i.test(label);
+
+  // hours_source / measured_hours come from the payroll preflight response,
+  // not this card's own query — present only when the caller has merged them
+  // in. Absent here today; see report.
+  const sourceBadge = a.hours_source
+    ? `<span style="background:${a.hours_source === 'measured' ? '#f0fdf4' : '#eff6ff'};color:${a.hours_source === 'measured' ? '#166534' : '#1e40af'};border-radius:10px;padding:1px 7px;font-size:.68rem;font-weight:700">
+         ${a.hours_source === 'measured' ? '📊 Measured' : '📐 Estimated'}${a.measured_hours != null ? ' ' + Number(a.measured_hours).toFixed(2) + 'h' : ''}
+       </span>`
+    : '';
+
+  // clocked_in_at/clocked_out_at are the only two of the five stage columns
+  // this card's query (staff-assignments.js, the ?booking_id= SELECT) carries
+  // — on_my_way_at/arrived_at/completed_at are not selected there, so those
+  // three inputs cannot be prefilled with what's on file. `field in a` tells
+  // the two apart rather than guessing from a null, which would be
+  // indistinguishable from "not selected".
+  const rows = CLOCK_STAGES.map(s => {
+    const known = s.field in a;
+    const val = known ? isoToLocalInput(a[s.field]) : '';
+    const inputId = `clock-${s.key}-${a.log_id}`;
+    return `
+      <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+        <span style="width:78px;font-size:.72rem;color:#6b7280">${s.label}${known ? '' : ' *'}</span>
+        <input type="datetime-local" id="${inputId}" value="${val}"
+          style="flex:1;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:.75rem"/>
+        <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:.7rem"
+          onclick="adjustClock(${a.log_id},'${s.key}',document.getElementById('${inputId}').value).then(()=>loadStaffAssignments('${bookingId}'))">Save</button>
+      </div>`;
+  }).join('');
+
+  return `
+    <div style="margin-top:10px;border-top:1px dashed #e5e7eb;padding-top:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
+        <span style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:#6b7280;letter-spacing:.04em">⏱ Clock</span>
+        <span style="font-size:.75rem;font-weight:600;color:${isWarning ? '#dc2626' : '#374151'}">${esc(label)}</span>
+        ${sourceBadge}
+        <span class="save-flash" id="assign-flash-${a.log_id}">✓ Updated</span>
+      </div>
+      ${rows}
+      <div style="font-size:.66rem;color:#9ca3af;margin-top:4px">* current value isn't returned by this card's query yet — blank does not mean unset, see stamp on the staff portal instead</div>
+    </div>`;
+}
+
+// A datetime-local value is local time with no zone — sending it raw to the
+// server would silently shift the recorded hours by the admin's timezone
+// offset, so the ISO conversion happens here, once, before it leaves the
+// browser.
+async function adjustClock(logId, stage, value) {
+  try {
+    const res = await apiFetch('/api/staff-assignments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'adjust_clock', log_id: logId, stage,
+                             value: value ? new Date(value).toISOString() : null })
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Adjust failed');
+    flash('assign-flash-' + logId);
+  } catch (e) { alert('Could not adjust: ' + e.message); }
 }
 
 function renderScheduleBlock(a, bookingId) {
