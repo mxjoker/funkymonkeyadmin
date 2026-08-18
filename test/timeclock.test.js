@@ -206,16 +206,21 @@ test('a role with no clock data does not blank out a role that has one', () => {
 });
 
 test('no logs at all merges to nothing, not a crash', () => {
-  assert.deepStrictEqual(mergeClockSpan([]), { clocked_in_at: null, clocked_out_at: null, clock_adjusted_at: false });
-  assert.deepStrictEqual(mergeClockSpan(null), { clocked_in_at: null, clocked_out_at: null, clock_adjusted_at: false });
+  assert.deepStrictEqual(mergeClockSpan([]), { clocked_in_at: null, clocked_out_at: null, clock_adjusted: false });
+  assert.deepStrictEqual(mergeClockSpan(null), { clocked_in_at: null, clocked_out_at: null, clock_adjusted: false });
 });
 
-test('an adjustment on any row in the group carries through', () => {
+// The returned flag is `clock_adjusted` (boolean), not `clock_adjusted_at` —
+// that suffix belongs to the gig_logs timestamp column being read here, not
+// to this derived boolean. A reader that expects a timestamp must not find
+// one under this name.
+test('an adjustment on any row in the group carries through, under the boolean-shaped name', () => {
   const m = mergeClockSpan([
     { clocked_in_at: at2(9), clocked_out_at: at2(12), clock_adjusted_at: null },
     { clocked_in_at: at2(12), clocked_out_at: at2(15), clock_adjusted_at: at2(16) },
   ]);
-  assert.strictEqual(m.clock_adjusted_at, true);
+  assert.strictEqual(m.clock_adjusted, true);
+  assert.strictEqual(m.clock_adjusted_at, undefined, 'the old timestamp-shaped key must not linger');
 });
 
 // The merged span feeds straight into payableHours, exactly like a single

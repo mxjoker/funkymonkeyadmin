@@ -106,7 +106,9 @@ function mergeClockSpan(logs) {
   return {
     clocked_in_at: inMs === null ? null : new Date(inMs),
     clocked_out_at: outMs === null ? null : new Date(outMs),
-    clock_adjusted_at: adjusted,
+    // A boolean, unlike the gig_logs column it's derived from (clock_adjusted_at,
+    // a timestamp) — named without _at so nothing downstream reads it as one.
+    clock_adjusted: adjusted,
   };
 }
 
