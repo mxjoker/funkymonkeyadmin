@@ -213,3 +213,52 @@ test('the refusal names the person and what is missing', () => {
 test('a payable assignment produces no refusal', () => {
   assert.strictEqual(assignmentRefusal({ name: 'A', hourly_rate: 12 }, 'hourly', 'Foam Crew'), null);
 });
+
+// ── Per-gig pay override, at the write boundary ──────────────────────────────
+// _pay.js deliberately accepts any finite override so a deliberate $0 survives;
+// its comment defers sign validation to the endpoint. This is that endpoint.
+const { validPayOverride, payOverrideLog } = require('../netlify/functions/staff-assignments.js');
+
+test('a blank override clears back to the resolved amount', () => {
+  for (const v of [null, undefined, '']) {
+    assert.deepStrictEqual(validPayOverride(v), { ok: true, value: null });
+  }
+});
+
+test('zero is a real override, not an absent one', () => {
+  assert.deepStrictEqual(validPayOverride(0), { ok: true, value: 0 });
+  assert.deepStrictEqual(validPayOverride('0'), { ok: true, value: 0 });
+});
+
+test('a negative override is refused — a negative wage is always a typo', () => {
+  const r = validPayOverride(-50);
+  assert.strictEqual(r.ok, false);
+  assert.match(r.error, /negative/i);
+});
+
+test('junk is refused rather than stored as null', () => {
+  assert.strictEqual(validPayOverride('abc').ok, false);
+  assert.strictEqual(validPayOverride(Infinity).ok, false);
+});
+
+test('an override is rounded to cents', () => {
+  assert.strictEqual(validPayOverride('150.456').value, 150.46);
+});
+
+test('the audit line names both sides and never prints a raw null', () => {
+  const set = payOverrideLog(null, 150, 'Noah');
+  assert.match(set.detail, /Noah/);
+  assert.match(set.detail, /standard rate → \$150\.00/);
+  assert.ok(!/null|undefined/i.test(set.detail));
+
+  const changed = payOverrideLog(80, 150, 'Noah');
+  assert.match(changed.detail, /\$80\.00 → \$150\.00/);
+
+  const cleared = payOverrideLog(150, null, 'Noah');
+  assert.match(cleared.detail, /back to the standard rate/);
+  assert.ok(!/null|undefined/i.test(cleared.detail));
+});
+
+test('a $0 override reads as $0.00 in the audit line, not as cleared', () => {
+  assert.match(payOverrideLog(80, 0, 'Noah').detail, /\$0\.00/);
+});

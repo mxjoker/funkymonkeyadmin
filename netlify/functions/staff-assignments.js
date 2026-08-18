@@ -283,6 +283,11 @@ async function ensureTables(client) {
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS drive_minutes_each_way INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS total_minutes INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS schedule_start TIME",
+    // Guaranteed here too, not only by payroll.js's ensureTables — this file
+    // now writes to it (set_pay_override), and a writer
+    // that depends on another module's migrations having already run is the
+    // same deploy-order bug payroll.js's own role_pay guard exists to avoid.
+    "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS pay_amount_override NUMERIC(10,2)",
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS foam_fluid_needed BOOLEAN",
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS empty_jugs_refilled BOOLEAN",
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS gas_level VARCHAR(50)",
@@ -640,6 +645,41 @@ exports.handler = async (event) => {
             console.error('adjust_clock: failed to write the audit line —', logErr.message);
           }
           return json(200, rows[0]);
+        }
+
+        // ── Per-gig pay override ─────────────────────────────────────────
+        // Admin only, and audited both sides: this is a manual change to what
+        // someone is paid, the same class of edit as adjust_clock above.
+        if (action === 'set_pay_override') {
+          const adminAuth = await requireAuth(event, ['admin']);
+          if (!adminAuth) return unauthorized();
+
+          const { assignment_id, amount } = body;
+          if (!assignment_id) return json(400, { error: 'assignment_id required' });
+
+          const parsed = validPayOverride(amount);
+          if (!parsed.ok) return json(400, { error: parsed.error });
+
+          const { rows: before } = await client.query(
+            `SELECT sa.*, s.name AS staff_name, s.preferred_name
+             FROM staff_assignments sa LEFT JOIN staff s ON s.id = sa.staff_id
+             WHERE sa.id=$1`, [parseInt(assignment_id)]);
+          if (!before.length) return json(404, { error: 'Not found' });
+
+          const { rows } = await client.query(
+            'UPDATE staff_assignments SET pay_amount_override=$1, updated_at=NOW() WHERE id=$2 RETURNING *',
+            [parsed.value, parseInt(assignment_id)]
+          );
+
+          const who = before[0].preferred_name || before[0].staff_name;
+          const entry = payOverrideLog(before[0].pay_amount_override, parsed.value, who);
+          try {
+            await ensureBookingChanges(client);
+            await logChange(client, before[0].booking_id, entry.action, entry.detail);
+          } catch (logErr) {
+            console.error('set_pay_override: failed to write the audit line —', logErr.message);
+          }
+          return json(200, { assignment: rows[0] });
         }
 
         if (action === 'submit_survey') {
@@ -1113,6 +1153,37 @@ function clockAdjustmentLog(stage, before, after, nextStatus = null) {
   return { action: 'Clock adjusted', detail };
 }
 
+// A per-gig pay override is the escape hatch for the higher-of-roles rule: when
+// one person fills two roles on a booking, payroll pays the higher of the two,
+// and Joe's condition for accepting that rule was that the odd case stay easy to
+// correct. An override wins outright over both roles.
+//
+// Refused here rather than in _pay.js: that module deliberately accepts any
+// finite number so a deliberate $0 (an unpaid favour, a correction) survives,
+// and its comment defers sign validation to this write boundary. A negative wage
+// is always a typo.
+function validPayOverride(v) {
+  if (v === null || v === undefined || v === '') return { ok: true, value: null };
+  const n = Number(v);
+  if (!isFinite(n)) return { ok: false, error: 'Override must be a number' };
+  if (n < 0) return { ok: false, error: 'Override cannot be negative' };
+  return { ok: true, value: Math.round(n * 100) / 100 };
+}
+
+// Both sides of the change, in words. A wage that can be rewritten with no trail
+// is worth less than no record, so this is what booking_changes gets.
+function payOverrideLog(before, after, staffName) {
+  const money = (v) => (v === null || v === undefined ? null : `$${Number(v).toFixed(2)}`);
+  const from = money(before), to = money(after);
+  const who = staffName || 'staff';
+  let detail;
+  if (from && to)       detail = `${who}: ${from} → ${to}`;
+  else if (!from && to) detail = `${who}: standard rate → ${to}`;
+  else if (from && !to) detail = `${who}: ${from} → back to the standard rate`;
+  else                  detail = `${who}: nothing to change`;
+  return { action: 'Pay override changed', detail };
+}
+
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
 // One letter per role this staff member matched on this booking. The value is
@@ -1266,3 +1337,5 @@ exports.clockAdjustmentLog = clockAdjustmentLog;
 exports.isAdjustableStage = isAdjustableStage;
 exports.advancedStatus = advancedStatus;
 exports.ensureTables = ensureTables;
+module.exports.validPayOverride = validPayOverride;
+module.exports.payOverrideLog = payOverrideLog;

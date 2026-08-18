@@ -868,6 +868,7 @@ let allBookings = [];
 let allStaff    = [];
 let calStaffMap = {}; // booking_id → [{initials, color}]
 let allServiceSlots = []; // service_id slot requirements from staff_slots table
+let allRolePay = {}; // role_name -> 'hourly' | 'flat' | undefined (unset = use staff setting)
 let activeActionBadge = null; // 'review' | 'deposit' | null
 let currentUser = null; // { role:'admin'|'staff', staffId, staffName, staffColor }
 let calYear = new Date().getFullYear();
@@ -1042,7 +1043,7 @@ async function init() {
   }
   
   // Admin-only initialization
-  await Promise.all([loadBookings(), loadStaffList(), loadServiceSlots()]);
+  await Promise.all([loadBookings(), loadStaffList(), loadServiceSlots(), loadRolePay()]);
   await loadCalStaffMap();
   renderDashboard();
   showPage('dashboard');
@@ -1063,6 +1064,27 @@ async function loadServiceSlots() {
     const data = await res.json();
     allServiceSlots = data.slots || [];
   } catch(e) { console.error('loadServiceSlots:', e); }
+}
+
+async function loadRolePay() {
+  try {
+    const res = await apiFetch('/api/staff-assignments?role_pay=true');
+    if (!res.ok) return;
+    const data = await res.json();
+    allRolePay = data.role_pay || {};
+  } catch(e) { console.error('loadRolePay:', e); }
+}
+
+async function saveRolePay(roleName, payType) {
+  try {
+    const res = await apiFetch('/api/staff-assignments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save_role_pay', role_name: roleName,
+                             pay_type: payType === '' ? null : payType })
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
+    allRolePay = { ...allRolePay, [roleName]: payType || undefined };
+  } catch (e) { alert('Could not save pay type: ' + e.message); }
 }
 
 async function loadCalStaffMap() {
@@ -1581,6 +1603,34 @@ function reportButtonVisible(g) {
   if (g && g.survey_submitted_at) return false;
   const s = (g && g.checklist_status) || 'upcoming';
   return s === 'completed' || s === 'clocked_out';
+}
+
+// What the assignment card shows for pay. Mirrors _pay.js's resolvePayType
+// (role first, staff second, defaulting to flat) and resolveAmount's
+// override-wins rule — admin.html is a static page with no build step and
+// cannot require server modules, the same reason clockRowLabel() and
+// balanceLinkAmounts() above duplicate their server-side counterparts.
+// DISPLAY ONLY: payroll computes what it actually pays from _pay.js.
+//
+// `rolePay` is the already-resolved value for THIS role (allRolePay[tag]),
+// not the whole map — the caller looks it up, same shape _pay.js's own
+// resolvePayType expects for its rolePayByRole[roleName] read.
+function payLabel(assignment, rolePay, staff) {
+  const a = assignment || {}, s = staff || {};
+  const money = (n) => `$${(Number(n) || 0).toFixed(2)}`;
+  // 0 is a legitimate override (an unpaid favour, a correction) so absence
+  // is tested as null/undefined/'' rather than falsiness — the same guard
+  // resolveAmount() uses, so a deliberate $0 override still reads as one.
+  if (a.pay_amount_override !== null && a.pay_amount_override !== undefined && a.pay_amount_override !== '') {
+    return `override · ${money(a.pay_amount_override)}`;
+  }
+  const PAY_TYPES = ['hourly', 'flat'];
+  const payType = PAY_TYPES.includes(rolePay) ? rolePay
+    : PAY_TYPES.includes(s.pay_type) ? s.pay_type
+    : 'flat';
+  return payType === 'hourly'
+    ? `hourly · ${money(s.hourly_rate)}/hr`
+    : `flat · ${money(s.flat_rate)}`;
 }
 
 // ══ END PURE HELPERS ══
@@ -2432,7 +2482,33 @@ function renderAssignmentCard(a, payByStaff, bookingId, slotTag = null) {
       </div>`;
     }
   }
-  
+
+  // Per-gig pay override — the designated escape hatch for the higher-of
+  // rule. Visible on the card itself, not behind a disclosure: Joe's
+  // condition for the higher-of rule was that rare cases get resolved case
+  // by case "if editing/altering the pay per event is easy to do." Blank by
+  // default; the resolved amount (role pay type, or the staff default) is
+  // the placeholder, so the box shows what will be paid without an override
+  // rather than looking empty/unset.
+  let overrideHtml = '';
+  if (a.status === 'assigned') {
+    const staffRecord = (allStaff || []).find(s => s.id === a.staff_id);
+    const resolved = payLabel(a, allRolePay[a.tag_filled], staffRecord);
+    const placeholderAmt = resolved.replace(/^[^$]*\$/, '').replace('/hr', '');
+    const hasOverride = a.pay_amount_override !== null && a.pay_amount_override !== undefined;
+    const overrideInputId = `pay-override-${a.id}`;
+    overrideHtml = `
+      <div style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span style="font-size:.72rem;color:#6b7280">💵 ${esc(resolved)}</span>
+        <input type="number" id="${overrideInputId}" value="${hasOverride ? Number(a.pay_amount_override).toFixed(2) : ''}"
+          placeholder="${placeholderAmt}" min="0" step="0.01" title="Override this gig's pay — blank uses the resolved amount"
+          style="width:90px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:.75rem"/>
+        <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:.72rem"
+          onclick="saveOverride(${a.id},'${overrideInputId}','${bookingId}')">Save override</button>
+        <span class="save-flash" id="override-flash-${a.id}">✓ Updated</span>
+      </div>`;
+  }
+
   return `
     <div style="padding:8px 10px;background:${a.status==='assigned'?'#fff':'#f9fafb'};border:1px solid ${a.status==='assigned'?'#10b981':'#e5e7eb'};border-radius:8px">
       <div style="display:flex;align-items:center;gap:10px">
@@ -2448,6 +2524,7 @@ function renderAssignmentCard(a, payByStaff, bookingId, slotTag = null) {
       </div>
       ${surveyHtml}
       ${payHtml}
+      ${overrideHtml}
       ${a.status === 'assigned' ? renderScheduleBlock(a, bookingId) : ''}
       ${a.status === 'assigned' ? renderClockBlock(a, bookingId) : ''}
     </div>`;
@@ -2562,6 +2639,29 @@ async function trySaveClock(logId, stage, inputId, known, bookingId) {
   }
   await adjustClock(logId, stage, value);
   await loadStaffAssignments(bookingId);
+}
+
+// Saves through set_pay_override in staff-assignments.js — a dedicated
+// admin-only action, NOT update_assignment_times. That action recomputes every
+// time field from the payload (`parseInt(load_minutes) || 0` and friends), so an
+// override-only request would zero the whole gig schedule and never store the
+// override at all. set_pay_override touches one column, refuses a negative
+// value, and writes both sides to booking_changes — a manual change to a wage,
+// the same class of edit as a clock adjustment. A blank box clears the override
+// back to the resolved amount.
+async function saveOverride(assignmentId, inputId, bookingId) {
+  const el = document.getElementById(inputId);
+  const raw = el ? el.value.trim() : '';
+  try {
+    const res = await apiFetch('/api/staff-assignments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_pay_override', assignment_id: assignmentId,
+                             amount: raw === '' ? null : raw })
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
+    flash('override-flash-' + assignmentId);
+    await loadStaffAssignments(bookingId);
+  } catch (e) { alert('Could not save override: ' + e.message); }
 }
 
 function renderScheduleBlock(a, bookingId) {
@@ -4649,14 +4749,24 @@ function renderCatalogue() {
   // Skill Tags manager
   const exclusiveTags = skillTags().filter(t => EXCLUSIVE_TAGS.has(t));
   const stackableTags = skillTags().filter(t => !EXCLUSIVE_TAGS.has(t));
+  // Pay type belongs to the role, not to any one (service, role) slot row —
+  // a per-role setting edited from a repeated slot row would let one role
+  // hold contradictory values across services. This is where roles are
+  // managed, so this is where pay type is set.
+  const payTypeSelect = (t) => `<select onchange="saveRolePay('${t.replace(/'/g,"\\'")}',this.value)"
+      title="Pay type for ${esc(t)}" style="margin-left:4px;font-size:.68rem;border:1px solid transparent;background:transparent;color:inherit;cursor:pointer">
+      <option value=""${!allRolePay[t] ? ' selected' : ''}>use staff setting</option>
+      <option value="hourly"${allRolePay[t]==='hourly' ? ' selected' : ''}>hourly</option>
+      <option value="flat"${allRolePay[t]==='flat' ? ' selected' : ''}>flat</option>
+    </select>`;
   html += `<div class="cat-section">
     <h3>🏷 Skill Tags</h3>
-    <p class="text-muted" style="margin-bottom:12px;font-size:.82rem">Tags are used on staff profiles and booking staff requirements. Exclusive tags = one performer per gig. Stackable = combinable.</p>
+    <p class="text-muted" style="margin-bottom:12px;font-size:.82rem">Tags are used on staff profiles and booking staff requirements. Exclusive tags = one performer per gig. Stackable = combinable. Pay type sets how that role is paid; "use staff setting" defers to the person's own hourly/flat default.</p>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <div>
         <div style="font-size:.7rem;text-transform:uppercase;font-weight:700;color:#7c3aed;margin-bottom:6px">🎩 Exclusive (one per gig)</div>
         <div id="exclusive-tags" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px">
-          ${exclusiveTags.map(t => `<span class="cat-tag cat-tag-excl">${esc(t)}<button onclick="removeSkillTag('${t.replace(/'/g,"\\'")}',true)" title="Remove">×</button></span>`).join('')}
+          ${exclusiveTags.map(t => `<span class="cat-tag cat-tag-excl">${esc(t)}${payTypeSelect(t)}<button onclick="removeSkillTag('${t.replace(/'/g,"\\'")}',true)" title="Remove">×</button></span>`).join('')}
         </div>
         <div style="display:flex;gap:6px">
           <input id="new-excl-tag" type="text" placeholder="New exclusive tag…" style="flex:1;padding:6px 10px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.82rem"
@@ -4667,7 +4777,7 @@ function renderCatalogue() {
       <div>
         <div style="font-size:.7rem;text-transform:uppercase;font-weight:700;color:#059669;margin-bottom:6px">🔁 Stackable (combinable)</div>
         <div id="stackable-tags" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px">
-          ${stackableTags.map(t => `<span class="cat-tag cat-tag-stack">${esc(t)}<button onclick="removeSkillTag('${t.replace(/'/g,"\\'")}',false)" title="Remove">×</button></span>`).join('')}
+          ${stackableTags.map(t => `<span class="cat-tag cat-tag-stack">${esc(t)}${payTypeSelect(t)}<button onclick="removeSkillTag('${t.replace(/'/g,"\\'")}',false)" title="Remove">×</button></span>`).join('')}
         </div>
         <div style="display:flex;gap:6px">
           <input id="new-stack-tag" type="text" placeholder="New stackable tag…" style="flex:1;padding:6px 10px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.82rem"
