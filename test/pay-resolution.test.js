@@ -201,6 +201,30 @@ test('the higher of two overrides wins when both roles carry one', () => {
   assert.strictEqual(p.amount, 200);
 });
 
+// IMPORTANT 1/2: payroll.js needs to know the winning figure was a deliberate
+// override, not an auto-computed default, so it can (a) write that figure back
+// onto an existing payment row and (b) describe it correctly in the note. Both
+// read this one flag rather than re-deriving it from `basis`.
+test('paymentForBooking reports whether the winner was a deliberate override', () => {
+  const overridden = paymentForBooking(
+    [{ tag_filled: 'Foam Crew', pay_amount_override: 200 }],
+    { 'Foam Crew': 'hourly' }, HOURLY, 6);
+  assert.strictEqual(overridden.isOverride, true);
+
+  const auto = paymentForBooking(
+    [{ tag_filled: 'Foam Crew', pay_amount_override: null }],
+    { 'Foam Crew': 'hourly' }, HOURLY, 6);
+  assert.strictEqual(auto.isOverride, false);
+});
+
+test('a $0 override still reports isOverride: true, not falling to auto', () => {
+  const p = paymentForBooking(
+    [{ tag_filled: 'Foam Crew', pay_amount_override: 0 }],
+    { 'Foam Crew': 'hourly' }, HOURLY, 6);
+  assert.strictEqual(p.amount, 0);
+  assert.strictEqual(p.isOverride, true);
+});
+
 const { assignmentRefusal } = require('../netlify/functions/_pay.js');
 
 test('the refusal names the person and what is missing', () => {
@@ -239,6 +263,37 @@ test('a negative override is refused — a negative wage is always a typo', () =
 test('junk is refused rather than stored as null', () => {
   assert.strictEqual(validPayOverride('abc').ok, false);
   assert.strictEqual(validPayOverride(Infinity).ok, false);
+});
+
+// IMPORTANT 3: Number(' ') is 0, Number([]) is 0, Number(true) is 1, and
+// Number('0x10') is 16 -- every one of those is junk that Number() happily
+// launders into a storable wage. Whitespace means "clear" to any sane
+// reading, not "a deliberate $0", so it must land on the same branch as ''.
+test('whitespace-only clears, exactly like an empty string', () => {
+  assert.deepStrictEqual(validPayOverride('   '), { ok: true, value: null });
+  assert.deepStrictEqual(validPayOverride('\t\n'), { ok: true, value: null });
+});
+
+test('non-number, non-string shapes are refused, not coerced', () => {
+  assert.strictEqual(validPayOverride([]).ok, false);
+  assert.strictEqual(validPayOverride({}).ok, false);
+  assert.strictEqual(validPayOverride(true).ok, false);
+  assert.strictEqual(validPayOverride(false).ok, false);
+});
+
+test('a numeric string is still trimmed and accepted', () => {
+  assert.deepStrictEqual(validPayOverride('  150  '), { ok: true, value: 150 });
+});
+
+// A real number stays a real number, including 0x-style literals passed as
+// actual JS numbers (as opposed to the string '0x10', which is refused above
+// because a string is only ever read as decimal here).
+test('a bare number override is unaffected by the string-only hex guard', () => {
+  assert.deepStrictEqual(validPayOverride(16), { ok: true, value: 16 });
+});
+
+test('a hex-looking string is refused, not silently reinterpreted as decimal', () => {
+  assert.strictEqual(validPayOverride('0x10').ok, false);
 });
 
 test('an override is rounded to cents', () => {

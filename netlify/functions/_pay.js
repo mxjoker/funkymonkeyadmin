@@ -102,9 +102,10 @@ function paymentForBooking(assignments, rolePayByRole, staff, hours) {
   // oddity, not a policy decision here: the highest of them wins.
   const overridden = candidates.filter((c) => c.isOverride);
   const pool = overridden.length ? overridden : candidates;
-  const best = bestPayment(pool) || { amount: 0, basis: 'no assignment', payType: 'flat', tag: null };
+  const best = bestPayment(pool) || { amount: 0, basis: 'no assignment', payType: 'flat', tag: null, isOverride: false };
   return {
     amount: best.amount, basis: best.basis, payType: best.payType,
+    isOverride: !!best.isOverride,
     rolesFilled: list.map((a) => a.tag_filled).filter(Boolean),
   };
 }
