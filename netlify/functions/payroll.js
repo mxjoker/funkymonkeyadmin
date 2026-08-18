@@ -617,10 +617,15 @@ exports.handler = async (event) => {
               // deliberate per-gig override is the one figure Joe would
               // come back to insist on after seeing a payroll number he
               // disagreed with, so it does overwrite, $0 included.
+              // The note travels with the amount. Writing one without the
+              // other leaves an override's figure beside a stale
+              // "480 min raw -> 8h paid" line describing a calculation that
+              // was not used — and that note is what a wage question gets
+              // answered from.
               if (p.isOverride) {
                 await client.query(
-                  'UPDATE staff_payments SET amount=$1, hours=$2, hours_source=$3, measured_hours=$4, updated_at=NOW() WHERE id=$5',
-                  [p.amount, p.hours, p.hours_source, p.measured_hours, p.existingId]
+                  'UPDATE staff_payments SET amount=$1, hours=$2, hours_source=$3, measured_hours=$4, note=$5, updated_at=NOW() WHERE id=$6',
+                  [p.amount, p.hours, p.hours_source, p.measured_hours, paymentNote(p), p.existingId]
                 );
               } else {
                 await client.query(
