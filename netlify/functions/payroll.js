@@ -2,7 +2,8 @@ const { withClient } = require('./_db');
 const {
   CORS, preflight, requireAuth, unauthorized, forbidden,
 } = require('./_auth');
-const { payableHours } = require('./_timeclock');
+const { payableHours, mergeClockSpan } = require('./_timeclock');
+const { paymentForBooking } = require('./_pay');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -54,6 +55,24 @@ async function ensureTables(client) {
   try {
     await client.query(`ALTER TABLE staff_payments ADD COLUMN IF NOT EXISTS measured_hours NUMERIC(5,2)`);
   } catch (_) {}
+
+  // The escape hatch for a gig the higher-of rule prices wrong. Guaranteed here
+  // because this is the function that reads it — a reader depending on another
+  // module's migrations is a deploy-order bug, which this file already hit once.
+  try {
+    await client.query('ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS pay_amount_override NUMERIC(10,2)');
+  } catch (_) {}
+
+  // Same reasoning, same guarantee: this function reads role_pay directly
+  // (below), so it cannot rely on staff-assignments.js having run first.
+  // Definition mirrors staff-assignments.js:212-217 exactly.
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS role_pay (
+      role_name  VARCHAR(100) PRIMARY KEY,
+      pay_type   VARCHAR(20) NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 
   // The assignments query below reads gl.clocked_in_at / clocked_out_at /
   // clock_adjusted_at, but those columns — and the unique index that stops the
@@ -111,13 +130,20 @@ async function ensureTables(client) {
   } catch (_) {}
 }
 
-// The only record of how an approved payment's hours were derived — the DB
-// row itself doesn't say clock vs. estimate (see hours_source below), so this
-// text is what a wage question gets answered from. p.hours may be MEASURED
-// while raw_hours/total_minutes are still the estimate; comparing p.hours
-// against p.raw_hours regardless of source let a gig where the clock beat the
+// The only record of how an approved payment's amount was derived — the DB
+// row itself doesn't say clock vs. estimate vs. override (see hours_source
+// below), so this text is what a wage question gets answered from. An
+// overridden gig's amount has nothing to do with its hours, so describing
+// the hours ("480 min raw → 8h paid") beside a $200 override is a note about
+// time that was never used to pay anyone. p.hours may be MEASURED while
+// raw_hours/total_minutes are still the estimate; comparing p.hours against
+// p.raw_hours regardless of source let a gig where the clock beat the
 // estimate get stamped "(5h min applied)" when no floor applied at all.
 function paymentNote(p) {
+  if (p.isOverride) {
+    const roles = (p.roles_filled || []).join(', ');
+    return `Override: $${Number(p.amount || 0).toFixed(2)}${roles ? ` for ${roles}` : ''}`;
+  }
   if (p.hours_source === 'measured') {
     const floorApplied = p.hours > p.measured_hours;
     return `Measured ${p.measured_hours}h clocked → ${p.hours}h paid${floorApplied ? ' (5h min applied)' : ''}`;
@@ -132,7 +158,7 @@ function paymentNote(p) {
 // is that per-row noise buries the signals that matter.
 function noClockDataSummary(count, total) {
   if (!count) return null;
-  return `${count} of ${total} assignment${total === 1 ? '' : 's'} had no clock data; ` +
+  return `${count} of ${total} payment${total === 1 ? '' : 's'} had no clock data; ` +
     `${count === 1 ? 'that was' : 'those were'} paid the estimate`;
 }
 
@@ -304,7 +330,7 @@ exports.handler = async (event) => {
           }
 
           const { rows: assignments } = await client.query(`
-            SELECT sa.id as assignment_id, sa.staff_id, sa.tag_filled,
+            SELECT sa.id as assignment_id, sa.staff_id, sa.tag_filled, sa.pay_amount_override,
                    sa.load_minutes, sa.unload_minutes, sa.pack_out_minutes,
                    sa.home_unload_minutes, sa.drive_minutes_each_way, sa.total_minutes,
                    b.id as booking_id, b.reference, b.service_name, b.service_id,
@@ -325,7 +351,7 @@ exports.handler = async (event) => {
               AND b.event_date <= $2
               AND b.status IN ('confirmed','completed')
               AND sp_paid.id IS NULL
-            ORDER BY s.id, b.event_date
+            ORDER BY s.id, b.event_date, sa.id
           `, [rangeStart, rangeEnd]);
 
           if (assignments.length === 0 && !dryRun) {
@@ -393,11 +419,38 @@ exports.handler = async (event) => {
             return Math.max(10, Math.round((miles / 35) * 60)) + 15;
           }
 
+          const { rows: rolePayRows } = await client.query('SELECT role_name, pay_type FROM role_pay');
+          const rolePayByRole = {};
+          for (const r of rolePayRows) rolePayByRole[r.role_name] = r.pay_type;
+
           const paymentsToCreate = [];
           const warnings = [];
 
-          let noClockCount = 0;
+          // One person on one booking is one payment, however many roles they
+          // filled. Iterating raw assignment rows paid an hourly staff member the
+          // whole span once per role.
+          const byStaffBooking = new Map();
           for (const a of assignments) {
+            const key = `${a.staff_id}:${a.booking_id}`;
+            if (!byStaffBooking.has(key)) byStaffBooking.set(key, []);
+            byStaffBooking.get(key).push(a);
+          }
+
+          let noClockCount = 0;
+          for (const group of byStaffBooking.values()) {
+            // group[0] is now deterministic — ORDER BY s.id, b.event_date, sa.id
+            // above means "first in the group" always means "lowest assignment
+            // id" — but it is still an arbitrary pick among per-assignment
+            // fields that are NOT guaranteed identical across roles: an admin
+            // can hand-set load/unload/drive minutes on one role's row and not
+            // the other. The choice is deliberate, not incidental: a second
+            // role for the same person on the same booking is not a second
+            // physical trip, so there is one load, one drive, one unload for
+            // the group, and the lowest-id row's figures (or the template
+            // default) are what's used. Clock timestamps are handled
+            // separately below via mergeClockSpan, precisely because a
+            // one-row pick is wrong for those.
+            const a = group[0];
             const { rows: existingPayment } = await client.query(
               'SELECT id FROM staff_payments WHERE booking_id=$1 AND staff_id=$2',
               [a.booking_id, a.staff_id]
@@ -414,9 +467,17 @@ exports.handler = async (event) => {
             const totalMins = load + drive + unload + party + pack + drive + homeUn;
             const rawHours = totalMins / 60;
 
+            // A person who filled two roles worked one continuous shift, and
+            // each role's gig_logs row only stamps its own clock — picking one
+            // row's log arbitrarily made the paid hours (measured vs. the 5h
+            // estimate) depend on unrelated row order. The merged span is
+            // earliest clock-in to latest clock-out across the whole group,
+            // and degrades to a single row's own stamps when there is only one.
+            const clockSpan = mergeClockSpan(group);
+
             // Pay the clock when the record is complete and plausible; otherwise
             // pay the estimate and say so. The 5-hour minimum applies either way.
-            const paid = payableHours(a, Math.round(rawHours * 100) / 100);
+            const paid = payableHours(clockSpan, Math.round(rawHours * 100) / 100);
             const totalHours = paid.hours;
             if (paid.warning) {
               // totalHours may be the 5-hour floor rather than the estimate itself —
@@ -429,17 +490,23 @@ exports.handler = async (event) => {
               noClockCount++;
             }
 
-            const payType = a.pay_type || 'flat';
-            let amount;
-            if (payType === 'hourly') {
-              amount = Math.round(totalHours * (Number(a.hourly_rate) || 0) * 100) / 100;
-            } else {
-              amount = existingPayment.length > 0 ? null : (Number(a.flat_rate) || 0);
-            }
+            const bookingPaid = paymentForBooking(group, rolePayByRole, a, totalHours);
+            const payType = bookingPaid.payType;
+            // `amount` here is what the preflight displays; whether an
+            // existing row's `amount` column actually gets rewritten is a
+            // separate decision, made below (IMPORTANT 1) using isOverride.
+            // Preserves the old behaviour: a repeat run never overwrites an
+            // existing flat-rate payment's amount with a freshly computed
+            // default (the UPDATE below deliberately doesn't touch `amount`
+            // for that case — see p.isOverride below).
+            const amount = existingPayment.length > 0 && payType === 'flat' && bookingPaid.basis === 'flat rate'
+              ? null : bookingPaid.amount;
 
-            // Warn about $0 line items (flat_rate=0 staff)
+            // Warn about $0 line items (flat_rate=0 staff) — but not a
+            // deliberate $0 override, which is a real decision with nothing
+            // to check on the staff record.
             const resolvedAmount = amount !== null ? amount : 0;
-            if (resolvedAmount === 0) {
+            if (resolvedAmount === 0 && !bookingPaid.isOverride) {
               warnings.push(`${a.preferred_name || a.staff_name} (staff_id ${a.staff_id}) has $0 for booking ${a.reference} — check flat_rate/hourly_rate setting`);
             }
 
@@ -452,6 +519,9 @@ exports.handler = async (event) => {
               service_name: a.service_name,
               event_date: a.event_date,
               pay_type:   payType,
+              pay_basis:  bookingPaid.basis,
+              isOverride: bookingPaid.isOverride,
+              roles_filled: bookingPaid.rolesFilled,
               raw_hours:  Math.round(rawHours * 100) / 100,
               hours:      totalHours,
               hours_source: paid.source,
@@ -460,25 +530,29 @@ exports.handler = async (event) => {
               // surfaced anywhere — the spec asked that an adjusted log stay
               // flagged so a payroll run can show it. Carried alongside
               // hours_source so the preflight staff line can render both.
-              clock_adjusted: !!a.clock_adjusted_at,
+              // True if any role's log in the group was hand-corrected, not
+              // just the row that happened to be group[0].
+              clock_adjusted: clockSpan.clock_adjusted,
               amount,
               drive_minutes: drive,
               total_minutes: totalMins,
             });
 
             if (!dryRun) {
-              await client.query(`
-                UPDATE staff_assignments SET
-                  drive_minutes_each_way = $1,
-                  total_minutes = $2,
-                  updated_at = NOW()
-                WHERE id = $3
-                  AND (drive_minutes_each_way IS NULL OR total_minutes IS NULL)
-              `, [drive, totalMins, a.assignment_id]);
+              for (const row of group) {
+                await client.query(`
+                  UPDATE staff_assignments SET
+                    drive_minutes_each_way = $1,
+                    total_minutes = $2,
+                    updated_at = NOW()
+                  WHERE id = $3
+                    AND (drive_minutes_each_way IS NULL OR total_minutes IS NULL)
+                `, [drive, totalMins, row.assignment_id]);
+              }
             }
           }
 
-          const noClockSummary = noClockDataSummary(noClockCount, assignments.length);
+          const noClockSummary = noClockDataSummary(noClockCount, byStaffBooking.size);
           if (noClockSummary) warnings.push(noClockSummary);
 
           // ── preflight: return the review payload, write nothing ──────────
@@ -536,10 +610,29 @@ exports.handler = async (event) => {
           const paymentIds = [];
           for (const p of paymentsToCreate) {
             if (p.existingId) {
-              await client.query(
-                'UPDATE staff_payments SET hours=$1, hours_source=$2, measured_hours=$3, updated_at=NOW() WHERE id=$4',
-                [p.hours, p.hours_source, p.measured_hours, p.existingId]
-              );
+              // IMPORTANT 1: a repeat run must not overwrite an existing
+              // row's amount with a freshly computed default (a flat rate
+              // that changed, an hourly recompute) — that would silently
+              // disagree with whatever total was already approved. But a
+              // deliberate per-gig override is the one figure Joe would
+              // come back to insist on after seeing a payroll number he
+              // disagreed with, so it does overwrite, $0 included.
+              // The note travels with the amount. Writing one without the
+              // other leaves an override's figure beside a stale
+              // "480 min raw -> 8h paid" line describing a calculation that
+              // was not used — and that note is what a wage question gets
+              // answered from.
+              if (p.isOverride) {
+                await client.query(
+                  'UPDATE staff_payments SET amount=$1, hours=$2, hours_source=$3, measured_hours=$4, note=$5, updated_at=NOW() WHERE id=$6',
+                  [p.amount, p.hours, p.hours_source, p.measured_hours, paymentNote(p), p.existingId]
+                );
+              } else {
+                await client.query(
+                  'UPDATE staff_payments SET hours=$1, hours_source=$2, measured_hours=$3, updated_at=NOW() WHERE id=$4',
+                  [p.hours, p.hours_source, p.measured_hours, p.existingId]
+                );
+              }
               paymentIds.push({ id: p.existingId, ...p });
             } else {
               const { rows: ins } = await client.query(`

@@ -178,3 +178,59 @@ test('no clock data at all does not warn, and still pays the estimate', () => {
     assert.strictEqual(r.warning, null, 'a booking that never touched the clock should not warn');
   }
 });
+
+const { mergeClockSpan } = require('../netlify/functions/_timeclock.js');
+
+test('a single log degrades to exactly that log\'s own stamps', () => {
+  const m = mergeClockSpan([{ clocked_in_at: at2(9), clocked_out_at: at2(15) }]);
+  assert.strictEqual(m.clocked_in_at.getTime(), new Date(at2(9)).getTime());
+  assert.strictEqual(m.clocked_out_at.getTime(), new Date(at2(15)).getTime());
+});
+
+test('two roles merge to the earliest in and the latest out, not either row alone', () => {
+  const m = mergeClockSpan([
+    { clocked_in_at: at2(10), clocked_out_at: at2(14) },
+    { clocked_in_at: at2(9),  clocked_out_at: at2(15) },
+  ]);
+  assert.strictEqual(m.clocked_in_at.getTime(), new Date(at2(9)).getTime(), 'should take the earliest clock-in');
+  assert.strictEqual(m.clocked_out_at.getTime(), new Date(at2(15)).getTime(), 'should take the latest clock-out');
+});
+
+test('a role with no clock data does not blank out a role that has one', () => {
+  const m = mergeClockSpan([
+    { clocked_in_at: null, clocked_out_at: null },
+    { clocked_in_at: at2(9), clocked_out_at: at2(15) },
+  ]);
+  assert.strictEqual(m.clocked_in_at.getTime(), new Date(at2(9)).getTime());
+  assert.strictEqual(m.clocked_out_at.getTime(), new Date(at2(15)).getTime());
+});
+
+test('no logs at all merges to nothing, not a crash', () => {
+  assert.deepStrictEqual(mergeClockSpan([]), { clocked_in_at: null, clocked_out_at: null, clock_adjusted: false });
+  assert.deepStrictEqual(mergeClockSpan(null), { clocked_in_at: null, clocked_out_at: null, clock_adjusted: false });
+});
+
+// The returned flag is `clock_adjusted` (boolean), not `clock_adjusted_at` —
+// that suffix belongs to the gig_logs timestamp column being read here, not
+// to this derived boolean. A reader that expects a timestamp must not find
+// one under this name.
+test('an adjustment on any row in the group carries through, under the boolean-shaped name', () => {
+  const m = mergeClockSpan([
+    { clocked_in_at: at2(9), clocked_out_at: at2(12), clock_adjusted_at: null },
+    { clocked_in_at: at2(12), clocked_out_at: at2(15), clock_adjusted_at: at2(16) },
+  ]);
+  assert.strictEqual(m.clock_adjusted, true);
+  assert.strictEqual(m.clock_adjusted_at, undefined, 'the old timestamp-shaped key must not linger');
+});
+
+// The merged span feeds straight into payableHours, exactly like a single
+// log did before grouping existed.
+test('a merged span is usable by payableHours like any other log', () => {
+  const m = mergeClockSpan([
+    { clocked_in_at: at2(10), clocked_out_at: at2(14) },
+    { clocked_in_at: at2(9),  clocked_out_at: at2(15) },
+  ]);
+  const r = payableHours(m, 6);
+  assert.strictEqual(r.source, 'measured');
+  assert.strictEqual(r.hours, 6);
+});

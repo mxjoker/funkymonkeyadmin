@@ -12,7 +12,7 @@ function loadHelpers() {
   assert.ok(a !== -1 && b !== -1, 'pure-helper sentinels missing from admin.html');
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS, reportButtonVisible };', ctx);
+  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS, reportButtonVisible, payLabel };', ctx);
   return ctx.out;
 }
 
@@ -237,4 +237,40 @@ test('the pay review marks hours a human corrected by hand', () => {
   assert.match(block, /clock_adjusted/, 'the preflight line never reads the adjusted flag');
   assert.match(block, /corrected|adjusted by hand|hand-corrected/i,
     'nothing tells the reviewer the hours were corrected by hand');
+});
+
+// ── What the assignment card shows for pay ──────────────────────────────────
+// Mirrors _pay.js's resolvePayType (role first, staff second) and
+// resolveAmount's override-wins rule, display only — admin.html cannot
+// require the server module, the same reason clockRowLabel() and
+// balanceLinkAmounts() duplicate their server-side counterparts.
+const { payLabel } = loadHelpers();
+
+test('an hourly role shows the rate, not a flat guess', () => {
+  const label = payLabel({}, 'hourly', { hourly_rate: 12, flat_rate: 80 });
+  assert.match(label, /^hourly · \$12\.00\/hr$/);
+});
+
+test('a flat role shows the flat rate', () => {
+  const label = payLabel({}, 'flat', { hourly_rate: 12, flat_rate: 80 });
+  assert.match(label, /^flat · \$80\.00$/);
+});
+
+test('a per-gig override wins outright, over either role setting', () => {
+  const hourly = payLabel({ pay_amount_override: 150 }, 'hourly', { hourly_rate: 12, flat_rate: 80 });
+  assert.match(hourly, /^override · \$150\.00$/);
+  const flat = payLabel({ pay_amount_override: 0 }, 'flat', { hourly_rate: 12, flat_rate: 80 });
+  assert.match(flat, /^override · \$0\.00$/, 'a deliberate $0 override must not read as "no override"');
+});
+
+// No role_pay row for this role: falls through to the staff member's own
+// pay_type, the same order _pay.js's resolvePayType resolves in.
+test('with no role setting, the label falls through to the staff member', () => {
+  const label = payLabel({}, undefined, { pay_type: 'hourly', hourly_rate: 15, flat_rate: 80 });
+  assert.match(label, /^hourly · \$15\.00\/hr$/);
+});
+
+test('with neither a role nor a staff setting, the label defaults to flat', () => {
+  const label = payLabel({}, undefined, { flat_rate: 80 });
+  assert.match(label, /^flat · \$80\.00$/);
 });

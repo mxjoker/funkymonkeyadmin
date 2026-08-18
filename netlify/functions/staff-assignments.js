@@ -4,6 +4,7 @@ const {
 } = require('./_auth');
 const { sendEmail, wrap, logChange, ensureBookingChanges } = require('./_email');
 const { sendSms, ensureSmsTables } = require('./_sms');
+const { isValidPayType, resolvePayType, assignmentRefusal } = require('./_pay');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -200,6 +201,21 @@ async function ensureTables(client) {
     )
   `);
 
+  // Pay type belongs to the role, not to the person and not to the service:
+  // Foam Crew is hourly wherever it appears, Story Doodles is flat. Roles are not
+  // stored anywhere else — skillTags() in admin.html derives the list at runtime
+  // from SKILL_PRESETS plus whatever tags are in use — so this table carries the
+  // pay decision only and deliberately does NOT try to become a role registry.
+  // A role with no row here has no opinion, and resolution falls through to the
+  // staff member's own pay_type, which is what every assignment did before this.
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS role_pay (
+      role_name  VARCHAR(100) PRIMARY KEY,
+      pay_type   VARCHAR(20) NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
   await client.query(`
     CREATE TABLE IF NOT EXISTS staff_assignments (
       id SERIAL PRIMARY KEY,
@@ -267,6 +283,11 @@ async function ensureTables(client) {
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS drive_minutes_each_way INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS total_minutes INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS schedule_start TIME",
+    // Guaranteed here too, not only by payroll.js's ensureTables — this file
+    // now writes to it (set_pay_override), and a writer
+    // that depends on another module's migrations having already run is the
+    // same deploy-order bug payroll.js's own role_pay guard exists to avoid.
+    "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS pay_amount_override NUMERIC(10,2)",
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS foam_fluid_needed BOOLEAN",
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS empty_jugs_refilled BOOLEAN",
     "ALTER TABLE gig_logs ADD COLUMN IF NOT EXISTS gas_level VARCHAR(50)",
@@ -380,6 +401,13 @@ exports.handler = async (event) => {
             'SELECT * FROM staff_slots ORDER BY service_id, sort_order'
           );
           return json(200, { slots });
+        }
+
+        if (params.role_pay) {
+          const { rows } = await client.query('SELECT role_name, pay_type FROM role_pay');
+          const map = {};
+          for (const r of rows) map[r.role_name] = r.pay_type;
+          return json(200, { role_pay: map });
         }
 
         if (params.time_templates === 'true') {
@@ -619,6 +647,41 @@ exports.handler = async (event) => {
           return json(200, rows[0]);
         }
 
+        // ── Per-gig pay override ─────────────────────────────────────────
+        // Admin only, and audited both sides: this is a manual change to what
+        // someone is paid, the same class of edit as adjust_clock above.
+        if (action === 'set_pay_override') {
+          const adminAuth = await requireAuth(event, ['admin']);
+          if (!adminAuth) return unauthorized();
+
+          const { assignment_id, amount } = body;
+          if (!assignment_id) return json(400, { error: 'assignment_id required' });
+
+          const parsed = validPayOverride(amount);
+          if (!parsed.ok) return json(400, { error: parsed.error });
+
+          const { rows: before } = await client.query(
+            `SELECT sa.*, s.name AS staff_name, s.preferred_name
+             FROM staff_assignments sa LEFT JOIN staff s ON s.id = sa.staff_id
+             WHERE sa.id=$1`, [parseInt(assignment_id)]);
+          if (!before.length) return json(404, { error: 'Not found' });
+
+          const { rows } = await client.query(
+            'UPDATE staff_assignments SET pay_amount_override=$1, updated_at=NOW() WHERE id=$2 RETURNING *',
+            [parsed.value, parseInt(assignment_id)]
+          );
+
+          const who = before[0].preferred_name || before[0].staff_name;
+          const entry = payOverrideLog(before[0].pay_amount_override, parsed.value, who);
+          try {
+            await ensureBookingChanges(client);
+            await logChange(client, before[0].booking_id, entry.action, entry.detail);
+          } catch (logErr) {
+            console.error('set_pay_override: failed to write the audit line —', logErr.message);
+          }
+          return json(200, { assignment: rows[0] });
+        }
+
         if (action === 'submit_survey') {
           const auth = await requireAuth(event);
           if (!auth) return unauthorized();
@@ -729,6 +792,34 @@ exports.handler = async (event) => {
           return json(200, { success: true, saved: realSlots.length });
         }
 
+        // Admin-only: set or clear a role's pay type. This decides whether every
+        // future assignment to that role is paid by the hour or by the event, so
+        // it is not a staff-editable field.
+        if (action === 'save_role_pay') {
+          const adminAuth = await requireAuth(event, ['admin']);
+          if (!adminAuth) return unauthorized();
+
+          const roleName = String(body.role_name || '').trim();
+          if (!roleName || roleName.length > 100) return json(400, { error: 'role_name required' });
+
+          // null clears the row; anything else must be one of the two real types.
+          // An unrecognised value must be refused rather than stored, or
+          // resolvePayType would silently fall through and the UI would show a
+          // setting that does nothing.
+          if (body.pay_type === null || body.pay_type === '') {
+            await client.query('DELETE FROM role_pay WHERE role_name=$1', [roleName]);
+            return json(200, { role_name: roleName, pay_type: null });
+          }
+          if (!isValidPayType(body.pay_type)) return json(400, { error: 'pay_type must be "hourly" or "flat"' });
+
+          await client.query(
+            `INSERT INTO role_pay (role_name, pay_type, updated_at) VALUES ($1,$2,NOW())
+             ON CONFLICT (role_name) DO UPDATE SET pay_type=EXCLUDED.pay_type, updated_at=NOW()`,
+            [roleName, body.pay_type]
+          );
+          return json(200, { role_name: roleName, pay_type: body.pay_type });
+        }
+
         if (action === 'notify_staff') {
           const { booking_id } = body;
           if (!booking_id) return json(400, { error: 'booking_id required' });
@@ -749,6 +840,24 @@ exports.handler = async (event) => {
           if (!booking_id || !staff_id || !tag_filled) {
             return json(400, { error: 'booking_id, staff_id, tag_filled required' });
           }
+
+          // Refused here, before the row exists, not discovered as a $0 line
+          // item in payroll after the week is already worked. Resolved the
+          // same way payroll.js resolves it -- role first, staff second --
+          // so this check and the eventual payment never disagree.
+          const { rows: assignStaffRows } = await client.query('SELECT * FROM staff WHERE id=$1', [parseInt(staff_id)]);
+          const assignStaff = assignStaffRows[0];
+          // No FK on staff_assignments.staff_id: a bad id used to fall through
+          // to assignmentRefusal(), which reports the missing rate on a staff
+          // record that does not exist -- send someone to fix a person, not a
+          // record.
+          if (!assignStaff) return json(404, { error: 'Staff not found' });
+          const { rows: rolePayRows } = await client.query('SELECT role_name, pay_type FROM role_pay');
+          const rolePayByRole = {};
+          for (const r of rolePayRows) rolePayByRole[r.role_name] = r.pay_type;
+          const payType = resolvePayType(tag_filled, rolePayByRole, assignStaff);
+          const refusal = assignmentRefusal(assignStaff, payType, tag_filled);
+          if (refusal) return json(400, { error: refusal });
 
           const { rows } = await client.query(
             `INSERT INTO staff_assignments (booking_id, staff_id, tag_filled, status, slot_id, assigned_at)
@@ -775,9 +884,8 @@ exports.handler = async (event) => {
           );
           const fa = freshAssignment || assignment;
 
-          const { rows: staffRows }   = await client.query('SELECT * FROM staff WHERE id=$1', [parseInt(staff_id)]);
           const { rows: bookingRows } = await client.query('SELECT * FROM bookings WHERE id=$1', [parseInt(booking_id)]);
-          const s = staffRows[0];
+          const s = assignStaff;
           const b = bookingRows[0];
 
           if (s && b) {
@@ -1050,6 +1158,53 @@ function clockAdjustmentLog(stage, before, after, nextStatus = null) {
   return { action: 'Clock adjusted', detail };
 }
 
+// A per-gig pay override is the escape hatch for the higher-of-roles rule: when
+// one person fills two roles on a booking, payroll pays the higher of the two,
+// and Joe's condition for accepting that rule was that the odd case stay easy to
+// correct. An override wins outright over both roles.
+//
+// Refused here rather than in _pay.js: that module deliberately accepts any
+// finite number so a deliberate $0 (an unpaid favour, a correction) survives,
+// and its comment defers sign validation to this write boundary. A negative wage
+// is always a typo.
+function validPayOverride(v) {
+  if (v === null || v === undefined || v === '') return { ok: true, value: null };
+  // Number() coerces almost anything into a storable wage: Number(' ') is 0,
+  // Number([]) is 0, Number(true) is 1. Only a number or a string is a
+  // legitimate shape for a wage in the first place -- everything else is
+  // refused outright rather than laundered into a figure.
+  if (typeof v !== 'number' && typeof v !== 'string') {
+    return { ok: false, error: 'Override must be a number' };
+  }
+  const trimmed = typeof v === 'string' ? v.trim() : v;
+  // Whitespace means "clear" to any sane reading, exactly like ''.
+  if (trimmed === '') return { ok: true, value: null };
+  // A trimmed string is restricted to plain decimal digits -- Number() also
+  // accepts hex ('0x10') and other exotic numeric literals as valid, which a
+  // wage typed into a form field never legitimately is.
+  if (typeof trimmed === 'string' && !/^-?\d*\.?\d+$/.test(trimmed)) {
+    return { ok: false, error: 'Override must be a number' };
+  }
+  const n = Number(trimmed);
+  if (!isFinite(n)) return { ok: false, error: 'Override must be a number' };
+  if (n < 0) return { ok: false, error: 'Override cannot be negative' };
+  return { ok: true, value: Math.round(n * 100) / 100 };
+}
+
+// Both sides of the change, in words. A wage that can be rewritten with no trail
+// is worth less than no record, so this is what booking_changes gets.
+function payOverrideLog(before, after, staffName) {
+  const money = (v) => (v === null || v === undefined ? null : `$${Number(v).toFixed(2)}`);
+  const from = money(before), to = money(after);
+  const who = staffName || 'staff';
+  let detail;
+  if (from && to)       detail = `${who}: ${from} → ${to}`;
+  else if (!from && to) detail = `${who}: standard rate → ${to}`;
+  else if (from && !to) detail = `${who}: ${from} → back to the standard rate`;
+  else                  detail = `${who}: nothing to change`;
+  return { action: 'Pay override changed', detail };
+}
+
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
 // One letter per role this staff member matched on this booking. The value is
@@ -1203,3 +1358,5 @@ exports.clockAdjustmentLog = clockAdjustmentLog;
 exports.isAdjustableStage = isAdjustableStage;
 exports.advancedStatus = advancedStatus;
 exports.ensureTables = ensureTables;
+module.exports.validPayOverride = validPayOverride;
+module.exports.payOverrideLog = payOverrideLog;
