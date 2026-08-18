@@ -55,3 +55,31 @@ test('an estimated payment the floor genuinely lifted still says so', () => {
   });
   assert.strictEqual(note, 'Auto-generated: 150 min raw (15 min drive ea.) → 5h paid (5h min applied)');
 });
+
+// IMPORTANT 2: an overridden gig used to store "Auto-generated: 480 min raw
+// (30 min drive ea.) → 8h paid" beside an amount that has nothing to do with
+// those hours -- the note described time that was never used to pay anyone.
+// A deliberate override describes itself: the figure and which roles earned it.
+test('an override describes the override, not hours that were never used to pay it', () => {
+  const note = paymentNote({
+    isOverride: true, amount: 200, roles_filled: ['Foam Crew', 'Story Doodles'],
+    hours_source: 'estimated', measured_hours: null, hours: 8,
+    raw_hours: 8, total_minutes: 480, drive_minutes: 30,
+  });
+  assert.strictEqual(note, 'Override: $200.00 for Foam Crew, Story Doodles');
+  assert.doesNotMatch(note, /min raw|min drive|paid \(/);
+});
+
+test('an override with no roles recorded still describes the figure', () => {
+  const note = paymentNote({ isOverride: true, amount: 0, roles_filled: [] });
+  assert.strictEqual(note, 'Override: $0.00');
+});
+
+test('a non-override payment is completely unaffected by the isOverride field existing and being false', () => {
+  const note = paymentNote({
+    isOverride: false, amount: 72, roles_filled: ['Foam Crew'],
+    hours_source: 'measured', measured_hours: 6.5, hours: 6.5,
+    raw_hours: 6, total_minutes: 360, drive_minutes: 30,
+  });
+  assert.strictEqual(note, 'Measured 6.5h clocked → 6.5h paid');
+});

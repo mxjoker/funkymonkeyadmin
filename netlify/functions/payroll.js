@@ -130,13 +130,20 @@ async function ensureTables(client) {
   } catch (_) {}
 }
 
-// The only record of how an approved payment's hours were derived — the DB
-// row itself doesn't say clock vs. estimate (see hours_source below), so this
-// text is what a wage question gets answered from. p.hours may be MEASURED
-// while raw_hours/total_minutes are still the estimate; comparing p.hours
-// against p.raw_hours regardless of source let a gig where the clock beat the
+// The only record of how an approved payment's amount was derived — the DB
+// row itself doesn't say clock vs. estimate vs. override (see hours_source
+// below), so this text is what a wage question gets answered from. An
+// overridden gig's amount has nothing to do with its hours, so describing
+// the hours ("480 min raw → 8h paid") beside a $200 override is a note about
+// time that was never used to pay anyone. p.hours may be MEASURED while
+// raw_hours/total_minutes are still the estimate; comparing p.hours against
+// p.raw_hours regardless of source let a gig where the clock beat the
 // estimate get stamped "(5h min applied)" when no floor applied at all.
 function paymentNote(p) {
+  if (p.isOverride) {
+    const roles = (p.roles_filled || []).join(', ');
+    return `Override: $${Number(p.amount || 0).toFixed(2)}${roles ? ` for ${roles}` : ''}`;
+  }
   if (p.hours_source === 'measured') {
     const floorApplied = p.hours > p.measured_hours;
     return `Measured ${p.measured_hours}h clocked → ${p.hours}h paid${floorApplied ? ' (5h min applied)' : ''}`;
@@ -151,7 +158,7 @@ function paymentNote(p) {
 // is that per-row noise buries the signals that matter.
 function noClockDataSummary(count, total) {
   if (!count) return null;
-  return `${count} of ${total} assignment${total === 1 ? '' : 's'} had no clock data; ` +
+  return `${count} of ${total} payment${total === 1 ? '' : 's'} had no clock data; ` +
     `${count === 1 ? 'that was' : 'those were'} paid the estimate`;
 }
 
@@ -485,18 +492,21 @@ exports.handler = async (event) => {
 
             const bookingPaid = paymentForBooking(group, rolePayByRole, a, totalHours);
             const payType = bookingPaid.payType;
-            // Preserves the old behaviour exactly: a repeat run never overwrites
-            // an existing flat-rate payment's amount with a freshly computed
-            // default (the UPDATE below deliberately doesn't touch `amount`).
-            // An override or an hourly result always carries its real figure —
-            // hourly can legitimately change on a re-run (updated clock data),
-            // and an override is a deliberate figure that should always show.
+            // `amount` here is what the preflight displays; whether an
+            // existing row's `amount` column actually gets rewritten is a
+            // separate decision, made below (IMPORTANT 1) using isOverride.
+            // Preserves the old behaviour: a repeat run never overwrites an
+            // existing flat-rate payment's amount with a freshly computed
+            // default (the UPDATE below deliberately doesn't touch `amount`
+            // for that case — see p.isOverride below).
             const amount = existingPayment.length > 0 && payType === 'flat' && bookingPaid.basis === 'flat rate'
               ? null : bookingPaid.amount;
 
-            // Warn about $0 line items (flat_rate=0 staff)
+            // Warn about $0 line items (flat_rate=0 staff) — but not a
+            // deliberate $0 override, which is a real decision with nothing
+            // to check on the staff record.
             const resolvedAmount = amount !== null ? amount : 0;
-            if (resolvedAmount === 0) {
+            if (resolvedAmount === 0 && !bookingPaid.isOverride) {
               warnings.push(`${a.preferred_name || a.staff_name} (staff_id ${a.staff_id}) has $0 for booking ${a.reference} — check flat_rate/hourly_rate setting`);
             }
 
@@ -510,6 +520,7 @@ exports.handler = async (event) => {
               event_date: a.event_date,
               pay_type:   payType,
               pay_basis:  bookingPaid.basis,
+              isOverride: bookingPaid.isOverride,
               roles_filled: bookingPaid.rolesFilled,
               raw_hours:  Math.round(rawHours * 100) / 100,
               hours:      totalHours,
@@ -521,7 +532,7 @@ exports.handler = async (event) => {
               // hours_source so the preflight staff line can render both.
               // True if any role's log in the group was hand-corrected, not
               // just the row that happened to be group[0].
-              clock_adjusted: clockSpan.clock_adjusted_at,
+              clock_adjusted: clockSpan.clock_adjusted,
               amount,
               drive_minutes: drive,
               total_minutes: totalMins,
@@ -599,10 +610,24 @@ exports.handler = async (event) => {
           const paymentIds = [];
           for (const p of paymentsToCreate) {
             if (p.existingId) {
-              await client.query(
-                'UPDATE staff_payments SET hours=$1, hours_source=$2, measured_hours=$3, updated_at=NOW() WHERE id=$4',
-                [p.hours, p.hours_source, p.measured_hours, p.existingId]
-              );
+              // IMPORTANT 1: a repeat run must not overwrite an existing
+              // row's amount with a freshly computed default (a flat rate
+              // that changed, an hourly recompute) — that would silently
+              // disagree with whatever total was already approved. But a
+              // deliberate per-gig override is the one figure Joe would
+              // come back to insist on after seeing a payroll number he
+              // disagreed with, so it does overwrite, $0 included.
+              if (p.isOverride) {
+                await client.query(
+                  'UPDATE staff_payments SET amount=$1, hours=$2, hours_source=$3, measured_hours=$4, updated_at=NOW() WHERE id=$5',
+                  [p.amount, p.hours, p.hours_source, p.measured_hours, p.existingId]
+                );
+              } else {
+                await client.query(
+                  'UPDATE staff_payments SET hours=$1, hours_source=$2, measured_hours=$3, updated_at=NOW() WHERE id=$4',
+                  [p.hours, p.hours_source, p.measured_hours, p.existingId]
+                );
+              }
               paymentIds.push({ id: p.existingId, ...p });
             } else {
               const { rows: ins } = await client.query(`

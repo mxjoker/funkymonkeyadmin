@@ -12,16 +12,20 @@ test('no line when every assignment had clock data', () => {
   assert.strictEqual(noClockDataSummary(0, 22), null);
 });
 
+// The denominator is byStaffBooking.size — one (staff, booking) group, i.e.
+// one payment, not one raw staff_assignments row. Two roles for the same
+// person on the same booking are one payment, so "assignments" overstated
+// the count "assignments" implies; "payments" names what's actually counted.
 test('one aggregate line naming both counts', () => {
   assert.strictEqual(
     noClockDataSummary(18, 22),
-    '18 of 22 assignments had no clock data; those were paid the estimate'
+    '18 of 22 payments had no clock data; those were paid the estimate'
   );
 });
 
-test('singular assignment reads grammatically', () => {
+test('singular payment reads grammatically', () => {
   assert.strictEqual(
     noClockDataSummary(1, 1),
-    '1 of 1 assignment had no clock data; that was paid the estimate'
+    '1 of 1 payment had no clock data; that was paid the estimate'
   );
 });
