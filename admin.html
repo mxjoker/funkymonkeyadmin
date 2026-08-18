@@ -2486,22 +2486,29 @@ function renderAssignmentCard(a, payByStaff, bookingId, slotTag = null) {
   // Per-gig pay override — the designated escape hatch for the higher-of
   // rule. Visible on the card itself, not behind a disclosure: Joe's
   // condition for the higher-of rule was that rare cases get resolved case
-  // by case "if editing/altering the pay per event is easy to do." Blank by
-  // default; the resolved amount (role pay type, or the staff default) is
-  // the placeholder, so the box shows what will be paid without an override
-  // rather than looking empty/unset.
+  // by case "if editing/altering the pay per event is easy to do." The 💵
+  // span states the resolved basis honestly (e.g. "hourly · $12.00/hr");
+  // the input's placeholder does NOT — this card has no hours, so it cannot
+  // compute what an hourly role would actually total, and showing the rate
+  // there read as the gig's pay. Left as a literal "override" instead.
   let overrideHtml = '';
   if (a.status === 'assigned') {
     const staffRecord = (allStaff || []).find(s => s.id === a.staff_id);
-    const resolved = payLabel(a, allRolePay[a.tag_filled], staffRecord);
-    const placeholderAmt = resolved.replace(/^[^$]*\$/, '').replace('/hr', '');
-    const hasOverride = a.pay_amount_override !== null && a.pay_amount_override !== undefined;
+    const hasOverride = a.pay_amount_override !== null && a.pay_amount_override !== undefined && a.pay_amount_override !== '';
+    // allStaff holds only active staff; a deactivated person's assignment
+    // still renders, but payLabel(..., undefined) would confidently report
+    // "flat · $0.00" for a rate that was never looked up. An override
+    // doesn't need the staff record (payLabel reads it straight off the
+    // assignment), so only the no-record, no-override case falls to '—'.
+    const resolved = staffRecord || hasOverride
+      ? payLabel(a, allRolePay[a.tag_filled], staffRecord)
+      : '—';
     const overrideInputId = `pay-override-${a.id}`;
     overrideHtml = `
       <div style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
         <span style="font-size:.72rem;color:#6b7280">💵 ${esc(resolved)}</span>
         <input type="number" id="${overrideInputId}" value="${hasOverride ? Number(a.pay_amount_override).toFixed(2) : ''}"
-          placeholder="${placeholderAmt}" min="0" step="0.01" title="Override this gig's pay — blank uses the resolved amount"
+          placeholder="override" min="0" step="0.01" title="Override this gig's pay — blank uses the resolved amount"
           style="width:90px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:.75rem"/>
         <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:.72rem"
           onclick="saveOverride(${a.id},'${overrideInputId}','${bookingId}')">Save override</button>
@@ -2659,8 +2666,12 @@ async function saveOverride(assignmentId, inputId, bookingId) {
                              amount: raw === '' ? null : raw })
     });
     if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
-    flash('override-flash-' + assignmentId);
+    // override-flash-* lives inside the assignment card, which
+    // loadStaffAssignments() re-renders wholesale — flashing first destroyed
+    // the element before the "✓ Updated" transition was ever seen. Flash the
+    // freshly rendered element instead, same order assignStaff() uses.
     await loadStaffAssignments(bookingId);
+    flash('override-flash-' + assignmentId);
   } catch (e) { alert('Could not save override: ' + e.message); }
 }
 
