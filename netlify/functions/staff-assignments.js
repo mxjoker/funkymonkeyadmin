@@ -847,6 +847,11 @@ exports.handler = async (event) => {
           // so this check and the eventual payment never disagree.
           const { rows: assignStaffRows } = await client.query('SELECT * FROM staff WHERE id=$1', [parseInt(staff_id)]);
           const assignStaff = assignStaffRows[0];
+          // No FK on staff_assignments.staff_id: a bad id used to fall through
+          // to assignmentRefusal(), which reports the missing rate on a staff
+          // record that does not exist -- send someone to fix a person, not a
+          // record.
+          if (!assignStaff) return json(404, { error: 'Staff not found' });
           const { rows: rolePayRows } = await client.query('SELECT role_name, pay_type FROM role_pay');
           const rolePayByRole = {};
           for (const r of rolePayRows) rolePayByRole[r.role_name] = r.pay_type;
@@ -1164,7 +1169,23 @@ function clockAdjustmentLog(stage, before, after, nextStatus = null) {
 // is always a typo.
 function validPayOverride(v) {
   if (v === null || v === undefined || v === '') return { ok: true, value: null };
-  const n = Number(v);
+  // Number() coerces almost anything into a storable wage: Number(' ') is 0,
+  // Number([]) is 0, Number(true) is 1. Only a number or a string is a
+  // legitimate shape for a wage in the first place -- everything else is
+  // refused outright rather than laundered into a figure.
+  if (typeof v !== 'number' && typeof v !== 'string') {
+    return { ok: false, error: 'Override must be a number' };
+  }
+  const trimmed = typeof v === 'string' ? v.trim() : v;
+  // Whitespace means "clear" to any sane reading, exactly like ''.
+  if (trimmed === '') return { ok: true, value: null };
+  // A trimmed string is restricted to plain decimal digits -- Number() also
+  // accepts hex ('0x10') and other exotic numeric literals as valid, which a
+  // wage typed into a form field never legitimately is.
+  if (typeof trimmed === 'string' && !/^-?\d*\.?\d+$/.test(trimmed)) {
+    return { ok: false, error: 'Override must be a number' };
+  }
+  const n = Number(trimmed);
   if (!isFinite(n)) return { ok: false, error: 'Override must be a number' };
   if (n < 0) return { ok: false, error: 'Override cannot be negative' };
   return { ok: true, value: Math.round(n * 100) / 100 };
