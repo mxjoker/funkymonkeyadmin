@@ -15,13 +15,13 @@ function loadHelpers() {
   const ctx = {};
   vm.createContext(ctx);
   vm.runInContext(
-    HTML.slice(a, b) + '\nout = { BOOKING_COLUMNS, sortBookings, nextSort, roundTo15, incompleteReasons };',
+    HTML.slice(a, b) + '\nout = { BOOKING_COLUMNS, sortBookings, nextSort, incompleteReasons };',
     ctx
   );
   return ctx.out;
 }
 
-const { BOOKING_COLUMNS, sortBookings, nextSort, roundTo15 } = loadHelpers();
+const { BOOKING_COLUMNS, sortBookings, nextSort } = loadHelpers();
 
 const order = (list, sort, field = 'reference') =>
   sortBookings([...list], sort).map(b => b[field]);
@@ -106,42 +106,10 @@ test('the sorted list is a copy — sorting must not reorder allBookings', () =>
   assert.deepStrictEqual(ROWS, original);
 });
 
-// ── Event time snapping (admin booking modal) ────────────────────────────────
-
-test('minutes snap to the nearest quarter hour', () => {
-  assert.strictEqual(roundTo15('13:00'), '13:00');
-  assert.strictEqual(roundTo15('13:07'), '13:00');
-  assert.strictEqual(roundTo15('13:08'), '13:15');
-  assert.strictEqual(roundTo15('13:22'), '13:15');
-  assert.strictEqual(roundTo15('13:23'), '13:30');
-  assert.strictEqual(roundTo15('13:38'), '13:45');
-});
-
-test('rounding up past :45 rolls the hour', () => {
-  assert.strictEqual(roundTo15('13:53'), '14:00');
-});
-
-test('late-night rounding never rolls into the next day', () => {
-  // 23:53 -> 24:00 is not a time any input can hold, and an event must not
-  // silently move to tomorrow because of rounding.
-  assert.strictEqual(roundTo15('23:53'), '23:45');
-});
-
-test('Postgres time values with seconds are accepted', () => {
-  assert.strictEqual(roundTo15('14:30:00'), '14:30');
-  assert.strictEqual(roundTo15('09:07:42'), '09:00');
-});
-
-test('single-digit hours are zero-padded so the input accepts them', () => {
-  assert.strictEqual(roundTo15('9:15'), '09:15');
-});
-
-test('empty and junk stay empty rather than becoming 00:00', () => {
-  // Clearing the field must clear it, not silently set midnight.
-  for (const v of ['', null, undefined, 'not a time']) {
-    assert.strictEqual(roundTo15(v), '', `${JSON.stringify(v)} should round to ''`);
-  }
-});
+// Event-time snapping tests lived here. The Event Time field is now a <select>
+// of quarter hours (TIME_OPTIONS in admin.html), which cannot produce an
+// off-slot value in the first place, so roundTo15() and its tests were removed
+// together. See test/time-options.test.js.
 
 // ── The incomplete catch-all ─────────────────────────────────────────────────
 // Status-based panels miss leads that arrived without a service or a price.

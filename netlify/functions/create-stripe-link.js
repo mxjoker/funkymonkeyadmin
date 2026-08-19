@@ -1,6 +1,7 @@
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
 const { esc, sendEmail, wrap } = require('./_email');
+const { sendTemplate } = require('./automations');
 const { balanceCharge, SERVICE_FEE_RATE } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
@@ -238,27 +239,19 @@ exports.handler = async (event) => {
         // Email failure does not fail the link creation
       }
     } else if (!skip_client_email) {
+      // Body and subject now live in the 'deposit_link_ready' rule, editable in
+      // Automations. Previously an HTML literal here — the only way to reword
+      // it was a code change and a deploy. sendTemplate also writes email_log,
+      // which this branch never did: the deposit email was being sent and
+      // leaving no record that it had been.
       try {
-        await sendEmail(email, `Your deposit link is ready! 💳 — Funky Monkey Events`,
-          wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${esc(client)}</strong>! 🎉</p>
-            <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Your booking for <strong style="color:#F3E8FF">${esc(service)}</strong> is approved! Pay your deposit to lock in your date.</p>
-            <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:24px;text-align:center">
-              <div style="font-size:11px;color:#A78BCA;text-transform:uppercase;font-weight:700;margin-bottom:6px">Deposit Amount</div>
-              <div style="font-size:36px;font-weight:900;color:#10B981;font-family:'Fredoka One',sans-serif">$${amountNum.toFixed(2)}</div>
-              <div style="font-size:12px;color:#A78BCA;margin-top:4px">Secure your date — balance due day of event</div>
-            </div>
-            <div style="text-align:center;margin-bottom:24px">
-              <a href="${url}" style="background-color:#10B981;color:#ffffff;padding:16px 40px;border-radius:12px;text-decoration:none;font-weight:900;font-size:16px;display:inline-block">Pay Deposit Now →</a>
-              <div style="font-size:11px;color:#A78BCA;margin-top:14px;line-height:1.5">
-                Button not working? Copy this link into your browser:<br>
-                <a href="${url}" style="color:#06B6D4;word-break:break-all">${url}</a>
-              </div>
-            </div>
-            <div style="background:#FFFFFF08;border-radius:10px;padding:12px;font-size:11px;color:#A78BCA;line-height:1.6;text-align:center">
-              🔒 Secure payment powered by Stripe · Accepts all major cards, Apple Pay &amp; Google Pay<br>
-              Link expires in 24 hours · Booking ref: ${esc(String(bookingRef || bookingId))}
-            </div>
-            <p style="font-size:13px;color:#A78BCA;text-align:center;margin-top:16px">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`));
+        await withClient(async (c) => {
+          const { rows } = await c.query('SELECT * FROM bookings WHERE id=$1', [bookingRow.id]);
+          const b = rows[0];
+          if (!b) throw new Error(`booking ${bookingRow.id} vanished between link creation and email`);
+          const r = await sendTemplate(c, { ...b, stripe_payment_link: url }, 'deposit_link_ready', url);
+          if (!r.sent) console.error('create-stripe-link: deposit email not sent —', r.error);
+        });
       } catch(emailErr) {
         console.error("create-stripe-link: email failed:", emailErr.message);
         // Email failure does not fail the link creation

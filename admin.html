@@ -1494,20 +1494,6 @@ function sortBookings(list, { key, dir }) {
   });
 }
 
-// "13:07" -> "13:00", "13:08" -> "13:15". Also accepts the "14:30:00" that
-// Postgres time columns hand back. Empty stays empty so clearing still clears.
-function roundTo15(value) {
-  const m = /^(\d{1,2}):(\d{2})/.exec(String(value || ''));
-  if (!m) return '';
-  let h = Math.min(23, Number(m[1]));
-  let slot = Math.round(Math.min(59, Number(m[2])) / 15) * 15;
-  if (slot === 60) { slot = 0; h += 1; }
-  // 23:53 would round up to 24:00, which no time input can hold — and an event
-  // must not jump to the next day because of rounding. Clamp to 23:45.
-  if (h > 23) { h = 23; slot = 45; }
-  return `${String(h).padStart(2, '0')}:${String(slot).padStart(2, '0')}`;
-}
-
 // What the deposit button will actually charge. `deposit_amount` is
 // authoritative and 0 is a legitimate value: schools and libraries are
 // deliberately no-deposit, and booking.js:349 already refuses to mint a link
@@ -1520,7 +1506,7 @@ function depositLinkAmount(b) {
 
 // Mirrors balanceCharge() and SERVICE_FEE_RATE in _items.js. Duplicated
 // deliberately — admin.html is a static page with no access to server modules,
-// the same reason finaliseLinkClient() below is duplicated — so if the rate or
+// the same reason workedHoursDisplay() below is duplicated — so if the rate or
 // the rounding changes there, change it here in the same commit.
 // test/admin-link-buttons.test.js asserts the two agree to the cent.
 //
@@ -1549,7 +1535,7 @@ function balanceLinkEligible(b) {
 
 // Mirrors workedHours() in netlify/functions/_timeclock.js — admin.html is a
 // static page with no build step and cannot require server modules, the same
-// reason balanceLinkAmounts() and finaliseLinkClient() are duplicated. DISPLAY
+// reason balanceLinkAmounts() is duplicated. DISPLAY
 // ONLY: payroll computes what it pays from the server module, and the 16-hour
 // rule and the 5-hour minimum live there. If those rules change, change this
 // label with them.
@@ -1811,22 +1797,41 @@ function wireAddressZip() {
   });
 }
 
+// Every quarter hour of the day, stored as 24h "HH:MM" (what the DB and
+// fmtTime already expect) and shown as "2:30 PM".
+//
+// A <select> rather than <input type="time" step="900">: step only constrains
+// the spinner arrows, so a typed or pasted 12:07 still stuck. Rounding it in
+// onchange worked but silently moved what someone had just typed — a dropdown
+// cannot produce an off-slot time in the first place.
+//
+// Full 24 hours rather than business hours only: the unmatched-option fallback
+// in bookingField covers legacy values, but a 6am setup slot is a real booking,
+// not a data error, and should be selectable rather than merely tolerated.
+const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
+  const h = Math.floor(i / 4), m = (i % 4) * 15;
+  const v = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  return { v, t: `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` };
+});
+
 function bookingField(label, name, value, type = 'text', opts = null) {
   const v = value === null || value === undefined ? '' : String(value);
   // A stored value that matches none of the presets (e.g. legacy lowercase
   // data) must not be silently blanked by the browser defaulting to the
   // empty option — surface it as an extra selected option instead.
-  const unmatched = opts && v && !opts.includes(v);
+  // An option is either a plain string (value and label the same) or {v, t}
+  // when the stored value is not what a human should read — a time is 14:30 in
+  // the database and "2:30 PM" on screen.
+  const optValue = (o) => (o && typeof o === 'object' ? o.v : o);
+  const optLabel = (o) => (o && typeof o === 'object' ? o.t : o);
+  const unmatched = opts && v && !opts.some(o => optValue(o) === v);
   const input = opts
     ? `<select class="bk-edit" data-f="${name}" data-orig="${esc(v)}">
          <option value=""></option>
          ${unmatched ? `<option value="${esc(v)}" selected>${esc(v)}</option>` : ''}
-         ${opts.map(o => `<option value="${esc(o)}" ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}
+         ${opts.map(o => `<option value="${esc(optValue(o))}" ${optValue(o) === v ? 'selected' : ''}>${esc(optLabel(o))}</option>`).join('')}
        </select>`
-    : `<input class="bk-edit" data-f="${name}" data-orig="${esc(v)}" type="${type}" value="${esc(v)}"${
-        // Times snap to :00/:15/:30/:45. step alone only drives the spinner —
-        // a typed 12:07 still sticks — so the value is rounded on change too.
-        type === 'time' ? ' step="900" onchange="this.value=roundTo15(this.value)"' : ''}>`;
+    : `<input class="bk-edit" data-f="${name}" data-orig="${esc(v)}" type="${type}" value="${esc(v)}">`;
   return `<div class="detail-field"><label>${label}</label>${input}</div>`;
 }
 
@@ -1897,10 +1902,10 @@ function removeItemRow(btn) {
 
 // id === null opens an empty modal for a new booking taken over the phone.
 // Saving it POSTs a draft; every other path is identical to editing.
-function openBooking(id) {
+function openBooking(id, seed) {
   const isNew = id === null || id === undefined;
   const b = isNew
-    ? { id: 'new', status: 'draft', addons: [] }
+    ? { id: 'new', status: 'draft', addons: [], ...(seed || {}) }
     : allBookings.find(x => String(x.id) === String(id));
   if (!b) return;
 
@@ -1945,7 +1950,7 @@ function openBooking(id) {
       ${bookingField('Referral', 'referral_source', b.referral_source, 'text', REFERRAL_SOURCES)}
       ${bookingField('Customer Type', 'customer_type', b.customer_type, 'text', CUSTOMER_TYPES)}
       ${bookingField('Event Date', 'event_date', (b.event_date || '').slice(0, 10), 'date')}
-      ${bookingField('Event Time', 'event_time', b.event_time, 'time')}
+      ${bookingField('Event Time', 'event_time', b.event_time, 'time', TIME_OPTIONS)}
       ${bookingField('Occasion', 'occasion', b.occasion, 'text',
         ['Birthday','Fun day / Carnival','Wedding','Corporate','Community','School','Library','Other'])}
       ${bookingField('Event Type', 'event_type', b.event_type, 'text', EVENT_TYPE_LABELS)}
@@ -2021,6 +2026,7 @@ function openBooking(id) {
           : `<span style="font-size:.75rem;color:#6b7280">No deposit on this booking</span>`}
       </div>
       ${b.stripe_payment_link?`<div class="stripe-result">Last link: <a href="${b.stripe_payment_link}" target="_blank" style="color:#7c3aed">Open →</a></div>`:''}
+      <div class="stripe-result" id="sent-deposit-${b.id}"></div>
       <div class="stripe-result" id="stripe-msg-${b.id}"></div>
     </div>`}
 
@@ -2044,6 +2050,42 @@ function openBooking(id) {
         <button class="btn btn-primary btn-sm" onclick="sendFinalisationLink('${b.id}')">Send Finalisation Link</button>
       </div>
       <div style="font-size:.75rem;color:#6b7280;margin-top:6px">Emails the client a link to review/complete their details and pay the deposit.</div>
+      <div style="font-size:.75rem;margin-top:6px" id="sent-final-${b.id}"></div>
+    </div>
+
+    <!-- Communication log -->
+    <div style="background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <strong style="font-size:.875rem">💬 Communication</strong>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="toggleCallForm('${b.id}')">Log a call</button>
+          <button class="btn btn-outline btn-sm" onclick="toggleFollowUpForm('${b.id}')">Schedule follow-up</button>
+        </div>
+      </div>
+      <div id="followup-form-${b.id}" style="display:none;margin-bottom:12px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:8px">
+        <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+          <label style="font-size:.75rem;color:#6b7280;white-space:nowrap">Send on</label>
+          <input type="date" id="fu-date-${b.id}" class="form-control" style="flex:0 0 160px;font-size:.8rem">
+          <input type="text" id="fu-subj-${b.id}" class="form-control" placeholder="Subject" style="flex:1;font-size:.8rem">
+        </div>
+        <textarea id="fu-body-${b.id}" class="form-control" rows="3" placeholder="Message — {{client_first_name}}, {{event_date}}, {{service_name}} all work here" style="font-size:.82rem;margin-bottom:8px"></textarea>
+        <button class="btn btn-primary btn-sm" onclick="saveFollowUp('${b.id}')">Schedule</button>
+        <span style="font-size:.72rem;color:#9ca3af;margin-left:8px">Goes out that morning (9am Central).</span>
+        <span id="fu-msg-${b.id}" style="font-size:.75rem;margin-left:8px"></span>
+      </div>
+      <div id="call-form-${b.id}" style="display:none;margin-bottom:12px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:8px">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <select id="call-dir-${b.id}" class="form-control" style="flex:0 0 130px;font-size:.8rem">
+            <option value="out">We called them</option>
+            <option value="in">They called us</option>
+          </select>
+          <input type="datetime-local" id="call-when-${b.id}" class="form-control" style="flex:1;font-size:.8rem">
+        </div>
+        <textarea id="call-note-${b.id}" class="form-control" rows="2" placeholder="What was said?" style="font-size:.82rem;margin-bottom:8px"></textarea>
+        <button class="btn btn-primary btn-sm" onclick="saveCall('${b.id}')">Save</button>
+        <span id="call-msg-${b.id}" style="font-size:.75rem;margin-left:8px"></span>
+      </div>
+      <div id="comms-log-${b.id}"><span class="text-muted" style="font-size:.8rem">Loading…</span></div>
     </div>`}
 
     ${isNew ? '' : `
@@ -2053,6 +2095,15 @@ function openBooking(id) {
         <strong style="font-size:.875rem">🧾 Invoice</strong>
         <button class="btn btn-outline btn-sm" onclick="downloadInvoice('${b.reference}')">Download PDF</button>
       </div>
+    </div>
+
+    <!-- Rebook -->
+    <div style="background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <strong style="font-size:.875rem">🔁 Rebook</strong>
+        <button class="btn btn-outline btn-sm" onclick="duplicateBooking('${b.id}')">Duplicate for rebook</button>
+      </div>
+      <div style="font-size:.75rem;color:#6b7280;margin-top:6px">Copies the client, service, items and venue into a new draft. Date, payment status and any Stripe links start fresh.</div>
     </div>`}
 
     ${isNew ? '' : `
@@ -2196,6 +2247,10 @@ function openBooking(id) {
     </div>
   ` : ''}
   `;
+
+  // Fire and forget: the log is supplementary, and a slow query must not hold
+  // up a modal whose remaining content is already on screen.
+  if (!isNew) loadComms(b.id);
 
   wireAddressZip();
 
@@ -3168,6 +3223,191 @@ async function sendBalanceLink(id) {
 // link. Order matters: the finalisation page can only ever surface a link
 // that already exists (create-stripe-link.js is admin-only), so a link
 // missing here means a client who lands on the page with nothing to pay. ──
+// ── Duplicate a booking for a rebook ─────────────────────────────────────────
+// An allow-list, not a delete-list, for the same reason _finalise.js uses one:
+// a new column added later defaults to NOT being copied. The alternative fails
+// the other way — a field nobody thought about rides along into a new booking.
+//
+// What is deliberately NOT here matters more than what is:
+//   reference, event_date/time — the whole point is that these are new
+//   status, deposit_paid, payment_* — a new booking is unpaid, whatever the old one was
+//   stripe_payment_link, stripe_balance_link — a copied link bills the OLD booking's
+//     session, and a deposit link stays re-payable forever
+//   sms_consent — consent was given for one event. Carrying it over would text
+//     someone who never agreed to be texted about this booking.
+const REBOOK_FIELDS = [
+  'client_name', 'client_phone', 'client_email', 'organisation_name', 'customer_type',
+  'service_id', 'service_name', 'service_price', 'event_type', 'event_type_id', 'occasion',
+  'event_location', 'event_zip', 'venue', 'surface_type', 'brand', 'referral_source',
+  'guest_count', 'child_name', 'guests_of_honour', 'notes',
+  'items', 'addons', 'extra_hours', 'extra_hours_cost', 'deposit_amount'
+];
+
+function duplicateBooking(id) {
+  const src = allBookings.find(x => String(x.id) === String(id));
+  if (!src) return;
+  const seed = {};
+  for (const f of REBOOK_FIELDS) {
+    if (src[f] !== undefined && src[f] !== null) {
+      seed[f] = Array.isArray(src[f]) ? JSON.parse(JSON.stringify(src[f])) : src[f];
+    }
+  }
+  closeModal();
+  openBooking(null, seed);
+  // Said plainly rather than left for them to notice: the date is the one
+  // thing a rebook always changes, and an unset date on a saved draft is how
+  // a booking goes missing from the calendar.
+  const note = document.getElementById('modal-title');
+  if (note) note.textContent = `New booking — copied from ${src.reference || 'a past event'} (set the date)`;
+}
+
+// ── Communication log ────────────────────────────────────────────────────────
+// email_log and sms_log are written by the senders themselves, so this reads
+// what actually went out rather than a second record that can drift. Phone
+// calls have no sender to record them, which is what booking_comms is for.
+const COMMS_ICON = { email: '✉️', sms: '💬', call: '📞', scheduled: '⏳' };
+
+function commsWhen(at) {
+  const d = new Date(at);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+         d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+// A failed send must not read like a successful one. Anything that is not a
+// delivered/sent terminal state is called out in red rather than shown as a
+// bare timestamp — the whole point of this panel is knowing what reached them.
+function commsStatus(r) {
+  const ok = ['sent', 'delivered', 'logged', 'received', 'pending'];
+  if (ok.includes(r.status)) return '';
+  return ` <strong style="color:#dc2626">${esc(r.status)}</strong>`;
+}
+
+async function loadComms(bookingId) {
+  const log = document.getElementById(`comms-log-${bookingId}`);
+  try {
+    const res = await apiFetch(`/api/automations?type=comms&booking_id=${bookingId}`);
+    if (!res.ok) throw new Error('load failed');
+    const rows = await res.json();
+
+    if (log) {
+      log.innerHTML = rows.length
+        ? rows.slice().reverse().map(r => {
+            const future = r.channel === 'scheduled' && r.status === 'pending';
+            return `
+            <div style="display:flex;gap:8px;padding:7px 0;border-bottom:1px solid #eef0f3;font-size:.8rem${future ? ';background:#fffbeb' : ''}">
+              <span style="flex:0 0 auto">${COMMS_ICON[r.channel] || '•'}</span>
+              <div style="flex:1;min-width:0">
+                <div style="color:#374151">${esc(r.label || '')}${r.direction === 'in' ? ' <span style="color:#059669">(inbound)</span>' : ''}${commsStatus(r)}</div>
+                <div style="color:#6b7280;word-break:break-word">${esc(String(r.detail || '').slice(0, 200))}</div>
+              </div>
+              <span style="flex:0 0 auto;color:#9ca3af;white-space:nowrap;text-align:right">
+                ${future ? 'scheduled ' + commsDay(r.at) : commsWhen(r.at)}
+                ${future ? `<br><a href="#" onclick="cancelFollowUp(event,'${bookingId}',${r.id})" style="color:#dc2626;font-size:.72rem">cancel</a>` : ''}
+              </span>
+            </div>`; }).join('')
+        : '<span class="text-muted" style="font-size:.8rem">Nothing sent or logged yet.</span>';
+    }
+
+    // "Sent, and when" for the two emails that have their own button. Last
+    // successful send wins — a resend should update the date, and a failed
+    // attempt must not overwrite a real one.
+    const lastGood = (match) => rows.filter(r =>
+      r.channel === 'email' && ['sent', 'delivered'].includes(r.status) && match(r)).pop();
+
+    const dep = lastGood(r => r.label === 'Deposit link ready');
+    const depEl = document.getElementById(`sent-deposit-${bookingId}`);
+    if (depEl) depEl.innerHTML = dep
+      ? `<span style="color:#059669">✓ Deposit email sent ${commsWhen(dep.at)}</span>`
+      : '<span style="color:#9ca3af">Deposit email not sent yet</span>';
+
+    // Sends from before manual templates existed logged as 'Manual' with this
+    // subject; matched too, so switching to templates does not erase history.
+    const fin = lastGood(r => /^Finalisation link/.test(r.label || '') ||
+                              /^Finalise your booking/.test(r.detail || ''));
+    const finEl = document.getElementById(`sent-final-${bookingId}`);
+    if (finEl) finEl.innerHTML = fin
+      ? `<span style="color:#059669">✓ Sent ${commsWhen(fin.at)}</span>`
+      : '<span style="color:#9ca3af">Not sent yet</span>';
+  } catch (e) {
+    if (log) log.innerHTML = '<span style="color:#dc2626;font-size:.8rem">Could not load the communication log.</span>';
+  }
+}
+
+// Date only. A scheduled follow-up has no meaningful clock time — the cron
+// runs once a day — so showing 12:00 AM beside it would be a promise the
+// schedule cannot keep.
+function commsDay(at) {
+  const d = new Date(at);
+  return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function toggleFollowUpForm(id) {
+  const el = document.getElementById(`followup-form-${id}`);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveFollowUp(id) {
+  const msg = document.getElementById(`fu-msg-${id}`);
+  const send_on = document.getElementById(`fu-date-${id}`).value;
+  const subject = document.getElementById(`fu-subj-${id}`).value.trim();
+  const body_html = document.getElementById(`fu-body-${id}`).value.trim();
+  if (!send_on || !subject || !body_html) {
+    msg.innerHTML = '<span style="color:#dc2626">Date, subject and message are all needed.</span>';
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/automations', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'schedule_email', booking_id: id, send_on, subject, body_html })
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Could not schedule');
+    document.getElementById(`fu-subj-${id}`).value = '';
+    document.getElementById(`fu-body-${id}`).value = '';
+    msg.innerHTML = '<span style="color:#059669">Scheduled.</span>';
+    toggleFollowUpForm(id);
+    await loadComms(id);
+  } catch (e) { msg.innerHTML = `<span style="color:#dc2626">${esc(e.message)}</span>`; }
+}
+
+async function cancelFollowUp(ev, bookingId, id) {
+  ev.preventDefault();
+  if (!confirm('Cancel this scheduled follow-up?')) return;
+  try {
+    const res = await apiFetch('/api/automations', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'cancel_scheduled_email', id })
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Could not cancel');
+    await loadComms(bookingId);
+  } catch (e) { alert(e.message); }
+}
+
+function toggleCallForm(id) {
+  const el = document.getElementById(`call-form-${id}`);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveCall(id) {
+  const note = document.getElementById(`call-note-${id}`).value.trim();
+  const msg = document.getElementById(`call-msg-${id}`);
+  if (!note) { msg.innerHTML = '<span style="color:#dc2626">Add a note first.</span>'; return; }
+  const when = document.getElementById(`call-when-${id}`).value;
+  try {
+    const res = await apiFetch('/api/automations', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'log_call', booking_id: id, note,
+        direction: document.getElementById(`call-dir-${id}`).value,
+        occurred_at: when || null })
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
+    document.getElementById(`call-note-${id}`).value = '';
+    msg.innerHTML = '<span style="color:#059669">Saved.</span>';
+    toggleCallForm(id);
+    await loadComms(id);
+  } catch (e) { msg.innerHTML = `<span style="color:#dc2626">${esc(e.message)}</span>`; }
+}
+
 async function sendFinalisationLink(id) {
   const b = allBookings.find(x => String(x.id) === String(id));
   if (!b) return;
@@ -3210,32 +3450,18 @@ async function sendFinalisationLink(id) {
       const linkData = await linkRes.json();
       b.stripe_payment_link = linkData.url;
     }
-    // A $0-deposit booking (school, library, etc.) has nothing to pay — same
-    // invariant as _email.js's {{deposit_amount}} comment, just in the prose
-    // here instead of a number. Don't tell them to pay what isn't owed.
-    const askForDeposit = depositAmount > 0;
-    const bodyText = askForDeposit
-      ? `<p>Please review your details, fill in anything missing, and pay your deposit to secure the date:</p>`
-      : `<p>Please review your details and fill in anything missing so we have everything we need for your event:</p>`;
+    // A $0-deposit booking (school, library, etc.) has nothing to pay, and must
+    // not be told to pay a deposit. Two templates rather than one with a
+    // conditional — the choice is made here, where the amount is already known.
+    const key = depositAmount > 0 ? 'finalisation_link' : 'finalisation_link_no_deposit';
     const res = await apiFetch('/api/automations', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'send_manual', booking_id: b.id,
-        subject: `Finalise your booking — ${b.reference}`,
-        html: `<p>Hi ${esc((b.client_name||'').split(' ')[0] || 'there')}!</p>
-               ${bodyText}
-               <p><a href="${finaliseLinkClient(b)}">Finalise my booking</a></p>` })
+      body: JSON.stringify({ action: 'send_template', booking_id: b.id, template_key: key })
     });
     if (!res.ok) throw new Error((await res.json()).error || 'Send failed');
     alert('Sent.');
+    await loadComms(b.id);
   } catch (e) { alert('Could not send: ' + e.message); }
-}
-
-// Mirrors finaliseLinkFor() in _email.js. Duplicated deliberately — admin.html
-// is a static page with no access to server modules — so if that one changes,
-// change this in the same commit.
-function finaliseLinkClient(b) {
-  if (!b.reference || !b.client_email) return '';
-  return `${location.origin}/my-booking.html?ref=${encodeURIComponent(b.reference)}&email=${encodeURIComponent(b.client_email)}`;
 }
 
 // ── Record client deposit payment — inline feedback, reopens modal to show updated deposit status ──
@@ -3474,8 +3700,14 @@ function renderOneMonth(year, month, gridId, labelId) {
     const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const dayBkgs = allBookings.filter(b => b.event_date && b.event_date.startsWith(dateStr) && b.status !== 'cancelled');
     const evts = dayBkgs.map(b => {
+      // flex:0 0 auto is load-bearing. .cal-evt is a flex row with
+      // overflow:hidden, and 38239c8 changed the grid to minmax(0,1fr) so a
+      // column CAN now shrink below its content width. Without this the badges
+      // keep the default flex-shrink:1 and are squeezed to nothing in a narrow
+      // column — the initials vanished with no error and no empty space to
+      // notice, because the name simply took the width.
       const staffBadges = (calStaffMap[b.id] || []).map(s =>
-        `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:${s.color};color:#fff;font-size:9px;font-weight:800;border:1.5px solid #fff;margin-left:2px">${s.initials}</span>`
+        `<span title="${esc(s.initials)}" style="flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:${s.color};color:#fff;font-size:9px;font-weight:800;border:1.5px solid #fff;margin-left:2px">${esc(s.initials)}</span>`
       ).join('');
       return `<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${esc(b.client_name)} — ${esc(b.service_name)}">
         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.service_name||b.client_name)}</span>
@@ -5296,7 +5528,15 @@ function openRuleModal(rule) {
       </div>
       <div><label class="form-label">SMS text <span style="color:#9ca3af;font-size:.72rem">plain text, aim for under 320 characters</span></label>
         <textarea class="form-control" id="rule-body-sms" rows="3" maxlength="320" style="font-family:monospace;font-size:.8rem">${esc(r.body_sms||'')}</textarea>
-        <p class="text-muted" style="margin-top:6px;font-size:.72rem">Use <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{client_first_name}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{event_date}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{deposit_amount}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{payment_link}}</code>, <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">{{finalise_link}}</code> — same tokens as the email body above.</p>
+        <p class="text-muted" style="margin-top:6px;font-size:.72rem;line-height:1.9">
+          ${[['Who','client_first_name','client_name','guests_of_honour','child_name'],
+             ['Gig','service_name','event_date','event_time','event_zip','reference'],
+             ['Money','total_price','deposit_amount','balance_due'],
+             ['Links','payment_link','balance_link','deposit_link','review_link','finalise_link']]
+            .map(g => `<span style="display:inline-block;min-width:52px;font-weight:700;color:#6b7280">${g[0]}</span>` +
+              g.slice(1).map(t => `<code style="background:#f3f4f6;padding:1px 5px;border-radius:3px;margin-right:4px">{{${t}}}</code>`).join('')).join('<br>')}
+          <br><span style="color:#9ca3af">{{payment_link}} and {{deposit_link}} are the <strong>deposit</strong>; a balance-due message must use {{balance_link}}, or an already-paid client can be charged twice.</span>
+        </p>
       </div>
       <div style="display:flex;gap:10px;padding-top:4px">
         <button class="btn btn-primary" onclick="saveRule(${r.id||'null'})">Save Rule</button>

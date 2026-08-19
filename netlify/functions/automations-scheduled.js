@@ -20,7 +20,7 @@
 // Schedule lives in netlify.toml. Idempotency is each job's own concern.
 
 const { withClient } = require('./_db');
-const { runScheduledAutomations, ensureTables } = require('./automations');
+const { runScheduledAutomations, ensureTables, sendDueScheduledEmails } = require('./automations');
 const { ensureSmsTables, sendSms, flushHeldSms } = require('./_sms');
 const { wantsSms } = require('./staff-assignments');
 
@@ -119,10 +119,11 @@ exports.handler = async () => {
       const sent = await runScheduledAutomations(client).catch(e => { console.error('runScheduledAutomations FAILED:', e.message); return 0; });
       const dayOf = await staffDayOfReminders(client, now).catch(e => { console.error('staffDayOfReminders FAILED:', e.message); return 0; });
       const alerts = await unstaffedAlerts(client, now).catch(e => { console.error('unstaffedAlerts FAILED:', e.message); return 0; });
-      return { held, sent, dayOf, alerts };
+      const followUps = await sendDueScheduledEmails(client, now).catch(e => { console.error('sendDueScheduledEmails FAILED:', e.message); return 0; });
+      return { held, sent, dayOf, alerts, followUps };
     });
 
-    console.log(`Scheduled automations complete — ${result.sent} rule message(s), ${result.held.sent} held SMS flushed, ${result.held.expired} expired, ${result.held.optedOut} opted out, ${result.held.blocked} blocked (no Twilio creds), ${result.dayOf} day-of reminder(s), ${result.alerts} unstaffed alert(s)`);
+    console.log(`Scheduled automations complete — ${result.sent} rule message(s), ${result.held.sent} held SMS flushed, ${result.held.expired} expired, ${result.held.optedOut} opted out, ${result.held.blocked} blocked (no Twilio creds), ${result.dayOf} day-of reminder(s), ${result.alerts} unstaffed alert(s), ${result.followUps} scheduled follow-up(s)`);
     return { statusCode: 200, body: JSON.stringify({ ok: true, ...result, startedAt }) };
   } catch (e) {
     console.error('Scheduled automations FAILED:', e.message);

@@ -44,6 +44,61 @@ async function ensureTables(client) {
   // of a text message.
   await client.query("ALTER TABLE automation_rules ADD COLUMN IF NOT EXISTS channel VARCHAR(8) DEFAULT 'email'");
   await client.query("ALTER TABLE automation_rules ADD COLUMN IF NOT EXISTS body_sms TEXT DEFAULT ''");
+
+  // Manual templates: a rule fetched BY NAME and sent from a button, rather
+  // than fired by a trigger. trigger_event='manual' matches none of the four
+  // trigger queries below, so these rows can never fire on their own — the
+  // key is the only way to reach them.
+  //
+  // They exist because the finalisation and deposit-link emails were HTML
+  // literals inside admin.html and create-stripe-link.js, editable only by
+  // changing source and redeploying. Same table, same editor, same {{token}}
+  // renderer as every other rule.
+  await client.query('ALTER TABLE automation_rules ADD COLUMN IF NOT EXISTS template_key VARCHAR(64)');
+  // Plain, not partial: a partial index cannot back ON CONFLICT (template_key)
+  // inference, and Postgres already treats NULLs as distinct in a unique index
+  // — so the eight trigger-based rules, all NULL here, never collide.
+  await client.query('CREATE UNIQUE INDEX IF NOT EXISTS automation_rules_template_key_idx ON automation_rules (template_key)');
+  await seedManualTemplates(client);
+
+  // booking_comms: the manual half of the communication log. Email and SMS
+  // already record themselves in email_log and sms_log; a phone call has no
+  // system to record it, so this holds those and nothing else.
+  //
+  // Not folded into booking_changes: that table is an automated field-change
+  // audit (518 of its rows are address_restored) with no UI, and a call note
+  // dropped in there is a note nobody will find again.
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS booking_comms (
+      id          SERIAL PRIMARY KEY,
+      booking_id  INTEGER NOT NULL,
+      kind        VARCHAR(16) NOT NULL DEFAULT 'call',
+      direction   VARCHAR(8)  NOT NULL DEFAULT 'out',
+      note        TEXT NOT NULL DEFAULT '',
+      occurred_at TIMESTAMPTZ DEFAULT NOW(),
+      created_at  TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await client.query('CREATE INDEX IF NOT EXISTS idx_booking_comms_booking ON booking_comms (booking_id)');
+
+  // scheduled_emails: a one-off follow-up on a date Joe picks, per booking.
+  // Not an automation_rule — a rule is "every booking N days from its event",
+  // this is "this client, this date, this message", and modelling it as a rule
+  // would mean a rule per booking.
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS scheduled_emails (
+      id         SERIAL PRIMARY KEY,
+      booking_id INTEGER NOT NULL,
+      send_on    DATE NOT NULL,
+      subject    VARCHAR(500) NOT NULL,
+      body_html  TEXT NOT NULL DEFAULT '',
+      status     VARCHAR(16) NOT NULL DEFAULT 'pending',
+      sent_at    TIMESTAMPTZ,
+      error_detail TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await client.query("CREATE INDEX IF NOT EXISTS idx_scheduled_emails_due ON scheduled_emails (send_on) WHERE status='pending'");
   await ensureSmsTables(client);
 
   // booking_tasks: per-booking admin checklist
@@ -123,6 +178,176 @@ async function alreadySmsSent(client, ruleId, bookingId) {
     'SELECT id FROM sms_log WHERE rule_id=$1 AND booking_id=$2 LIMIT 1', [ruleId, bookingId]
   );
   return rows.length > 0;
+}
+
+// ── One-off scheduled follow-ups ─────────────────────────────────────────────
+// Deliberately `send_on <= CURRENT_DATE`, not `= CURRENT_DATE`. The rules
+// engine selects on an exact calendar day, which means a missed cron run is a
+// permanently missed send (automations-scheduled.js says so at the top). A
+// follow-up Joe scheduled by hand is worth more than that: if the run is
+// missed or the function errors, it goes out late rather than never.
+//
+// Rendered through the same render() as everything else, so {{tokens}} work.
+async function sendDueScheduledEmails(client, now = new Date()) {
+  const { rows } = await client.query(
+    `SELECT se.*, b.client_email, b.client_name, b.reference
+       FROM scheduled_emails se
+       JOIN bookings b ON b.id = se.booking_id
+      WHERE se.status = 'pending' AND se.send_on <= CURRENT_DATE
+      ORDER BY se.send_on LIMIT 100`
+  );
+  let sent = 0;
+  for (const row of rows) {
+    // Re-read the booking: it may have been edited (or the client's address
+    // corrected) between scheduling and today, and the email should reflect
+    // now, not the day it was written.
+    const { rows: [booking] } = await client.query('SELECT * FROM bookings WHERE id=$1', [row.booking_id]);
+    if (!booking) {
+      await client.query("UPDATE scheduled_emails SET status='failed', error_detail=$1 WHERE id=$2",
+        ['booking no longer exists', row.id]);
+      console.error('sendDueScheduledEmails: booking', row.booking_id, 'is gone — follow-up', row.id, 'marked failed');
+      continue;
+    }
+    if (!booking.client_email) {
+      await client.query("UPDATE scheduled_emails SET status='failed', error_detail=$1 WHERE id=$2",
+        ['booking has no client email', row.id]);
+      console.error('sendDueScheduledEmails: no client email on booking', row.booking_id, '— follow-up', row.id, 'marked failed');
+      continue;
+    }
+    const subject = render(row.subject, booking, booking.stripe_payment_link || null);
+    try {
+      const res = await sendEmail(booking.client_email, subject,
+        wrap(render(row.body_html, booking, booking.stripe_payment_link || null)));
+      await client.query("UPDATE scheduled_emails SET status='sent', sent_at=NOW() WHERE id=$1", [row.id]);
+      await logEmail(client, booking.id, null, 'Scheduled follow-up', subject, booking.client_email, 'client', logStatus(res));
+      sent++;
+    } catch (e) {
+      // Left 'pending' on a transport error so tomorrow's run retries it; a
+      // permanent problem (no booking, no address) is marked failed above.
+      await client.query('UPDATE scheduled_emails SET error_detail=$1 WHERE id=$2', [e.message, row.id]);
+      await logEmail(client, booking.id, null, 'Scheduled follow-up', subject, booking.client_email, 'client', 'failed', e.message);
+      console.error('sendDueScheduledEmails: send failed for follow-up', row.id, '|', e.message, '— will retry tomorrow');
+    }
+  }
+  return sent;
+}
+
+// ── Manual templates ─────────────────────────────────────────────────────────
+// Seeded once, then owned by whoever edits them in the Automations tab. The
+// bodies below are the HTML that used to live in admin.html and
+// create-stripe-link.js, with the local variables swapped for the {{tokens}}
+// render() already resolves — so an edit is a database write, not a deploy.
+//
+// Two finalisation variants rather than one with a conditional: a $0-deposit
+// booking (school, library) must not be told to pay a deposit, and a template
+// language with an if-statement is a bigger thing to own than a second row.
+const MANUAL_TEMPLATES = [
+  {
+    template_key: 'finalisation_link',
+    name: 'Finalisation link (deposit due)',
+    subject: 'Finalise your booking — {{reference}}',
+    body_html: '<p>Hi {{client_first_name}}!</p>' +
+      '<p>Please review your details, fill in anything missing, and pay your deposit to secure the date:</p>' +
+      '<p><a href="{{finalise_link}}">Finalise my booking</a></p>',
+    body_sms: 'Hi {{client_first_name}}! Please finish your booking details and pay your deposit here: {{finalise_link}} Reply STOP to opt out.'
+  },
+  {
+    template_key: 'finalisation_link_no_deposit',
+    name: 'Finalisation link (nothing to pay)',
+    subject: 'Finalise your booking — {{reference}}',
+    body_html: '<p>Hi {{client_first_name}}!</p>' +
+      '<p>Please review your details and fill in anything missing so we have everything we need for your event:</p>' +
+      '<p><a href="{{finalise_link}}">Finalise my booking</a></p>',
+    body_sms: 'Hi {{client_first_name}}! Please finish your booking details here: {{finalise_link}} Reply STOP to opt out.'
+  },
+  {
+    template_key: 'deposit_link_ready',
+    name: 'Deposit link ready',
+    subject: 'Your deposit link is ready! 💳 — Funky Monkey Events',
+    body_html: '<p style="font-size:16px;margin-bottom:16px">Hi <strong>{{client_name}}</strong>! 🎉</p>' +
+      '<p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Your booking for <strong style="color:#F3E8FF">{{service_name}}</strong> is approved! Pay your deposit to lock in your date.</p>' +
+      '<div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:24px;text-align:center">' +
+      '<div style="font-size:11px;color:#A78BCA;text-transform:uppercase;font-weight:700;margin-bottom:6px">Deposit Amount</div>' +
+      '<div style="font-size:36px;font-weight:900;color:#10B981">${{deposit_amount}}</div>' +
+      '<div style="font-size:12px;color:#A78BCA;margin-top:4px">Secure your date — balance due day of event</div></div>' +
+      '<div style="text-align:center;margin-bottom:24px">' +
+      '<a href="{{payment_link}}" style="background-color:#10B981;color:#ffffff;padding:16px 40px;border-radius:12px;text-decoration:none;font-weight:900;font-size:16px;display:inline-block">Pay Deposit Now →</a>' +
+      '<div style="font-size:11px;color:#A78BCA;margin-top:14px;line-height:1.5">Button not working? Copy this link into your browser:<br>' +
+      '<a href="{{payment_link}}" style="color:#06B6D4;word-break:break-all">{{payment_link}}</a></div></div>' +
+      '<div style="background:#FFFFFF08;border-radius:10px;padding:12px;font-size:11px;color:#A78BCA;line-height:1.6;text-align:center">' +
+      '🔒 Secure payment powered by Stripe · Accepts all major cards, Apple Pay &amp; Google Pay<br>Booking ref: {{reference}}</div>' +
+      '<p style="font-size:13px;color:#A78BCA;text-align:center;margin-top:16px">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>',
+    body_sms: ''
+  }
+];
+
+// INSERT ... DO NOTHING, never DO UPDATE: re-running this on every cold start
+// must not overwrite wording Joe has since edited. A missing row is restored;
+// an edited one is left alone.
+async function seedManualTemplates(client) {
+  for (const t of MANUAL_TEMPLATES) {
+    try {
+      await client.query(
+        `INSERT INTO automation_rules
+           (name, active, trigger_event, recipient, subject, body_html, body_sms, channel, sort_order, template_key)
+         VALUES ($1, TRUE, 'manual', 'client', $2, $3, $4, 'email', 900, $5)
+         ON CONFLICT (template_key) DO NOTHING`,
+        [t.name, t.subject, t.body_html, t.body_sms, t.template_key]
+      );
+    } catch (e) {
+      console.error('seedManualTemplates failed for', t.template_key, '|', e.message);
+    }
+  }
+}
+
+// Send one manual template to a booking's client. The one door for the
+// finalisation and deposit-link buttons, so both log the same way and neither
+// can drift into its own copy of the wording.
+//
+// Deliberately NOT routed through sendAutomationMessage: that guards against
+// sending the same rule twice for a booking, which is correct for a trigger
+// and wrong for a button Joe presses on purpose to re-send.
+async function sendTemplate(client, booking, templateKey, link) {
+  const { rows } = await client.query(
+    'SELECT * FROM automation_rules WHERE template_key=$1', [templateKey]);
+  const rule = rows[0];
+  // A missing template is a broken deploy, not a quiet no-op: say so and send
+  // nothing, rather than mailing a blank body.
+  if (!rule) {
+    console.error('sendTemplate: no template with key', templateKey, '— nothing sent');
+    return { sent: false, error: `Email template "${templateKey}" is missing` };
+  }
+  if (!booking.client_email) {
+    return { sent: false, error: 'This booking has no client email address, so nothing was sent' };
+  }
+
+  const subject = render(rule.subject, booking, link);
+  const html = wrap(render(rule.body_html, booking, link));
+  let res;
+  try {
+    res = await sendEmail(booking.client_email, subject, html);
+    await logEmail(client, booking.id, rule.id, rule.name, subject, booking.client_email, 'client', logStatus(res));
+  } catch (e) {
+    console.error('sendTemplate email failed:', booking.client_email, '|', e.message);
+    await logEmail(client, booking.id, rule.id, rule.name, subject, booking.client_email, 'client', 'failed', e.message);
+    return { sent: false, error: e.message };
+  }
+
+  // The rule editor shows an SMS box for every rule including these. Ignoring
+  // what Joe types into it would be a silent failure; honour it on the same
+  // consent terms as any other client text.
+  if ((rule.channel === 'sms' || rule.channel === 'both') && (rule.body_sms || '').trim()) {
+    if (booking.sms_consent !== true) {
+      console.log('sendTemplate SMS skipped — no client SMS consent | booking:', booking.id);
+    } else if (!booking.client_phone) {
+      console.error('sendTemplate SMS skipped — no phone | booking:', booking.id);
+    } else {
+      await sendSms(client, booking.client_phone, renderSms(rule.body_sms, booking, link),
+        { booking_id: booking.id, rule_id: rule.id, trigger_label: rule.name });
+    }
+  }
+
+  return { sent: true, suppressed: !!(res && res.suppressed), label: rule.name };
 }
 
 // ── Send one rule, on whichever channels it asks for ─────────────────────────
@@ -327,6 +552,39 @@ exports.handler = async (event) => {
           return json(200, rows);
         }
 
+        // One booking's whole conversation, oldest first. A UNION rather than a
+        // new table that duplicates what email_log and sms_log already hold —
+        // those are written by the senders themselves, so they cannot drift
+        // out of step with what actually went out.
+        if (type === 'comms') {
+          const bookingId = event.queryStringParameters?.booking_id;
+          if (!bookingId) return json(400, { error: 'booking_id required' });
+          const { rows } = await client.query(
+            `SELECT 'email' AS channel, sent_at AS at, trigger_label AS label,
+                    subject AS detail, recipient_email AS target, status, 'out' AS direction, id
+               FROM email_log  WHERE booking_id = $1
+             UNION ALL
+             SELECT 'sms', created_at, COALESCE(NULLIF(trigger_label,''),'SMS'),
+                    body, phone, status, direction, id
+               FROM sms_log    WHERE booking_id = $1
+             UNION ALL
+             SELECT kind, occurred_at, 'Logged by hand',
+                    note, '', 'logged', direction, id
+               FROM booking_comms WHERE booking_id = $1
+             UNION ALL
+             -- Not yet sent, so it sorts into the future end of the list. Only
+             -- rows still awaiting a send: once one goes out it appears via
+             -- email_log like any other email, and showing both would double it.
+             SELECT 'scheduled', send_on::timestamptz, 'Scheduled follow-up',
+                    subject, '', status, 'out', id
+               FROM scheduled_emails
+              WHERE booking_id = $1 AND status IN ('pending','cancelled','failed')
+             ORDER BY at ASC`,
+            [parseInt(bookingId)]
+          );
+          return json(200, rows);
+        }
+
         if (type === 'tasks') {
           const bookingId = event.queryStringParameters?.booking_id;
           if (!bookingId) return json(400, { error: 'booking_id required' });
@@ -366,6 +624,90 @@ exports.handler = async (event) => {
       }
 
       // POST action:'send_manual' — manually send an email to a client
+      // Send one of the manual templates (finalisation link, deposit link).
+      // The booking row is re-read here rather than trusted from the client:
+      // the link and the email address must be the stored ones, not whatever
+      // a stale admin page still has in memory.
+      // Record a phone call (or anything else that happened off-system).
+      // Schedule a one-off follow-up email for a future date.
+      if (action === 'schedule_email') {
+        const { booking_id, send_on, subject, body_html } = body;
+        if (!booking_id || !send_on) return json(400, { error: 'booking_id and send_on required' });
+        const subj = String(subject || '').trim();
+        const html = String(body_html || '').trim();
+        // Both required: an empty subject or body would send a blank email on a
+        // date nobody is watching.
+        if (!subj) return json(400, { error: 'A subject is required' });
+        if (!html) return json(400, { error: 'A message is required' });
+        // Validated rather than coerced — new Date('next tuesday') is Invalid
+        // Date, and storing that would silently schedule nothing.
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(send_on))) {
+          return json(400, { error: 'Pick a date' });
+        }
+        const { rows: bk } = await client.query('SELECT id, client_email FROM bookings WHERE id=$1', [parseInt(booking_id)]);
+        if (!bk.length) return json(404, { error: 'Booking not found' });
+        // Refused at scheduling time, while Joe is looking at it, rather than
+        // discovered as a failed row weeks later.
+        if (!bk[0].client_email) {
+          return json(400, { error: 'This booking has no client email, so a follow-up could never be sent' });
+        }
+        const { rows } = await client.query(
+          `INSERT INTO scheduled_emails (booking_id, send_on, subject, body_html)
+           VALUES ($1, $2::date, $3, $4) RETURNING *`,
+          [parseInt(booking_id), send_on, subj, html]
+        );
+        return json(200, { success: true, scheduled: rows[0] });
+      }
+
+      // Cancel a pending follow-up. Cancelled rather than deleted: the comms
+      // log should still be able to show that one was planned and called off.
+      if (action === 'cancel_scheduled_email') {
+        const { id } = body;
+        if (!id) return json(400, { error: 'id required' });
+        const { rowCount } = await client.query(
+          "UPDATE scheduled_emails SET status='cancelled' WHERE id=$1 AND status='pending'", [parseInt(id)]);
+        if (!rowCount) return json(404, { error: 'No pending follow-up with that id — it may have already sent' });
+        return json(200, { success: true });
+      }
+
+      if (action === 'log_call') {
+        const { booking_id, note, direction, occurred_at } = body;
+        if (!booking_id) return json(400, { error: 'booking_id required' });
+        // An empty note is a row that says a call happened and nothing about
+        // it. Rejected rather than stored — the log is for reading later.
+        const text = String(note || '').trim();
+        if (!text) return json(400, { error: 'A note is required — say what the call was about' });
+        const dir = direction === 'in' ? 'in' : 'out';
+        // A bad date string must not become NOW() silently: that would file the
+        // call under today and quietly lose when it happened.
+        let when = null;
+        if (occurred_at) {
+          const d = new Date(occurred_at);
+          if (isNaN(d.getTime())) return json(400, { error: 'That date could not be read' });
+          when = d.toISOString();
+        }
+        const { rows } = await client.query(
+          `INSERT INTO booking_comms (booking_id, kind, direction, note, occurred_at)
+           VALUES ($1, 'call', $2, $3, COALESCE($4::timestamptz, NOW())) RETURNING *`,
+          [parseInt(booking_id), dir, text, when]
+        );
+        return json(200, { success: true, entry: rows[0] });
+      }
+
+      if (action === 'send_template') {
+        const { booking_id, template_key } = body;
+        if (!booking_id || !template_key) {
+          return json(400, { error: 'booking_id and template_key required' });
+        }
+        const { rows } = await client.query('SELECT * FROM bookings WHERE id=$1', [parseInt(booking_id)]);
+        const booking = rows[0];
+        if (!booking) return json(404, { error: 'Booking not found' });
+
+        const result = await sendTemplate(client, booking, template_key, booking.stripe_payment_link || null);
+        if (!result.sent) return json(400, { success: false, error: result.error });
+        return json(200, { success: true, suppressed: result.suppressed, label: result.label });
+      }
+
       if (action === 'send_manual') {
         const { booking_id, subject, html } = body;
         const { rows } = await client.query('SELECT * FROM bookings WHERE id=$1', [parseInt(booking_id)]);
@@ -506,3 +848,6 @@ module.exports.ensureTables = ensureTables;
 module.exports.triggerStatusChange = triggerStatusChange;
 module.exports.sendAutomationMessage = sendAutomationMessage;
 module.exports.alreadySmsSent = alreadySmsSent;
+module.exports.sendTemplate = sendTemplate;
+module.exports.sendDueScheduledEmails = sendDueScheduledEmails;
+module.exports.MANUAL_TEMPLATES = MANUAL_TEMPLATES;
