@@ -101,3 +101,38 @@ test('an empty reply is freeform', () => {
   assert.strictEqual(parseLetters('', OFFER).freeform, true);
   assert.strictEqual(parseLetters('   ', OFFER).freeform, true);
 });
+
+// ── The scheduled loops pass link=null ──────────────────────────────────────
+// automations.js:240/265/288 call sendAutomationMessage(..., booking, null),
+// so on a days_before/days_after rule {{payment_link}} used to render as an
+// empty string — a text reading "pay here:" with nothing after it, and no
+// error anywhere. These three assertions fail if that fallback is removed.
+test('a link token falls back to the booking row when no link is passed', () => {
+  const booking = {
+    client_name: 'Dana Ruiz',
+    stripe_payment_link: 'https://pay.stripe.com/dep_123',
+    stripe_balance_link: 'https://pay.stripe.com/bal_456'
+  };
+  assert.strictEqual(renderSms('{{payment_link}}', booking), 'https://pay.stripe.com/dep_123');
+  assert.strictEqual(renderSms('{{deposit_link}}', booking), 'https://pay.stripe.com/dep_123');
+
+  // An explicitly passed link still wins — status_change rules supply the live
+  // one, and it must not be shadowed by a stale column.
+  assert.strictEqual(renderSms('{{payment_link}}', booking, 'https://pay.stripe.com/live'), 'https://pay.stripe.com/live');
+});
+
+// The money bug this guards: stripe_payment_link is the DEPOSIT link, and a
+// deposit link stays live and re-payable after the balance is settled. If
+// {{balance_link}} ever resolved to it, a balance-due text 7 days out would
+// bill an already-paid client a second deposit.
+test('{{balance_link}} is the balance link, never the deposit link', () => {
+  const booking = {
+    stripe_payment_link: 'https://pay.stripe.com/dep_123',
+    stripe_balance_link: 'https://pay.stripe.com/bal_456'
+  };
+  assert.strictEqual(renderSms('{{balance_link}}', booking), 'https://pay.stripe.com/bal_456');
+
+  // No balance link on the row yet: render nothing rather than falling through
+  // to the deposit link.
+  assert.strictEqual(renderSms('{{balance_link}}', { stripe_payment_link: 'https://pay.stripe.com/dep_123' }), '');
+});

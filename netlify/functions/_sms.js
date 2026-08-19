@@ -67,13 +67,23 @@ function renderSms(template, booking = {}, link) {
     .replace(/{{deposit_amount}}/g,    Number(booking.deposit_amount || 0).toFixed(2))
     .replace(/{{balance_due}}/g,       Number(booking.balance_due    || 0).toFixed(2))
     .replace(/{{reference}}/g,         booking.reference || '')
-    .replace(/{{payment_link}}/g,      link || '')
+    // Falls back to the booking's own deposit link. The three scheduled loops
+    // in automations.js call sendAutomationMessage(..., booking, null), so on a
+    // days_before/days_after rule `link` is null and this token used to render
+    // as an empty string — a text reading "pay here:" with nothing after it,
+    // and no error anywhere. The link is already on the row; read it.
+    .replace(/{{payment_link}}/g,      link || booking.stripe_payment_link || '')
+    // NOT the same link. stripe_payment_link is the DEPOSIT; a deposit link
+    // stays live and re-payable after the balance is settled, so texting it to
+    // someone 7 days out — who has almost certainly already paid their deposit
+    // — bills them a second time. A balance-due message must use this token.
+    .replace(/{{balance_link}}/g,      booking.stripe_balance_link || '')
     // {{deposit_link}} is render()'s token, not this one's — but the rule
     // editor shows both bodies side by side, so a body written for email can
     // get pasted into the SMS box. An HTML button is meaningless in a text
     // message, so resolve it to the same raw URL rather than leaving a
     // literal "{{deposit_link}}" in the text.
-    .replace(/{{deposit_link}}/g,      link || '')
+    .replace(/{{deposit_link}}/g,      link || booking.stripe_payment_link || '')
     .replace(/{{finalise_link}}/g,     finaliseLinkFor(booking));
 }
 
