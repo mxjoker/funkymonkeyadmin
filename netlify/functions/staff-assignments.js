@@ -2,7 +2,7 @@ const { withClient, getPool } = require('./_db');
 const {
   CORS, preflight, requireAuth, unauthorized, forbidden,
 } = require('./_auth');
-const { sendEmail, wrap, logChange, ensureBookingChanges } = require('./_email');
+const { sendEmail, wrap, logChange, ensureBookingChanges, fmtEventDate } = require('./_email');
 const { sendSms, ensureSmsTables } = require('./_sms');
 const { isValidPayType, resolvePayType, assignmentRefusal } = require('./_pay');
 
@@ -889,9 +889,13 @@ exports.handler = async (event) => {
           const b = bookingRows[0];
 
           if (s && b) {
-            const dateStr = b.event_date
-              ? new Date(b.event_date + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
-              : 'TBD';
+            // pg returns a DATE column as a Date object, and `dateObject +
+            // 'T00:00:00'` stringifies it first — "Mon Aug 24 2026 …(Central
+            // Daylight Time)T00:00:00" — which parses to Invalid Date, and
+            // toLocaleDateString renders that as the literal text "Invalid
+            // Date" rather than throwing. Staff were texted it. fmtEventDate
+            // handles both a Date and a 'YYYY-MM-DD' string.
+            const dateStr = fmtEventDate(b.event_date) || 'TBD';
 
             const toStr = m => {
               const h = Math.floor(((m % 1440) + 1440) % 1440 / 60);
@@ -1259,9 +1263,10 @@ async function notifyStaffForBooking(client, booking) {
   const { rows: allStaff } = await client.query('SELECT * FROM staff WHERE active=TRUE');
   const eligible = eligibleStaff(allStaff, tags);
 
-  const dateStr = booking.event_date
-    ? new Date(String(booking.event_date).split('T')[0] + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
-    : 'TBD';
+  // Same Invalid Date bug as the "You're booked" path above. The String()+
+  // split('T') here looks like it guards it, but String(Date) has no 'T' to
+  // split on, so the whole date string passes through and still fails.
+  const dateStr = fmtEventDate(booking.event_date) || 'TBD';
   const timeStr = booking.event_time || '';
 
   for (const { staff, matched } of eligible) {

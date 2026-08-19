@@ -7,7 +7,7 @@ const { withClient } = require('./_db');
 const { CORS, preflight } = require('./_auth');
 const {
   wrap, esc, sendEmail, logEmail, logStatus, logChange,
-  ensureEmailLog, ensureBookingChanges,
+  ensureEmailLog, ensureBookingChanges, fmtEventDate,
 } = require('./_email');
 const { triggerStatusChange } = require('./automations');
 const { ensureBookingItems, getItems } = require('./_items');
@@ -89,10 +89,11 @@ exports.handler = async (event) => {
         ? items.map(i => `<li>${esc(i.name)}${i.quantity > 1 ? ` ×${i.quantity}` : ''} — $${(Number(i.price) * Math.max(1, i.quantity)).toFixed(2)}</li>`).join('')
         : `<li>${esc(updated.service_name || 'Service')} — $${Number(updated.service_price || 0).toFixed(2)}</li>`;
 
-      const dateStr = updated.event_date
-        ? new Date(String(updated.event_date).split('T')[0] + 'T00:00:00')
-            .toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-        : 'TBD';
+      // Was the same Invalid Date bug the staff SMS paths had: `updated` is a
+      // DB row, so event_date is a Date object, and String(Date) has no 'T' to
+      // split on — the whole thing fell through to Invalid Date in a client's
+      // acceptance email.
+      const dateStr = fmtEventDate(updated.event_date) || 'TBD';
 
       // Owner notification. Plain background colour, never a gradient — Gmail
       // strips linear-gradient and test/_email.test.js scans for it.
