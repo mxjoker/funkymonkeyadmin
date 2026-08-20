@@ -78,7 +78,7 @@ const read = (f) => fs.readFileSync(path.join(__dirname, '../netlify/functions',
 // document they would use to check the arithmetic. _items.js is the single
 // definition of the rate; nothing may re-derive or restate it.
 test('no client-facing copy hardcodes the fee percentage', () => {
-  for (const f of ['create-stripe-link.js', 'stripe-webhook.js']) {
+  for (const f of ['create-stripe-link.js', 'stripe-webhook.js', 'automations.js']) {
     assert.ok(!/Service fee \(\d+%\)/.test(read(f)),
       `${f} hardcodes the fee percentage instead of deriving it from SERVICE_FEE_RATE`);
   }

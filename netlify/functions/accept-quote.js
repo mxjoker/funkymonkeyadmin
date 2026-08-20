@@ -6,15 +6,13 @@
 const { withClient } = require('./_db');
 const { CORS, preflight } = require('./_auth');
 const {
-  wrap, esc, sendEmail, logEmail, logStatus, logChange,
-  ensureEmailLog, ensureBookingChanges, fmtEventDate,
-} = require('./_email');
+  esc, logChange,
+  ensureEmailLog, ensureBookingChanges, } = require('./_email');
 const { triggerStatusChange } = require('./automations');
 const { ensureBookingItems, getItems } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
-const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 
 /**
@@ -89,37 +87,18 @@ exports.handler = async (event) => {
         ? items.map(i => `<li>${esc(i.name)}${i.quantity > 1 ? ` ×${i.quantity}` : ''} — $${(Number(i.price) * Math.max(1, i.quantity)).toFixed(2)}</li>`).join('')
         : `<li>${esc(updated.service_name || 'Service')} — $${Number(updated.service_price || 0).toFixed(2)}</li>`;
 
-      // Was the same Invalid Date bug the staff SMS paths had: `updated` is a
-      // DB row, so event_date is a Date object, and String(Date) has no 'T' to
-      // split on — the whole thing fell through to Invalid Date in a client's
-      // acceptance email.
-      const dateStr = fmtEventDate(updated.event_date) || 'TBD';
-
-      // Owner notification. Plain background colour, never a gradient — Gmail
-      // strips linear-gradient and test/_email.test.js scans for it.
-      const subject = `✅ Quote ACCEPTED — ${updated.reference} — ${updated.client_name || 'client'}`;
-      const html = wrap(`
-        <h2>Quote accepted</h2>
-        <p><strong>${esc(updated.client_name || 'A client')}</strong> just accepted their quote from the booking page.</p>
-        <p><strong>Ref:</strong> ${esc(updated.reference)}</p>
-        <p><strong>Date:</strong> ${dateStr}</p>
-        <ul>${lines}</ul>
-        <p><strong>Total:</strong> $${Number(updated.total_price || 0).toFixed(2)}</p>
-        <p><strong>Deposit to collect:</strong> $${Number(updated.deposit_amount || 0).toFixed(2)}</p>
-        <p>Next step: send the deposit link.</p>
-        <br/>
-        <a href="${SITE}/admin.html" style="background:#7c3aed;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">Open in Admin</a>
-      `);
-
-      // sendEmail throws on failure. The status change has already committed
-      // and is the thing that matters — a failed notification must not undo it
-      // or 500 the client. Log the real outcome either way.
+      // Owner notification. Wording lives in the 'quote_accepted_alert' rule;
+      // the line items do not, because they are what the client just agreed to.
+      //
+      // sendTemplate throws nothing on a send failure — the status change has
+      // already committed and is the thing that matters, so a failed
+      // notification must not undo it or 500 the client. It logs either way.
       try {
-        const res = await sendEmail(NOTIFY, subject, html);
-        await logEmail(c, booking.id, null, 'Quote accepted', subject, NOTIFY, 'admin', logStatus(res));
+        const r = await sendTemplate(c, updated, 'quote_accepted_alert', null,
+          { extra: { quote_lines: lines } });
+        if (!r.sent) console.error('accept-quote notify failed:', r.error);
       } catch (e) {
         console.error('accept-quote notify failed:', e.message);
-        await logEmail(c, booking.id, null, 'Quote accepted', subject, NOTIFY, 'admin', 'failed', e.message);
       }
 
       // Any admin-configured rules for the 'accepted' rung fire too. This is

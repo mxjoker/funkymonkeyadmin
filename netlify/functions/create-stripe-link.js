@@ -1,6 +1,5 @@
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { esc, sendEmail, wrap } = require('./_email');
 const { sendTemplate } = require('./automations');
 const { balanceCharge, SERVICE_FEE_RATE } = require('./_items');
 
@@ -211,46 +210,23 @@ exports.handler = async (event) => {
     // client gets two emails about the same thing seconds apart. Default stays
     // "send it": the existing sendStripeLink() button in admin.html relies on
     // this being the only email and never sets the flag.
-    if (!skip_client_email && kind === 'balance') {
-      try {
-        await sendEmail(email, `Your balance is ready to pay 💳 — Funky Monkey Events`,
-          wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${esc(client)}</strong>! 👋</p>
-            <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Here's the balance for <strong style="color:#F3E8FF">${esc(service)}</strong>. You can settle it with the button below.</p>
-            <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:24px">
-              <table style="width:100%;border-collapse:collapse;color:#F3E8FF;font-size:14px">
-                <tr><td style="padding:4px 0;color:#A78BCA">Balance</td><td style="padding:4px 0;text-align:right">$${charge.balance.toFixed(2)}</td></tr>
-                <tr><td style="padding:4px 0;color:#A78BCA">Service fee (${Math.round(SERVICE_FEE_RATE * 100)}%)</td><td style="padding:4px 0;text-align:right">$${charge.fee.toFixed(2)}</td></tr>
-                <tr><td style="padding:8px 0 0;border-top:1px solid #3D2460;font-weight:900">Total due</td><td style="padding:8px 0 0;border-top:1px solid #3D2460;text-align:right;color:#10B981;font-size:20px;font-weight:900">$${charge.total.toFixed(2)}</td></tr>
-              </table>
-            </div>
-            <div style="text-align:center;margin-bottom:24px">
-              <a href="${url}" style="background-color:#10B981;color:#ffffff;padding:16px 40px;border-radius:12px;text-decoration:none;font-weight:900;font-size:16px;display:inline-block">Pay Balance Now →</a>
-              <div style="font-size:11px;color:#A78BCA;margin-top:14px;line-height:1.5">
-                Button not working? Copy this link into your browser:<br>
-                <a href="${url}" style="color:#06B6D4;word-break:break-all">${url}</a>
-              </div>
-            </div>
-            <div style="background:#FFFFFF08;border-radius:10px;padding:12px;font-size:11px;color:#A78BCA;line-height:1.6;text-align:center">
-              🔒 Secure payment powered by Stripe · Booking ref: ${esc(String(bookingRef || bookingId))}
-            </div>
-            <p style="font-size:13px;color:#A78BCA;text-align:center;margin-top:16px">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`));
-      } catch (emailErr) {
-        console.error("create-stripe-link: balance email failed:", emailErr.message);
-        // Email failure does not fail the link creation
-      }
-    } else if (!skip_client_email) {
-      // Body and subject now live in the 'deposit_link_ready' rule, editable in
-      // Automations. Previously an HTML literal here — the only way to reword
-      // it was a code change and a deploy. sendTemplate also writes email_log,
-      // which this branch never did: the deposit email was being sent and
-      // leaving no record that it had been.
+    if (!skip_client_email) {
+      // Body and subject live in the 'deposit_link_ready' and
+      // 'balance_link_ready' rules, editable in Automations. Both were HTML
+      // literals here — the only way to reword either was a code change and a
+      // deploy. sendTemplate also writes email_log, which the balance branch
+      // never did: it was sending a bill and leaving no record of it.
+      const templateKey = kind === 'balance' ? 'balance_link_ready' : 'deposit_link_ready';
       try {
         await withClient(async (c) => {
           const { rows } = await c.query('SELECT * FROM bookings WHERE id=$1', [bookingRow.id]);
           const b = rows[0];
           if (!b) throw new Error(`booking ${bookingRow.id} vanished between link creation and email`);
-          const r = await sendTemplate(c, { ...b, stripe_payment_link: url }, 'deposit_link_ready', url);
-          if (!r.sent) console.error('create-stripe-link: deposit email not sent —', r.error);
+          // The row is re-read AFTER the link is persisted, but the write above
+          // may have failed; overlay the URL we actually have so the email can
+          // never go out with an empty pay button.
+          const r = await sendTemplate(c, { ...b, [linkCol]: url }, templateKey, url);
+          if (!r.sent) console.error(`create-stripe-link: ${templateKey} not sent —`, r.error);
         });
       } catch(emailErr) {
         console.error("create-stripe-link: email failed:", emailErr.message);

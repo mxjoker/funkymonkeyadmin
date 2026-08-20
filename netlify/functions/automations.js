@@ -1,7 +1,7 @@
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
 const { wrap, render, esc, sendEmail, logStatus, logEmail, ensureEmailLog } = require('./_email');
-const { sendSms, renderSms, ensureSmsTables } = require('./_sms');
+const { sendSms, renderSms, ensureSmsTables, normalisePhone } = require('./_sms');
 
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 
@@ -251,54 +251,11 @@ async function sendDueScheduledEmails(client, now = new Date()) {
   return sent;
 }
 
-// ── Manual templates ─────────────────────────────────────────────────────────
-// Seeded once, then owned by whoever edits them in the Automations tab. The
-// bodies below are the HTML that used to live in admin.html and
-// create-stripe-link.js, with the local variables swapped for the {{tokens}}
-// render() already resolves — so an edit is a database write, not a deploy.
-//
-// Two finalisation variants rather than one with a conditional: a $0-deposit
-// booking (school, library) must not be told to pay a deposit, and a template
-// language with an if-statement is a bigger thing to own than a second row.
-const MANUAL_TEMPLATES = [
-  {
-    template_key: 'finalisation_link',
-    name: 'Finalisation link (deposit due)',
-    subject: 'Finalise your booking — {{reference}}',
-    body_html: '<p>Hi {{client_first_name}}!</p>' +
-      '<p>Please review your details, fill in anything missing, and pay your deposit to secure the date:</p>' +
-      '<p><a href="{{finalise_link}}">Finalise my booking</a></p>',
-    body_sms: 'Hi {{client_first_name}}! Please finish your booking details and pay your deposit here: {{finalise_link}} Reply STOP to opt out.'
-  },
-  {
-    template_key: 'finalisation_link_no_deposit',
-    name: 'Finalisation link (nothing to pay)',
-    subject: 'Finalise your booking — {{reference}}',
-    body_html: '<p>Hi {{client_first_name}}!</p>' +
-      '<p>Please review your details and fill in anything missing so we have everything we need for your event:</p>' +
-      '<p><a href="{{finalise_link}}">Finalise my booking</a></p>',
-    body_sms: 'Hi {{client_first_name}}! Please finish your booking details here: {{finalise_link}} Reply STOP to opt out.'
-  },
-  {
-    template_key: 'deposit_link_ready',
-    name: 'Deposit link ready',
-    subject: 'Your deposit link is ready! 💳 — Funky Monkey Events',
-    body_html: '<p style="font-size:16px;margin-bottom:16px">Hi <strong>{{client_name}}</strong>! 🎉</p>' +
-      '<p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Your booking for <strong style="color:#F3E8FF">{{service_name}}</strong> is approved! Pay your deposit to lock in your date.</p>' +
-      '<div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:24px;text-align:center">' +
-      '<div style="font-size:11px;color:#A78BCA;text-transform:uppercase;font-weight:700;margin-bottom:6px">Deposit Amount</div>' +
-      '<div style="font-size:36px;font-weight:900;color:#10B981">${{deposit_amount}}</div>' +
-      '<div style="font-size:12px;color:#A78BCA;margin-top:4px">Secure your date — balance due day of event</div></div>' +
-      '<div style="text-align:center;margin-bottom:24px">' +
-      '<a href="{{payment_link}}" style="background-color:#10B981;color:#ffffff;padding:16px 40px;border-radius:12px;text-decoration:none;font-weight:900;font-size:16px;display:inline-block">Pay Deposit Now →</a>' +
-      '<div style="font-size:11px;color:#A78BCA;margin-top:14px;line-height:1.5">Button not working? Copy this link into your browser:<br>' +
-      '<a href="{{payment_link}}" style="color:#06B6D4;word-break:break-all">{{payment_link}}</a></div></div>' +
-      '<div style="background:#FFFFFF08;border-radius:10px;padding:12px;font-size:11px;color:#A78BCA;line-height:1.6;text-align:center">' +
-      '🔒 Secure payment powered by Stripe · Accepts all major cards, Apple Pay &amp; Google Pay<br>Booking ref: {{reference}}</div>' +
-      '<p style="font-size:13px;color:#A78BCA;text-align:center;margin-top:16px">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>',
-    body_sms: ''
-  }
-];
+// ── The message templates ────────────────────────────────────────────────────
+// Every one of them lives in _templates.js now, including the system emails
+// that used to be HTML literals inside the function that sent them. This module
+// only seeds and sends; the wording is data.
+const { TEMPLATES: MANUAL_TEMPLATES } = require('./_templates');
 
 // INSERT ... DO NOTHING, never DO UPDATE: re-running this on every cold start
 // must not overwrite wording Joe has since edited. A missing row is restored;
@@ -309,9 +266,16 @@ async function seedManualTemplates(client) {
       await client.query(
         `INSERT INTO automation_rules
            (name, active, trigger_event, recipient, subject, body_html, body_sms, channel, sort_order, template_key)
-         VALUES ($1, TRUE, 'manual', 'client', $2, $3, $4, 'email', 900, $5)
+         VALUES ($1, TRUE, $6, $7, $2, $3, $4, $8, $9, $5)
          ON CONFLICT (template_key) DO NOTHING`,
-        [t.name, t.subject, t.body_html, t.body_sms, t.template_key]
+        [t.name, t.subject, t.body_html, t.body_sms, t.template_key,
+         // 'manual' = a button on a booking sends it. 'system' = a code path
+         // does, on payment, on refund, on a client finalising. Neither value
+         // is queried by any trigger loop, so seeding one can never start an
+         // automation — see the WHERE clauses in triggerStatusChange and
+         // runScheduledAutomations, which name their trigger_event explicitly.
+         t.trigger_event || 'manual', t.recipient || 'client',
+         t.channel || 'email', t.sort_order || 900]
       );
     } catch (e) {
       console.error('seedManualTemplates failed for', t.template_key, '|', e.message);
@@ -326,7 +290,7 @@ async function seedManualTemplates(client) {
 // Deliberately NOT routed through sendAutomationMessage: that guards against
 // sending the same rule twice for a booking, which is correct for a trigger
 // and wrong for a button Joe presses on purpose to re-send.
-async function sendTemplate(client, booking, templateKey, link) {
+async function sendTemplate(client, booking, templateKey, link, opts = {}) {
   const lookup = () => client.query(
     'SELECT * FROM automation_rules WHERE template_key=$1', [templateKey]);
   let { rows } = await lookup();
@@ -345,19 +309,33 @@ async function sendTemplate(client, booking, templateKey, link) {
     console.error('sendTemplate: no template with key', templateKey, '— nothing sent');
     return { sent: false, error: `Email template "${templateKey}" is missing` };
   }
-  if (!booking.client_email) {
+  // Who it goes to: an explicit address wins (a staff member, a venue), then
+  // the rule's own recipient. An 'admin' template goes to Joe — sending one to
+  // the client would mail an internal alert to the customer, which is the
+  // failure mode this branch exists to prevent.
+  const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
+  const toClient = !opts.to && rule.recipient !== 'admin';
+  const to = opts.to || (rule.recipient === 'admin' ? NOTIFY : booking.client_email);
+  if (!to) {
     return { sent: false, error: 'This booking has no client email address, so nothing was sent' };
   }
 
-  const subject = render(rule.subject, booking, link);
-  const html = wrap(render(rule.body_html, booking, link));
+  const subject = render(rule.subject, booking, link, opts.extra);
+  const html = wrap(render(rule.body_html, booking, link, opts.extra));
   let res;
   try {
-    res = await sendEmail(booking.client_email, subject, html);
-    await logEmail(client, booking.id, rule.id, rule.name, subject, booking.client_email, 'client', logStatus(res));
+    res = await sendEmail(to, subject, html);
+    // email_log.booking_id is NOT NULL. A Stripe payment_intent that failed
+    // often matches no booking at all, and losing the send to a constraint
+    // error would be a silent non-delivery of the loudest kind.
+    if (booking.id) {
+      await logEmail(client, booking.id, rule.id, rule.name, subject, to, rule.recipient || 'client', logStatus(res));
+    } else {
+      console.log('sendTemplate: sent', templateKey, 'to', to, '— no booking to log it against');
+    }
   } catch (e) {
-    console.error('sendTemplate email failed:', booking.client_email, '|', e.message);
-    await logEmail(client, booking.id, rule.id, rule.name, subject, booking.client_email, 'client', 'failed', e.message);
+    console.error('sendTemplate email failed:', to, '|', e.message);
+    await logEmail(client, booking.id, rule.id, rule.name, subject, to, rule.recipient || 'client', 'failed', e.message);
     return { sent: false, error: e.message };
   }
 
@@ -365,13 +343,17 @@ async function sendTemplate(client, booking, templateKey, link) {
   // what Joe types into it would be a silent failure; honour it on the same
   // consent terms as any other client text.
   if ((rule.channel === 'sms' || rule.channel === 'both') && (rule.body_sms || '').trim()) {
-    if (booking.sms_consent !== true) {
+    const toPhone = opts.toPhone || booking.client_phone;
+    // Consent is a question about the CLIENT. Joe's own alert number and a
+    // staff member's work number are not texted on the strength of a box a
+    // customer ticked, and must not be silenced by one they didn't.
+    if (toClient && booking.sms_consent !== true) {
       console.log('sendTemplate SMS skipped — no client SMS consent | booking:', booking.id);
-    } else if (!booking.client_phone) {
+    } else if (!toPhone) {
       console.error('sendTemplate SMS skipped — no phone | booking:', booking.id);
     } else {
-      await sendSms(client, booking.client_phone, renderSms(rule.body_sms, booking, link),
-        { booking_id: booking.id, rule_id: rule.id, trigger_label: rule.name });
+      await sendSms(client, toPhone, renderSms(rule.body_sms, booking, link, opts.extra),
+        { booking_id: booking.id, rule_id: rule.id, trigger_label: rule.name, staff_id: opts.staff_id });
     }
   }
 
@@ -613,6 +595,39 @@ exports.handler = async (event) => {
           return json(200, rows);
         }
 
+        // Whether this client may be texted, and why. Two separate facts that
+        // are easy to conflate: sms_consent is "did they ever agree to start",
+        // sms_optout is "did they later tell us to stop". Either one blocks a
+        // send, so both are reported rather than reduced to one flag.
+        if (type === 'sms_consent') {
+          const bookingId = event.queryStringParameters?.booking_id;
+          if (!bookingId) return json(400, { error: 'booking_id required' });
+          const { rows } = await client.query(
+            'SELECT client_phone, sms_consent, sms_consent_at, sms_consent_text FROM bookings WHERE id=$1',
+            [parseInt(bookingId)]
+          );
+          if (!rows.length) return json(404, { error: 'Booking not found' });
+          const b = rows[0];
+          const e164 = normalisePhone(b.client_phone);
+          let optout = null;
+          if (e164) {
+            const { rows: o } = await client.query(
+              'SELECT phone, reason, created_at FROM sms_optout WHERE phone=$1', [e164]);
+            optout = o[0] || null;
+          }
+          return json(200, {
+            phone: b.client_phone || '',
+            // A number that will not normalise cannot be texted at all, and
+            // saying "no consent" would point at the wrong problem.
+            phone_usable: !!e164,
+            consent: b.sms_consent === true,
+            consent_at: b.sms_consent_at,
+            consent_text: b.sms_consent_text || '',
+            opted_out: !!optout,
+            opted_out_at: optout ? optout.created_at : null
+          });
+        }
+
         if (type === 'tasks') {
           const bookingId = event.queryStringParameters?.booking_id;
           if (!bookingId) return json(400, { error: 'booking_id required' });
@@ -696,6 +711,49 @@ exports.handler = async (event) => {
           "UPDATE scheduled_emails SET status='cancelled' WHERE id=$1 AND status='pending'", [parseInt(id)]);
         if (!rowCount) return json(404, { error: 'No pending follow-up with that id — it may have already sent' });
         return json(200, { success: true });
+      }
+
+      // Record that a client agreed to be texted, or withdraw it.
+      //
+      // Deliberately cannot touch sms_optout. That list is written by the
+      // client texting STOP, and only they can undo it by texting START —
+      // an admin clearing it would be overriding a person's own instruction,
+      // which is the one thing this whole consent record exists to prevent.
+      if (action === 'set_sms_consent') {
+        const { booking_id, consent, how } = body;
+        if (!booking_id) return json(400, { error: 'booking_id required' });
+        const { rows: bk } = await client.query(
+          'SELECT id, client_phone FROM bookings WHERE id=$1', [parseInt(booking_id)]);
+        if (!bk.length) return json(404, { error: 'Booking not found' });
+
+        if (consent !== true) {
+          await client.query(
+            'UPDATE bookings SET sms_consent=FALSE, sms_consent_at=NULL, sms_consent_text=$1, updated_at=NOW() WHERE id=$2',
+            [`Consent withdrawn in the admin on ${new Date().toISOString().slice(0, 10)}.`, parseInt(booking_id)]
+          );
+          return json(200, { success: true, consent: false });
+        }
+
+        // A phone number that cannot be normalised can never be texted, so
+        // recording consent against it would be a record of nothing.
+        if (!normalisePhone(bk[0].client_phone)) {
+          return json(400, { error: 'This booking has no usable mobile number, so there is nothing to consent to' });
+        }
+        // How it was obtained is the part that matters if the campaign is ever
+        // audited. Free text would drift; an unknown value is refused rather
+        // than stored as a vague "recorded by admin".
+        const HOW = {
+          phone: 'verbally over the phone',
+          person: 'in person',
+          email: 'in writing by email or text'
+        };
+        if (!HOW[how]) return json(400, { error: 'Say how consent was given' });
+        const text = `Recorded in the admin on ${new Date().toISOString().slice(0, 10)}: client agreed ${HOW[how]} to receive text messages about this booking.`;
+        await client.query(
+          'UPDATE bookings SET sms_consent=TRUE, sms_consent_at=NOW(), sms_consent_text=$1, updated_at=NOW() WHERE id=$2',
+          [text, parseInt(booking_id)]
+        );
+        return json(200, { success: true, consent: true, consent_text: text });
       }
 
       if (action === 'log_call') {

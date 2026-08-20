@@ -175,22 +175,32 @@ test('the duplicate-collapsing migration runs outside the swallow-all loop', () 
 
 // ── Staff portal links ──────────────────────────────────────────────────────
 
+// The bodies moved to _templates.js on 2026-08-20, so this now checks the
+// templates. The property is unchanged: a staff member sent to admin.html
+// lands on a login they do not have.
+const { TEMPLATES } = require('../netlify/functions/_templates.js');
+const tpl = (k) => TEMPLATES.find((t) => t.template_key === k);
+
 test('staff emails point at the staff portal, not the admin dashboard', () => {
   assert.ok(SRC.includes('/staff-portal.html'), 'PORTAL must resolve to the staff portal');
 
-  // The two staff-facing CTAs ("a gig is available" and "you're booked") must
-  // send people to the portal. The one surviving admin.html link is the
-  // post-gig survey notification, which goes to Joe and belongs on the
-  // dashboard — so it is scoped out by name rather than blanket-banned.
-  const adminLinks = CODE_LINES.filter(l => /\$\{SITE\}\/admin\.html/.test(l));
-  assert.strictEqual(adminLinks.length, 1, 'only the admin survey notice may link to the dashboard');
-  assert.ok(
-    adminLinks[0].includes('View in Dashboard'),
-    'the sole admin.html link must be the admin-facing survey notice'
-  );
+  for (const key of ['staff_gig_available', 'staff_assigned']) {
+    const t = tpl(key);
+    assert.ok(t, `${key} template is missing`);
+    assert.ok(t.body_html.includes('{{portal_link}}'), `${key} must link to the portal`);
+    assert.ok(!t.body_html.includes('{{admin_link}}'), `${key} links a staff member to the admin dashboard`);
+    assert.ok(!/admin\.html/.test(t.body_html), `${key} hardcodes an admin.html link`);
+  }
 
-  const portalLinks = SRC.match(/\$\{PORTAL\}/g) || [];
-  assert.ok(portalLinks.length >= 3, 'both staff emails must link to the portal');
+  // The one admin-facing message in this file's flow is the post-gig report,
+  // which goes to Joe and belongs on the dashboard.
+  assert.ok(tpl('post_gig_survey_alert').body_html.includes('{{admin_link}}'),
+    'the survey notice to Joe should link to the dashboard');
+
+  // The staff SMS bodies are still built here — they carry the reply codes the
+  // inbound webhook parses, so they are not template copy.
+  assert.ok((SRC.match(/\$\{PORTAL\}/g) || []).length >= 1,
+    'the "you\'re booked" text must still link to the portal');
 });
 
 // ── Client and server must agree on what "exclusive" means ──────────────────

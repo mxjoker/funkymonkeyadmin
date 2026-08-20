@@ -2,25 +2,16 @@ const { withClient, getPool } = require('./_db');
 const {
   CORS, preflight, requireAuth, unauthorized, forbidden,
 } = require('./_auth');
-const { sendEmail, wrap, logChange, ensureBookingChanges, fmtEventDate } = require('./_email');
+const { esc, logChange, ensureBookingChanges, fmtEventDate } = require('./_email');
+const { sendTemplate } = require('./automations');
 const { sendSms, ensureSmsTables } = require('./_sms');
 const { isValidPayType, resolvePayType, assignmentRefusal } = require('./_pay');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
-// sendEmail throws on failure. Staff notifications are fire-and-forget: a bad
-// address must never fail the assignment/claim/survey it accompanies, nor stop
-// the loop that notifies the remaining staff. Guarded here so all four call
-// sites (and any future one) are covered by one catch.
-// A staff member who unchecked Email does not get one. Guarded at the one
-// door so a future call site cannot forget. Calls with no `staff` (the
-// owner-notification at the survey path) always send.
-const notify = ({ to_email, subject, html, staff }) => {
-  if (staff && !wantsEmail(staff)) return Promise.resolve();
-  return sendEmail(to_email, subject, html)
-    .catch(e => console.error('staff notify failed:', to_email, '|', e.message));
-};
-
+// wantsEmail() is the opt-out every staff send checks. The notify() wrapper it
+// used to live inside is gone: all three staff emails are templates now, and
+// each guards on this directly at its own call site.
 // Staff SMS rides on comms_preference, the column that has been on the staff
 // table — with an "SMS (coming soon)" option in both UIs — since before this
 // feature existed. A second opt-in mechanism would mean two places to check and
@@ -732,28 +723,31 @@ exports.handler = async (event) => {
             const bRef  = bRows[0]?.reference || '';
             const svc   = bRows[0]?.service_name || '';
 
-            const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
-            await notify({
-              to_email: NOTIFY,
-              to_name: 'Joe',
-              subject: `📋 Post-Gig Survey Submitted — ${sName} · ${bRef}`,
-              html: wrap(`
-                <p style="font-weight:700;font-size:15px;margin-bottom:16px">📋 ${sName} submitted a post-gig report for <span style="color:#FFD600">${svc}</span></p>
-                <table style="width:100%;border-collapse:collapse">
-                  ${log.guest_count_actual!=null?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700;width:180px">Actual Guests</td><td style="padding:6px 0;font-weight:600">${log.guest_count_actual}</td></tr>`:''}
-                  ${log.balance_collected!=null?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Balance Collected</td><td style="padding:6px 0;font-weight:600">${log.balance_collected?'✅ Yes — $'+(log.balance_amount||0):'❌ No'}</td></tr>`:''}
-                  ${log.gas_level?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Gas Level</td><td style="padding:6px 0;font-weight:600">${log.gas_level}</td></tr>`:''}
-                  ${log.foam_fluid_needed!=null?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Foam Fluid Needed</td><td style="padding:6px 0;font-weight:600">${log.foam_fluid_needed?'⚠️ Yes':'✅ No'}</td></tr>`:''}
-                  ${log.empty_jugs_refilled!=null?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Jugs Refilled</td><td style="padding:6px 0;font-weight:600">${log.empty_jugs_refilled?'✅ Yes':'❌ No'}</td></tr>`:''}
-                  ${log.event_rating?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Event Rating</td><td style="padding:6px 0;font-weight:600">${'⭐'.repeat(log.event_rating)} (${log.event_rating}/5)</td></tr>`:''}
-                  ${log.notes?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700;vertical-align:top">Notes</td><td style="padding:6px 0">${log.notes}</td></tr>`:''}
-                  ${log.issues?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700;vertical-align:top">Issues</td><td style="padding:6px 0;color:#FCA5A5">${log.issues}</td></tr>`:''}
-                </table>
-                <div style="margin-top:20px;text-align:center">
-                  <a href="${SITE}/admin.html" style="background-color:#FF6B00;color:#0F0A1E;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:900;font-size:14px">View in Dashboard →</a>
-                </div>
-              `)
-            });
+            const reportRows = [
+              log.guest_count_actual!=null?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700;width:180px">Actual Guests</td><td style="padding:6px 0;font-weight:600">${esc(String(log.guest_count_actual))}</td></tr>`:'',
+              log.balance_collected!=null?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Balance Collected</td><td style="padding:6px 0;font-weight:600">${log.balance_collected?'✅ Yes — $'+(log.balance_amount||0):'❌ No'}</td></tr>`:'',
+              log.gas_level?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Gas Level</td><td style="padding:6px 0;font-weight:600">${esc(String(log.gas_level))}</td></tr>`:'',
+              log.foam_fluid_needed!=null?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Foam Fluid Needed</td><td style="padding:6px 0;font-weight:600">${log.foam_fluid_needed?'⚠️ Yes':'✅ No'}</td></tr>`:'',
+              log.empty_jugs_refilled!=null?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Jugs Refilled</td><td style="padding:6px 0;font-weight:600">${log.empty_jugs_refilled?'✅ Yes':'❌ No'}</td></tr>`:'',
+              log.event_rating?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Event Rating</td><td style="padding:6px 0;font-weight:600">${'⭐'.repeat(log.event_rating)} (${esc(String(log.event_rating))}/5)</td></tr>`:'',
+              log.notes?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700;vertical-align:top">Notes</td><td style="padding:6px 0">${esc(String(log.notes))}</td></tr>`:'',
+              log.issues?`<tr><td style="padding:6px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700;vertical-align:top">Issues</td><td style="padding:6px 0;color:#FCA5A5">${esc(String(log.issues))}</td></tr>`:'',
+            ].join('');
+
+            // Needs a booking to hang the log entry on. Without one the alert
+            // is skipped rather than sent unlogged — a report nobody can find
+            // afterwards is the shape of bug this file keeps producing.
+            if (bRows[0]) {
+              try {
+                const r = await sendTemplate(client, bRows[0], 'post_gig_survey_alert', null,
+                  { extra: { staff_name: esc(sName), report_rows: reportRows } });
+                if (!r.sent) console.error('post-gig report alert not sent —', r.error);
+              } catch (e) {
+                console.error('post-gig report alert failed:', e.message);
+              }
+            } else {
+              console.error('post-gig report alert skipped — no booking row for log', log.id);
+            }
           }
 
           return json(200, rows[0]);
@@ -961,27 +955,28 @@ exports.handler = async (event) => {
                 </div>`;
             }
 
-            await notify({
-              to_email: s.email,
-              to_name: s.preferred_name || s.name,
-              staff: s,
-              subject: `✅ You're booked! ${b.service_name} on ${dateStr}`,
-              html: wrap(`
-                <p style="font-size:16px;margin-bottom:16px">Hi <strong>${s.preferred_name || s.name}</strong>! 🎉</p>
-                <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">You've been assigned to a gig! Here are your details and call times.</p>
-                <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:4px">
-                  <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</span><br><span style="font-weight:600">${b.service_name}</span></div>
-                  <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Event Date</span><br><span style="font-weight:600">${dateStr}${b.event_time ? ' at ' + b.event_time : ''}</span></div>
-                  <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Area</span><br><span style="font-weight:600">${b.event_zip || 'OKC'}${b.event_location ? ' — ' + b.event_location : ''}</span></div>
-                  <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Your Role</span><br><span style="color:#FFD600;font-weight:700">${tag_filled}</span></div>
-                </div>
-                ${scheduleHtml}
-                <div style="text-align:center;margin-top:20px;margin-bottom:20px">
-                  <a href="${PORTAL}" style="background-color:#10B981;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">View Full Gig Details →</a>
-                </div>
-                <p style="font-size:12px;color:#A78BCA;text-align:center">Questions? Contact Joe at <a href="tel:4054316625" style="color:#06B6D4">(405) 431-6625</a></p>
-              `)
-            });
+            // Wording in the 'staff_assigned' rule. The opt-out check stays
+            // here — notify() owns it for every other send in this file, and a
+            // staff member who unchecked Email must not start getting mail
+            // because their email moved into a template.
+            if (wantsEmail(s)) {
+              try {
+                const r = await sendTemplate(client, b, 'staff_assigned', null, {
+                  to: s.email,
+                  extra: {
+                    staff_name: esc(s.preferred_name || s.name || ''),
+                    staff_role: esc(tag_filled || ''),
+                    schedule_block: scheduleHtml,
+                    portal_link: PORTAL,
+                  }
+                });
+                if (!r.sent) console.error('staff assigned email not sent —', r.error);
+              } catch (e) {
+                // Fire-and-forget, same contract as notify(): a mail failure
+                // must never fail the assignment it accompanies.
+                console.error('staff assigned email failed:', s.email, '|', e.message);
+              }
+            }
 
             // Shift start, not just the event time: the whole point of the text
             // is the number the crew member has to set an alarm for.
@@ -1270,26 +1265,21 @@ async function notifyStaffForBooking(client, booking) {
   const timeStr = booking.event_time || '';
 
   for (const { staff, matched } of eligible) {
-    await notify({
-      to_email: staff.email,
-      to_name: staff.preferred_name || staff.name,
-      staff,
-      subject: `🎪 Gig Available — ${booking.service_name} on ${dateStr}`,
-      html: wrap(`
-        <p style="font-size:16px;margin-bottom:16px">Hi <strong>${staff.preferred_name || staff.name}</strong>! 👋</p>
-        <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">A new gig is available and your skills match what's needed. Log in to the staff portal to express your interest!</p>
-        <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
-          <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</span><br><span style="font-weight:600">${booking.service_name}</span></div>
-          <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date & Time</span><br><span style="font-weight:600">${dateStr}${timeStr ? ' at ' + timeStr : ''}</span></div>
-          <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Area</span><br><span style="font-weight:600">${booking.event_zip || 'OKC area'}</span></div>
-          <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Your Matching Skills</span><br><span style="color:#FFD600;font-weight:700">${matched.join(', ')}</span></div>
-        </div>
-        <div style="text-align:center;margin-bottom:20px">
-          <a href="${PORTAL}" style="background-color:#7c3aed;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">Open the Staff Portal →</a>
-        </div>
-        <p style="font-size:12px;color:#A78BCA;text-align:center">Log in with your access code · ${PORTAL}</p>
-      `)
-    });
+    if (wantsEmail(staff)) {
+      try {
+        const r = await sendTemplate(client, booking, 'staff_gig_available', null, {
+          to: staff.email,
+          extra: {
+            staff_name: esc(staff.preferred_name || staff.name || ''),
+            matching_skills: esc(matched.join(', ')),
+            portal_link: PORTAL,
+          }
+        });
+        if (!r.sent) console.error('gig-available email not sent —', r.error);
+      } catch (e) {
+        console.error('gig-available email failed:', staff.email, '|', e.message);
+      }
+    }
     const offerMap = buildOfferMap(matched, booking.id);
     await notifySms(client, staff, offerText(booking, dateStr, offerMap), {
       booking_id: booking.id, trigger_label: 'Gig available', offer_map: offerMap

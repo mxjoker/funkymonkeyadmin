@@ -12,7 +12,7 @@ function loadHelpers() {
   assert.ok(a !== -1 && b !== -1, 'pure-helper sentinels missing from admin.html');
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS, reportButtonVisible, payLabel };', ctx);
+  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, depositWaivable, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS, reportButtonVisible, payLabel };', ctx);
   return ctx.out;
 }
 
@@ -273,4 +273,34 @@ test('with no role setting, the label falls through to the staff member', () => 
 test('with neither a role nor a staff setting, the label defaults to flat', () => {
   const label = payLabel({}, undefined, { flat_rate: 80 });
   assert.match(label, /^flat · \$80\.00$/);
+});
+
+// ── Waive deposit ───────────────────────────────────────────────────────────
+// Waiving zeroes deposit_amount and lets the balance recompute to the full
+// amount. Offering it on a deposit that was already PAID would bill that money
+// a second time, so the gate is the whole safety property.
+const { depositWaivable } = loadHelpers();
+
+test('a deposit that has been paid can never be waived', () => {
+  assert.strictEqual(depositWaivable({ deposit_amount: 100, deposit_paid: true }), false);
+});
+
+test('an outstanding deposit can be waived', () => {
+  assert.strictEqual(depositWaivable({ deposit_amount: 100, deposit_paid: false }), true);
+  assert.strictEqual(depositWaivable({ deposit_amount: '150.00' }), true);
+});
+
+test('there is nothing to waive when there is no deposit', () => {
+  for (const b of [{ deposit_amount: 0 }, { deposit_amount: null }, {}, { deposit_amount: 'abc' }]) {
+    assert.strictEqual(depositWaivable(b), false, JSON.stringify(b));
+  }
+});
+
+// Waiving is exactly the state that unlocks the balance link, which is the
+// reason the button exists at all.
+test('waiving unlocks the balance link on a booking that had a deposit due', () => {
+  const before = { deposit_amount: 100, deposit_paid: false, balance_due: 745 };
+  assert.strictEqual(balanceLinkEligible(before), false);
+  // What waiveDeposit() leaves behind: no deposit, balance grown by it.
+  assert.strictEqual(balanceLinkEligible({ ...before, deposit_amount: 0, balance_due: 845 }), true);
 });

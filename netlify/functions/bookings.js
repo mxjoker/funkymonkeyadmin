@@ -1,11 +1,11 @@
 const crypto = require('crypto');
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
-const { esc, wrap, sendEmail, fmtEventDate } = require('./_email');
 const { notifyMatchingStaff } = require('./staff-assignments');
 const { normaliseBrand } = require('./_brand');
 const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems, getItemsForBookings } = require('./_items');
 const { sendSms } = require('./_sms');
+const { sendTemplate } = require('./automations');
 const { normaliseAddress } = require('./_address');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
@@ -524,7 +524,7 @@ exports.handler = async (event) => {
       // Drafts send nothing: the record is half-finished, the client may have no
       // email address yet, and the owner is on the phone with them right now.
       if (!isDraft) {
-        await sendBookingEmails(booking);
+        await sendBookingEmails(client, booking);
         await notifyMatchingStaff(booking).catch(e => console.error('Staff notify error:', e.message));
       }
 
@@ -540,64 +540,31 @@ exports.handler = async (event) => {
 // Send admin notification then client acknowledgment, both awaited so the
 // serverless container doesn't terminate before the Resend calls complete.
 // Each is caught independently so admin failure never blocks client email.
-async function sendBookingEmails(booking) {
-  const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
-
-  const dateStr = fmtEventDate(booking.event_date) || 'TBD';
-
-  const addons = Array.isArray(booking.addons) ? booking.addons : [];
-  const addonList = addons.map(a =>
-    `<li>${esc(a.name)} — $${Number(a.price).toFixed(2)}</li>`
-  ).join('');
-
-  // Admin notification — failure logged but does NOT skip client email
-  await sendEmail(
-    NOTIFY_EMAIL,
-    `🐒 New Booking Request — ${esc(booking.reference)} — ${esc(booking.service_name)}`,
-    wrap(`
-      <h2>New Booking Request</h2>
-      <p><strong>Ref:</strong> ${esc(booking.reference)}</p>
-      <p><strong>Service:</strong> ${esc(booking.service_name)}</p>
-      <p><strong>Date:</strong> ${dateStr} at ${esc(booking.event_time)}</p>
-      <p><strong>ZIP:</strong> ${esc(booking.event_zip)}${booking.event_location ? ' — ' + esc(booking.event_location) : ''}</p>
-      <p><strong>Event Type:</strong> ${esc(booking.event_type)} · ${booking.guest_count} guests</p>
-      <hr/>
-      <p><strong>Client:</strong> ${esc(booking.client_name)}</p>
-      <p><strong>Phone:</strong> ${esc(booking.client_phone)}</p>
-      <p><strong>Email:</strong> ${esc(booking.client_email)}</p>
-      ${booking.referral_source ? `<p><strong>Referral:</strong> ${esc(booking.referral_source)}</p>` : ''}
-      <hr/>
-      <p><strong>Service:</strong> $${Number(booking.service_price).toFixed(2)}</p>
-      ${addonList ? `<ul>${addonList}</ul>` : ''}
-      ${Number(booking.mileage_cost) > 0 ? `<p><strong>Travel:</strong> $${Number(booking.mileage_cost).toFixed(2)} (${booking.mileage_miles} mi)</p>` : ''}
-      <p><strong>Total:</strong> $${Number(booking.total_price).toFixed(2)}</p>
-      <p><strong>Deposit:</strong> $${Number(booking.deposit_amount).toFixed(2)}</p>
-      <p><strong>Balance Due:</strong> $${Number(booking.balance_due).toFixed(2)}</p>
-      ${booking.notes ? `<p><strong>Notes:</strong> ${esc(booking.notes)}</p>` : ''}
-      <br/>
-      <a href="https://funkymonkeyadmin.netlify.app/admin.html" style="background:#7c3aed;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">View in Admin</a>
-    `)
-  ).catch(e => console.error('Admin email error:', e.message));
-
-  // Client acknowledgment — always attempted regardless of admin email outcome
-  const firstName = esc(booking.client_name.split(' ')[0] || 'there');
-  await sendEmail(
-    booking.client_email,
-    `🎉 Booking Request Received — Funky Monkey Events (${booking.reference})`,
-    wrap(`
-      <h2>Thanks, ${firstName}!</h2>
-      <p>We've received your booking request and will get back to you within 24 hours to confirm availability.</p>
-      <p><strong>Your reference number:</strong> ${esc(booking.reference)}</p>
-      <h3>Booking Summary</h3>
-      <p><strong>Service:</strong> ${esc(booking.service_name)}</p>
-      <p><strong>Date:</strong> ${dateStr} at ${esc(booking.event_time)}</p>
-      ${Number(booking.total_price) > 0 ? `<p><strong>Estimated Total:</strong> $${Number(booking.total_price).toFixed(2)}</p>` : '<p><em>A custom quote will be included in our follow-up.</em></p>'}
-      <p><strong>Deposit to Confirm:</strong> $${Number(booking.deposit_amount).toFixed(2)}</p>
-      ${Number(booking.total_price) > 0 ? `<p><strong>Balance Due at Event:</strong> $${Number(booking.balance_due).toFixed(2)}</p>` : ''}
-      <br/>
-      <p>Questions? Call or text us at <strong>(405) 431-6625</strong></p>
-      <p>— The Funky Monkey Events Team 🐒</p>
-    `)
-  ).catch(e => console.error('Client email error:', e.message));
+//
+// Both bodies used to be HTML literals here. They are rows in automation_rules
+// now — 'new_booking_alert' and 'booking_request_received' — so the wording is
+// editable in the Automations tab, and both sends land in email_log, which the
+// client acknowledgment never did.
+async function sendBookingEmails(c, booking) {
+  for (const key of ['new_booking_alert', 'booking_request_received']) {
+    try {
+      const r = await sendTemplate(c, booking, key, null, {
+        extra: {
+          // A booking with no price yet says so rather than quoting $0.00, and
+          // prints no balance line at all. The whole line is the token: a
+          // conditional sentence is not a conditional word.
+          total_line: Number(booking.total_price) > 0
+            ? `<p><strong>Estimated Total:</strong> $${Number(booking.total_price).toFixed(2)}</p>` +
+              `<p><strong>Balance Due at Event:</strong> $${Number(booking.balance_due || 0).toFixed(2)}</p>`
+            : '<p><em>A custom quote will be included in our follow-up.</em></p>',
+        }
+      });
+      if (!r.sent) console.error(`sendBookingEmails: ${key} not sent —`, r.error);
+    } catch (e) {
+      // One failed send must never skip the other.
+      console.error(`sendBookingEmails: ${key} threw —`, e.message);
+    }
+  }
 }
+
 

@@ -11,6 +11,7 @@
 
 const FROM = 'Funky Monkey Events <bookings@funkymonkeyevents.com>';
 const { ensureTable: ensureBookingChanges } = require('./booking-changelog');
+const { balanceCharge, SERVICE_FEE_RATE } = require('./_items');
 
 // Google review profiles. Magic-show bookings point clients at Joe's personal
 // "Joe Coover Magic" profile; everything else goes to "Funky Monkey Events".
@@ -73,7 +74,54 @@ function fmtEventDate(value, opts) {
     Object.assign({ timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }, opts));
 }
 
-function render(template, booking, stripeLink) {
+// Tokens every message can use that are DERIVED from the row rather than being
+// a column on it: a list, a conditional line, a name split. Built once here so
+// the email and SMS renderers cannot disagree about what {{addon_list}} means.
+//
+// Each returns '' — never 'undefined', never 'null' — when the data is absent,
+// because these sit in the middle of a sentence in someone's inbox.
+function rowTokens(booking) {
+  const addons = Array.isArray(booking.addons) ? booking.addons : [];
+  const miles = Number(booking.mileage_cost || 0);
+  return {
+    addon_list: addons.length
+      ? '<ul>' + addons.map(a => `<li>${esc(a.name)} — $${Number(a.price || 0).toFixed(2)}</li>`).join('') + '</ul>'
+      : '',
+    // A whole line, not a number: a booking with no travel charge must not
+    // leave "Travel: $0.00" in the email.
+    // "OKC" is the fallback three of the ported emails already used: an alert
+    // saying the event is nowhere is worse than one saying it is in town.
+    location_label: booking.event_location || booking.event_zip || 'OKC',
+    // "Saturday, 12 September 2026 at 2:00 PM", or just the date. Built here
+    // because six templates want the pair and none of them want "TBD at ".
+    event_datetime: (fmtEventDate(booking.event_date) || 'TBD')
+      + (booking.event_time ? ' at ' + booking.event_time : ''),
+    mileage_line: miles > 0
+      ? `<p><strong>Travel:</strong> $${miles.toFixed(2)}${booking.mileage_miles ? ` (${esc(String(booking.mileage_miles))} mi)` : ''}</p>`
+      : '',
+  };
+}
+
+// The plain-text side of the same tokens, for the SMS bodies.
+const stripTags = (html) => String(html || '')
+  .replace(/<li>/g, '- ').replace(/<\/li>/g, '\n').replace(/<[^>]+>/g, '')
+  .replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+
+// `extra` carries values that are not on the booking row at all — an amount a
+// webhook just received, a list of what a client changed, a staff member's call
+// time. Substituted last, and only for keys the caller passes: a template
+// naming an extra the caller does not supply keeps its literal {{token}}, which
+// the manual-templates test turns into a failure rather than a blank in a bill.
+function applyExtra(out, extra) {
+  if (!extra) return out;
+  for (const [k, v] of Object.entries(extra)) {
+    out = out.split('{{' + k + '}}').join(v == null ? '' : String(v));
+  }
+  return out;
+}
+
+function render(template, booking, stripeLink, extra) {
   const firstName = (booking.client_name || '').split(' ')[0] || 'there';
   const dateStr = fmtEventDate(booking.event_date) || 'TBD';
   // background-color, not linear-gradient: Gmail strips gradients from inline
@@ -91,11 +139,18 @@ function render(template, booking, stripeLink) {
       </div>`
     : '';
 
+  // The balance-link figures, priced by the same function that builds the
+  // Stripe session (_items.js). The email and the checkout page can never
+  // then quote different arithmetic — which matters most on the one document
+  // a client would use to check it.
+  const charge = balanceCharge(booking);
+  const derived = rowTokens(booking);
+
   // Guests of honour falls back to the child's name, then to a friendly
   // generic so the sentence still reads if neither field is set.
   const guestsOfHonour = booking.guests_of_honour || booking.child_name || 'everyone';
 
-  return template
+  return applyExtra(template
     .replace(/{{client_first_name}}/g, esc(firstName))
     .replace(/{{client_name}}/g,       esc(booking.client_name   || ''))
     .replace(/{{guests_of_honour}}/g,  esc(guestsOfHonour))
@@ -111,6 +166,12 @@ function render(template, booking, stripeLink) {
     // demand for $100.00 that exists nowhere in the booking.
     .replace(/{{deposit_amount}}/g,    Number(booking.deposit_amount||0).toFixed(2))
     .replace(/{{balance_due}}/g,       Number(booking.balance_due   ||0).toFixed(2))
+    .replace(/{{service_fee}}/g,       charge.fee.toFixed(2))
+    .replace(/{{balance_total}}/g,     charge.total.toFixed(2))
+    // A token, not a literal, so rewording the fee line in Automations
+    // cannot leave an email saying 5% beside a Stripe page charging
+    // something else. SERVICE_FEE_RATE is the only definition of the rate.
+    .replace(/{{service_fee_pct}}/g,   String(Math.round(SERVICE_FEE_RATE * 100)))
     .replace(/{{reference}}/g,         booking.reference     || '')
     .replace(/{{deposit_link}}/g,      depositBtn)
     // {{payment_link}} is renderSms's token, not render()'s — but the rule
@@ -119,7 +180,25 @@ function render(template, booking, stripeLink) {
     // the raw URL the button points at, not the HTML button) so that copy
     // never comes out as a literal, unreplaced "{{payment_link}}".
     .replace(/{{payment_link}}/g,      stripeLink || '')
-    .replace(/{{finalise_link}}/g,     finaliseLinkFor(booking));
+    // Row fields the ported system emails need. Plain columns, escaped like
+    // every other value here.
+    .replace(/{{client_email}}/g,      esc(booking.client_email    || ''))
+    .replace(/{{client_phone}}/g,      esc(booking.client_phone    || ''))
+    .replace(/{{event_location}}/g,    esc(booking.event_location  || ''))
+    .replace(/{{event_type}}/g,        esc(booking.event_type      || ''))
+    .replace(/{{guest_count}}/g,       esc(String(booking.guest_count ?? '')))
+    .replace(/{{service_price}}/g,     Number(booking.service_price || 0).toFixed(2))
+    .replace(/{{mileage_cost}}/g,      Number(booking.mileage_cost  || 0).toFixed(2))
+    .replace(/{{notes}}/g,             esc(booking.notes           || ''))
+    .replace(/{{referral_source}}/g,   esc(booking.referral_source || ''))
+    .replace(/{{status}}/g,            esc(booking.status          || ''))
+    .replace(/{{deposit_state}}/g,     booking.deposit_paid === true ? 'deposit paid' : 'no deposit yet')
+    .replace(/{{location_label}}/g,    esc(derived.location_label))
+    .replace(/{{event_datetime}}/g,    esc(derived.event_datetime))
+    .replace(/{{addon_list}}/g,        derived.addon_list)
+    .replace(/{{mileage_line}}/g,      derived.mileage_line)
+    .replace(/{{admin_link}}/g,        'https://funkymonkeyadmin.netlify.app/admin.html')
+    .replace(/{{finalise_link}}/g,     finaliseLinkFor(booking)), extra);
 }
 
 // ── Email allowlist ───────────────────────────────────────────────────────────
@@ -239,4 +318,5 @@ async function logChange(client, bookingId, action, detail) {
   }
 }
 
-module.exports = { wrap, render, esc, fmtEventDate, reviewLinkFor, sendEmail, logStatus, logEmail, ensureEmailLog, ensureBookingChanges, logChange, finaliseLinkFor };
+module.exports = {
+  rowTokens, stripTags, applyExtra, wrap, render, esc, fmtEventDate, reviewLinkFor, sendEmail, logStatus, logEmail, ensureEmailLog, ensureBookingChanges, logChange, finaliseLinkFor };

@@ -1566,6 +1566,14 @@ function balanceLinkEligible(b) {
   return b && (b.deposit_paid === true || depositLinkAmount(b) <= 0);
 }
 
+// A deposit can only be waived while it is still outstanding. Waiving one that
+// was already collected would zero deposit_amount on a booking where money
+// actually arrived, and the balance recompute would then bill the client for
+// that money a second time.
+function depositWaivable(b) {
+  return depositLinkAmount(b) > 0 && !!b && b.deposit_paid !== true;
+}
+
 // Mirrors workedHours() in netlify/functions/_timeclock.js — admin.html is a
 // static page with no build step and cannot require server modules, the same
 // reason balanceLinkAmounts() is duplicated. DISPLAY
@@ -2099,11 +2107,16 @@ function openBooking(id, seed) {
     ${isNew ? '' : `
     <!-- Stripe link -->
     <div class="stripe-block">
-      <div style="display:flex;align-items:center;justify-content:space-between">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
         <strong style="font-size:.875rem">💳 Stripe Deposit Link</strong>
-        ${depositLinkAmount(b) > 0
-          ? `<button class="btn btn-primary btn-sm" onclick="sendStripeLink('${b.id}')">Send $${depositLinkAmount(b).toFixed(2)} deposit link</button>`
-          : `<span style="font-size:.75rem;color:#6b7280">No deposit on this booking</span>`}
+        <div style="display:flex;align-items:center;gap:6px">
+          ${depositLinkAmount(b) > 0
+            ? `<button class="btn btn-primary btn-sm" onclick="sendStripeLink('${b.id}')">Send $${depositLinkAmount(b).toFixed(2)} deposit link</button>`
+            : `<span style="font-size:.75rem;color:#6b7280">No deposit on this booking</span>`}
+          ${depositWaivable(b)
+            ? `<button class="btn btn-outline btn-sm" onclick="waiveDeposit('${b.id}')" title="Collect nothing up front. The whole amount becomes the balance, and the balance link unlocks.">Waive deposit</button>`
+            : ''}
+        </div>
       </div>
       ${b.stripe_payment_link?`<div class="stripe-result">Last link: <a href="${b.stripe_payment_link}" target="_blank" style="color:#7c3aed">Open →</a></div>`:''}
       <div class="stripe-result" id="sent-deposit-${b.id}"></div>
@@ -2153,6 +2166,7 @@ function openBooking(id, seed) {
         <span style="font-size:.72rem;color:#9ca3af;margin-left:8px">Goes out that morning (9am Central).</span>
         <span id="fu-msg-${b.id}" style="font-size:.75rem;margin-left:8px"></span>
       </div>
+      <div id="sms-consent-${b.id}" style="margin-bottom:12px"></div>
       <div id="call-form-${b.id}" style="display:none;margin-bottom:12px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:8px">
         <div style="display:flex;gap:8px;margin-bottom:8px">
           <select id="call-dir-${b.id}" class="form-control" style="flex:0 0 130px;font-size:.8rem">
@@ -2330,7 +2344,7 @@ function openBooking(id, seed) {
 
   // Fire and forget: the log is supplementary, and a slow query must not hold
   // up a modal whose remaining content is already on screen.
-  if (!isNew) loadComms(b.id);
+  if (!isNew) { loadComms(b.id); loadSmsConsent(b.id); }
 
   wireAddressZip();
 
@@ -3253,6 +3267,46 @@ async function sendStripeLink(id) {
   } catch(e) { el.textContent = '❌ ' + e.message; }
 }
 
+// ── Waive the deposit ───────────────────────────────────────────────────────
+// Sets deposit_amount to 0. booking.js then recomputes balance_due as
+// total + mileage - 0, so the client is billed the whole amount at the end
+// rather than part of it up front — which is what waiving a deposit means, and
+// is also what makes the booking balance-link eligible (balanceLinkEligible).
+//
+// Only offered while the deposit is unpaid (depositWaivable): zeroing a deposit
+// that was actually collected would bill that money again.
+//
+// booking.js REFUSES that recompute on a booking whose stored balance the
+// formula cannot already explain — the guard that stops a paid-up client being
+// re-billed. Refusing is the safe direction, but it leaves the balance quoting
+// the old, deposit-reduced figure, so check what came back and say so rather
+// than letting the number quietly disagree with the quote.
+async function waiveDeposit(id) {
+  const b = allBookings.find(x => String(x.id) === String(id));
+  if (!b) return;
+  const dep = depositLinkAmount(b);
+  if (dep <= 0) return;
+  const el = document.getElementById('stripe-msg-' + id);
+  const expected = Number(b.balance_due || 0) + dep;
+  if (!confirm(`Waive the $${dep.toFixed(2)} deposit?\n\n`
+      + `${b.client_name || 'This client'} pays nothing up front, and the balance `
+      + `becomes $${expected.toFixed(2)} — the whole amount — due at the end.`)) return;
+  if (el) el.textContent = 'Waiving…';
+  try {
+    const updated = await patch(id, { deposit_amount: 0 });
+    await loadBookings();
+    if (Math.abs(Number(updated.balance_due || 0) - expected) > 0.005) {
+      alert(`Deposit waived, but the balance was left at $${Number(updated.balance_due || 0).toFixed(2)}`
+        + ` instead of $${expected.toFixed(2)}.\n\nThis booking's balance was set outside the quote at`
+        + ` some point, so it is not recomputed automatically — that guard is what stops a client who`
+        + ` has already paid being re-billed. Check the balance in the quote before sending a link.`);
+    }
+    openBooking(id);
+  } catch (e) {
+    if (el) el.textContent = '❌ ' + e.message; else alert('Could not waive: ' + e.message);
+  }
+}
+
 // ── Balance link — the amount is confirmed here but decided by the server:
 // create-stripe-link.js reads balance_due from the database and recomputes the
 // fee, so a stale allBookings row can never bill the wrong figure. ──
@@ -3361,6 +3415,71 @@ function commsStatus(r) {
   const ok = ['sent', 'delivered', 'logged', 'received', 'pending'];
   if (ok.includes(r.status)) return '';
   return ` <strong style="color:#dc2626">${esc(r.status)}</strong>`;
+}
+
+// Whether this client may be texted, shown on the booking rather than left in
+// the database. Two separate facts: consent is "did they ever agree to start",
+// opt-out is "did they later say stop". Either blocks a send, and they are
+// displayed separately because the fix for each is different.
+async function loadSmsConsent(bookingId) {
+  const host = document.getElementById(`sms-consent-${bookingId}`);
+  if (!host) return;
+  try {
+    const res = await apiFetch(`/api/automations?type=sms_consent&booking_id=${bookingId}`);
+    if (!res.ok) throw new Error('load failed');
+    const c = await res.json();
+
+    const box = (bg, border, ink, inner) =>
+      `<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:10px 12px;font-size:.82rem;color:${ink}">${inner}</div>`;
+
+    // Opt-out wins over everything, including a recorded consent — so it is
+    // shown on its own rather than as a footnote under a green tick.
+    if (c.opted_out) {
+      host.innerHTML = box('#fef2f2', '#fca5a5', '#991b1b',
+        `<strong>Texts blocked — they replied STOP</strong>${c.opted_out_at ? ' on ' + commsDay(c.opted_out_at) : ''}.
+         <div style="margin-top:4px;color:#7f1d1d">Only they can undo this, by texting START to the business number. It cannot be cleared from here.</div>`);
+      return;
+    }
+    if (!c.phone_usable) {
+      host.innerHTML = box('#f9fafb', '#e5e7eb', '#6b7280',
+        `<strong>No usable mobile number</strong> on this booking, so texts are not possible either way.`);
+      return;
+    }
+    if (c.consent) {
+      host.innerHTML = box('#ecfdf5', '#6ee7b7', '#065f46',
+        `<strong>Texts OK</strong> — consent recorded${c.consent_at ? ' ' + commsDay(c.consent_at) : ''}.
+         <div style="margin-top:4px;color:#047857">${esc(c.consent_text || '')}</div>
+         <button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="setSmsConsent('${bookingId}', false)">Withdraw consent</button>`);
+      return;
+    }
+    host.innerHTML = box('#fffbeb', '#fcd34d', '#92400e',
+      `<strong>No text consent recorded</strong> — automations will skip this client.
+       <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+         <span>Record that they agreed:</span>
+         <select id="consent-how-${bookingId}" class="form-control" style="flex:0 0 auto;width:auto;font-size:.8rem;padding:3px 6px">
+           <option value="phone">over the phone</option>
+           <option value="person">in person</option>
+           <option value="email">by email or text</option>
+         </select>
+         <button class="btn btn-primary btn-sm" onclick="setSmsConsent('${bookingId}', true)">Record</button>
+       </div>
+       <div style="margin-top:6px;color:#a16207;font-size:.75rem">Only record this if they actually agreed. It is the evidence of opt-in if the campaign is ever audited.</div>`);
+  } catch (e) {
+    host.innerHTML = `<div style="color:#dc2626;font-size:.8rem">Could not load text-consent status.</div>`;
+  }
+}
+
+async function setSmsConsent(bookingId, consent) {
+  if (!consent && !confirm('Withdraw text consent for this client?')) return;
+  try {
+    const res = await apiFetch('/api/automations', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_sms_consent', booking_id: bookingId, consent,
+        how: consent ? document.getElementById(`consent-how-${bookingId}`)?.value : undefined })
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Could not save');
+    await loadSmsConsent(bookingId);
+  } catch (e) { alert(e.message); }
 }
 
 async function loadComms(bookingId) {
@@ -5520,6 +5639,26 @@ async function loadAutomations() {
   renderAutoLog(log);
 }
 
+// The Automations tab is the one place to see everything this system sends.
+// Twenty-odd messages in one flat table is a list nobody reads, so they are
+// grouped by what they are FOR — and the grouping is the sort_order decade the
+// seed in netlify/functions/_templates.js assigns: 10s money to the client,
+// 20s the booking to the client, 30s the crew, 40s alerts to us. A rule with no
+// template_key is a real automation Joe built, and leads.
+const RULE_GROUPS = [
+  { key: 'auto',    title: '⚡ Automations — these fire on their own',    hint: 'Status changes and schedules. Switch one off and it stops.' },
+  { key: 'money',   title: '💳 Money — to the client',                    hint: 'Deposit and balance links, receipts, refunds.' },
+  { key: 'booking', title: '📋 The booking — to the client',              hint: 'Finalisation links, confirmations, change receipts.' },
+  { key: 'crew',    title: '🧑\u200d🔧 To the crew',                          hint: 'Gig offers and assignments. Staff opt-outs still apply.' },
+  { key: 'us',      title: '🔔 Alerts to us',                             hint: 'Nobody outside sees these.' },
+  { key: 'other',   title: '✉️ Other messages',                           hint: '' },
+];
+
+function ruleGroup(r) {
+  if (!r.template_key) return 'auto';
+  return { 1: 'money', 2: 'booking', 3: 'crew', 4: 'us' }[Math.floor(Number(r.sort_order || 900) / 10)] || 'other';
+}
+
 function renderAutoRules(rules) {
   const el = document.getElementById('auto-rules-body');
   if (!rules.length) { el.innerHTML = '<p style="padding:16px;color:#9ca3af">No rules yet. Click + New Rule to add one.</p>'; return; }
@@ -5528,22 +5667,41 @@ function renderAutoRules(rules) {
     if (r.trigger_event === 'days_before_event') return `<strong>${r.trigger_days} days before</strong> event`;
     if (r.trigger_event === 'days_after_event')  return `<strong>${r.trigger_days} days after</strong> event`;
     if (r.trigger_event === 'deposit_paid')      return `When deposit paid`;
+    // The two template kinds. Nothing fires either on a schedule: a button on a
+    // booking sends the first, a code path sends the second.
+    if (r.trigger_event === 'manual')            return `Sent by hand from a booking`;
+    if (r.trigger_event === 'system')            return `Sent automatically`;
     return r.trigger_event;
   };
-  el.innerHTML = `<table class="data-table"><thead><tr>
-    <th style="width:40px">On</th><th>Rule Name</th><th>Trigger</th>
-    <th>To</th><th>Subject</th><th style="width:80px"></th>
-  </tr></thead><tbody>${rules.map(r => `
+  const row = r => `
     <tr style="opacity:${r.active?1:.45}">
-      <td><input type="checkbox" ${r.active?'checked':''} onchange="toggleRule(${r.id},this.checked)"></td>
+      <td>${r.template_key
+        ? `<span title="A button or a code path sends this one. There is nothing to switch off." style="color:#9ca3af">—</span>`
+        : `<input type="checkbox" ${r.active?'checked':''} onchange="toggleRule(${r.id},this.checked)">`}</td>
       <td><strong>${esc(r.name)}</strong></td>
       <td style="font-size:.8rem">${triggerLabel(r)}</td>
-      <td><span style="font-size:.75rem;background:${r.recipient==='admin'?'#fef3c7':'#dbeafe'};color:${r.recipient==='admin'?'#92400e':'#1e40af'};padding:2px 8px;border-radius:10px;font-weight:600">${r.recipient}</span></td>
+      <td><span style="font-size:.75rem;background:${r.recipient==='admin'?'#fef3c7':r.recipient==='staff'?'#ede9fe':'#dbeafe'};color:${r.recipient==='admin'?'#92400e':r.recipient==='staff'?'#5b21b6':'#1e40af'};padding:2px 8px;border-radius:10px;font-weight:600">${r.recipient}</span></td>
       <td style="font-size:.8rem;color:#6b7280">${esc(r.subject).substring(0,60)}${r.subject.length>60?'…':''}</td>
       <td style="text-align:right">
-        <button class="btn btn-outline btn-sm" style="padding:2px 8px" onclick="openRuleModal(${JSON.stringify(r).replace(/"/g,'&quot;')})">Edit</button>
+        <button class="btn btn-outline btn-sm" style="padding:2px 8px" onclick="openRuleModal(${JSON.stringify(r).replace(/"/g,'&quot;')})">${r.template_key ? 'View / edit' : 'Edit'}</button>
       </td>
-    </tr>`).join('')}</tbody></table>`;
+    </tr>`;
+
+  el.innerHTML = RULE_GROUPS.map(g => {
+    const inGroup = rules.filter(r => ruleGroup(r) === g.key);
+    if (!inGroup.length) return '';
+    return `<details open style="border-bottom:1px solid #e5e7eb">
+      <summary style="cursor:pointer;padding:12px 16px;font-weight:700;font-size:.9rem;background:#fafafa;list-style:revert">
+        ${g.title}
+        <span style="font-weight:500;color:#9ca3af;font-size:.78rem">· ${inGroup.length}</span>
+        ${g.hint ? `<div style="font-weight:400;color:#9ca3af;font-size:.75rem;margin-top:2px;margin-left:18px">${g.hint}</div>` : ''}
+      </summary>
+      <table class="data-table"><thead><tr>
+        <th style="width:40px">On</th><th>Message</th><th>When</th>
+        <th>To</th><th>Subject</th><th style="width:110px"></th>
+      </tr></thead><tbody>${inGroup.map(row).join('')}</tbody></table>
+    </details>`;
+  }).join('');
 }
 
 function renderAutoLog(log) {
@@ -5569,6 +5727,13 @@ function openRuleModal(rule) {
     <div style="display:grid;gap:12px">
       <div><label class="form-label">Rule Name</label><input class="form-control" id="rule-name" value="${esc(r.name)}"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        ${r.template_key ? `
+        <div><label class="form-label">Trigger</label>
+          <div class="form-control" style="background:#f9fafb;color:#6b7280">${r.trigger_event === 'system' ? 'Sent automatically' : 'Sent by hand from a booking'}</div>
+          <input type="hidden" id="rule-trigger" value="${r.trigger_event === 'system' ? 'system' : 'manual'}">
+        </div>
+        <div id="rule-trigger-detail"><div style="font-size:.75rem;color:#9ca3af;margin-top:22px">Wording only — you cannot change what sends this, or stop it from here.</div></div>
+        ` : `
         <div><label class="form-label">Trigger</label>
           <select class="form-control" id="rule-trigger" onchange="updateRuleTriggerUI()">
             <option value="status_change" ${r.trigger_event==='status_change'?'selected':''}>Status changes to…</option>
@@ -5598,11 +5763,13 @@ function openRuleModal(rule) {
             : '<div></div>'
           }
         </div>
+        `}
       </div>
       <div><label class="form-label">Send to</label>
         <select class="form-control" id="rule-recipient">
           <option value="client" ${r.recipient==='client'?'selected':''}>Client</option>
           <option value="admin" ${r.recipient==='admin'?'selected':''}>Me (Admin)</option>
+          <option value="staff" ${r.recipient==='staff'?'selected':''}>The crew member</option>
         </select>
       </div>
       <div><label class="form-label">Channel</label>
@@ -5613,17 +5780,20 @@ function openRuleModal(rule) {
         </select>
       </div>
       <div><label class="form-label">Subject</label><input class="form-control" id="rule-subject" value="${esc(r.subject)}"></div>
+      ${r.template_key ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px;font-size:.75rem;color:#92400e">
+        This message is sent by the system, not by a rule you built. Reword it freely — but keep the <strong>{{tokens}}</strong> that are already in the body: they are where the amounts, links and lists get filled in.
+      </div>` : ''}
       <div><label class="form-label">Body (HTML allowed, use {{variables}})</label>
         <textarea class="form-control" id="rule-body" rows="6" style="font-family:monospace;font-size:.8rem">${esc(r.body_html)}</textarea>
       </div>
       <div><label class="form-label">SMS text <span style="color:#9ca3af;font-size:.72rem">plain text, aim for under 320 characters</span></label>
         <textarea class="form-control" id="rule-body-sms" rows="3" maxlength="320" style="font-family:monospace;font-size:.8rem">${esc(r.body_sms||'')}</textarea>
         <p class="text-muted" style="margin-top:6px;font-size:.72rem;line-height:1.9">
-          ${[['Who','client_first_name','client_name','guests_of_honour','child_name'],
-             ['Gig','service_name','event_date','event_time','event_zip','reference'],
-             ['Money','total_price','deposit_amount','balance_due'],
-             ['Booking','status','deposit_state'],
-             ['Links','payment_link','balance_link','deposit_link','review_link','finalise_link']]
+          ${[['Who','client_first_name','client_name','guests_of_honour','child_name','client_email','client_phone'],
+             ['Gig','service_name','event_date','event_time','event_datetime','event_zip','event_location','location_label','event_type','guest_count','reference','notes'],
+             ['Money','total_price','service_price','deposit_amount','balance_due','service_fee','balance_total','service_fee_pct','mileage_cost','addon_list','mileage_line'],
+             ['Booking','status','deposit_state','referral_source'],
+             ['Links','payment_link','balance_link','deposit_link','review_link','finalise_link','admin_link']]
             .map(g => `<span style="display:inline-block;min-width:52px;font-weight:700;color:#6b7280">${g[0]}</span>` +
               g.slice(1).map(t => `<code style="background:#f3f4f6;padding:1px 5px;border-radius:3px;margin-right:4px">{{${t}}}</code>`).join('')).join('<br>')}
           <br><span style="color:#9ca3af">{{payment_link}} and {{deposit_link}} are the <strong>deposit</strong>; a balance-due message must use {{balance_link}}, or an already-paid client can be charged twice.</span>

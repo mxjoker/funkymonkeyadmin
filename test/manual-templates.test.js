@@ -14,15 +14,32 @@ const BOOKING = {
   stripe_payment_link: 'https://pay.stripe.com/dep_123'
 };
 
-test('every manual template resolves all of its tokens', () => {
+// Every {{token}} in every body must be one the renderers resolve or one the
+// template DECLARES as an extra. A token that is neither renders as a literal
+// "{{amount_paid}}" in a bill — which is what this catches, at the one place a
+// new template gets added.
+const stub = (t) => Object.fromEntries((t.extras || []).map((k) => [k, 'X']));
+
+test('every template resolves all of its tokens', () => {
   for (const t of MANUAL_TEMPLATES) {
-    const out = render(t.body_html, BOOKING, BOOKING.stripe_payment_link) +
-                render(t.subject, BOOKING, BOOKING.stripe_payment_link);
+    const out = render(t.body_html, BOOKING, BOOKING.stripe_payment_link, stub(t)) +
+                render(t.subject, BOOKING, BOOKING.stripe_payment_link, stub(t));
     assert.ok(!/\{\{[a-z_]+\}\}/.test(out),
       `${t.template_key} left an unresolved token: ${(out.match(/\{\{[a-z_]+\}\}/g) || []).join(', ')}`);
     if (t.body_sms) {
-      const sms = renderSms(t.body_sms, BOOKING, BOOKING.stripe_payment_link);
+      const sms = renderSms(t.body_sms, BOOKING, BOOKING.stripe_payment_link, stub(t));
       assert.ok(!/\{\{[a-z_]+\}\}/.test(sms), `${t.template_key} SMS left an unresolved token`);
+    }
+  }
+});
+
+// An extra nobody uses is a caller that stopped passing it, or a wording edit
+// that dropped the token — both mean a message quietly missing its numbers.
+test('every declared extra is actually used by its template', () => {
+  for (const t of MANUAL_TEMPLATES) {
+    for (const k of t.extras || []) {
+      assert.ok((t.subject + t.body_html + (t.body_sms || '')).includes('{{' + k + '}}'),
+        `${t.template_key} declares extra "${k}" but never uses it`);
     }
   }
 });
@@ -75,4 +92,60 @@ test('sendTemplate seeds the templates if the lookup misses', async () => {
   // the transport, having found the template, not on the template being absent.
   assert.ok(!/is missing/.test(res.error || ''),
     `sendTemplate gave up before seeding: ${JSON.stringify(res)}`);
+});
+
+// ── The balance email ───────────────────────────────────────────────────────
+// It was an HTML literal in create-stripe-link.js until 2026-08-20: the only
+// way to reword a bill was a code change and a deploy.
+test('the balance template itemises the balance, the fee and the total', () => {
+  const out = render(byKey('balance_link_ready').body_html, BOOKING, 'https://pay.stripe.com/bal_789');
+  assert.ok(out.includes('$450.00'), 'lost the balance');
+  assert.ok(out.includes('$22.50'), 'lost the 5% service fee');
+  assert.ok(out.includes('$472.50'), 'lost the total due');
+  assert.ok(out.includes('https://pay.stripe.com/bal_789'), 'lost the pay link');
+});
+
+// The three figures must agree with the Stripe session to the cent — this is
+// the document a client checks the arithmetic on.
+test('the emailed total is the one Stripe will charge', () => {
+  const { balanceCharge } = require('../netlify/functions/_items.js');
+  const c = balanceCharge(BOOKING);
+  const out = render(byKey('balance_link_ready').body_html, BOOKING, 'x');
+  assert.ok(out.includes('$' + c.total.toFixed(2)), `email total is not $${c.total.toFixed(2)}`);
+});
+
+// A 5% card-only surcharge would breach Visa/Mastercard surcharge rules. The
+// wording is load-bearing, in the email as much as on the Stripe page.
+test('no client template calls the fee a card or processing fee', () => {
+  for (const t of MANUAL_TEMPLATES) {
+    const text = (t.subject + ' ' + t.body_html + ' ' + (t.body_sms || '')).toLowerCase();
+    for (const word of ['surcharge', 'card fee', 'processing fee', 'convenience']) {
+      assert.ok(!text.includes(word), `${t.template_key} says "${word}"`);
+    }
+  }
+});
+
+// The point of the exercise: no client-facing copy left in the function.
+test('create-stripe-link.js sends no email of its own any more', () => {
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '../netlify/functions/create-stripe-link.js'), 'utf8');
+  assert.ok(!/sendEmail\(/.test(src),
+    'an inline sendEmail is back in create-stripe-link.js — it belongs in a template');
+});
+
+// ── The rule editor must not re-trigger a manual template ───────────────────
+// The trigger <select> has no 'manual' option, so a template rule rendered
+// through it comes up on the FIRST option — status_change / confirmed — and
+// saving an edited wording turned the deposit email into an automation that
+// mailed a pay link to every booking reaching 'confirmed'. A fixed label and a
+// hidden input keep the trigger the rule already has.
+test('the rule editor shows a template a fixed trigger, not the dropdown', () => {
+  const html = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '../admin.html'), 'utf8');
+  const modal = html.slice(html.indexOf('function openRuleModal'),
+                           html.indexOf('function updateRuleTriggerUI'));
+  assert.ok(modal.includes('${r.template_key ?'),
+    'the rule editor stopped branching on template_key — editing a template can retrigger it');
+  assert.ok(/<input type="hidden" id="rule-trigger" value="\$\{r\.trigger_event === 'system' \? 'system' : 'manual'\}">/.test(modal),
+    'saveRule reads #rule-trigger; without the hidden input a template save picks the first option');
 });

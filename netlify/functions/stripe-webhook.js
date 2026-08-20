@@ -1,13 +1,13 @@
 const crypto = require("crypto");
 const { withClient } = require('./_db');
-const { esc, sendEmail, logStatus, wrap, fmtEventDate, logEmail, logChange, ensureEmailLog, ensureBookingChanges } = require('./_email');
+const { logChange, ensureEmailLog, ensureBookingChanges } = require('./_email');
 // _items.js is the single definition of the rate. The receipt states the
 // percentage the client was charged, so it must read it from there rather than
 // restate it — a literal here would print 5% beside a page charging something
 // else the day the rate moves.
 const { SERVICE_FEE_RATE } = require('./_items');
+const { sendTemplate } = require('./automations');
 
-const NOTIFY = process.env.NOTIFY_EMAIL || "Joe.Coover@gmail.com";
 
 const verifySig = (payload, sigHeader, secret) => {
   try {
@@ -133,17 +133,13 @@ function paymentEffect(booking, amountPaid, kind, meta) {
 // "settled in full" while balance_due still shows money owed misleads them
 // into thinking they can stop paying, while the admin email's Balance Due
 // row would show the truth — the same booking, two different stories.
+// Which of the two balance receipts goes out. The wording itself lives in
+// _templates.js and is editable in the Automations tab; the DECISION cannot be,
+// because it is about what is true, not about how it reads.
 function balanceReceiptCopy(effect) {
-  if (effect.balance_due === 0) {
-    return {
-      subject: "Payment received — you're all paid up! 🎉 Funky Monkey Events",
-      headline: "is settled in full.",
-    };
-  }
-  return {
-    subject: "Payment received — Funky Monkey Events",
-    headline: `still has $${effect.balance_due.toFixed(2)} outstanding — we'll follow up about the remaining balance.`,
-  };
+  return effect.balance_due === 0
+    ? { template_key: 'balance_paid_receipt_full', outstanding: '0.00' }
+    : { template_key: 'balance_paid_receipt_partial', outstanding: effect.balance_due.toFixed(2) };
 }
 
 exports.handler = async (event) => {
@@ -296,93 +292,46 @@ exports.handler = async (event) => {
                   : `$${amountPaid.toFixed(2)} (not itemised: ${effect.warning})`)
               : `$${amountPaid.toFixed(2)}`);
 
-          const dateStr  = fmtEventDate(b.event_date);
-          const timeStr  = b.event_time     || "";
-          const locStr   = b.event_location || b.event_zip || "OKC";
 
           // Client email — a balance receipt is not a deposit confirmation.
           // Sending the existing "You're CONFIRMED!" copy to someone settling
           // up after their event reads as if we had lost track of them.
+          //
+          // Both bodies are rows in automation_rules now (see _templates.js).
+          // What stays here is everything that is a FACT rather than wording:
+          // which receipt is true, and what the money actually was.
           if (effect.kind === 'balance') {
-            // Which subject/framing sentence: "settled in full" is only true
-            // when this payment actually zeroed the balance. See
-            // balanceReceiptCopy's comment for why that isn't guaranteed.
-            const { subject, headline } = balanceReceiptCopy(effect);
+            const { template_key, outstanding } = balanceReceiptCopy(effect);
             // Only print a Balance / Service-fee breakdown when it came from
             // Stripe-signed metadata. Otherwise state just the amount
             // received — a fabricated split is worse than none.
-            const breakdownRows = effect.itemised
+            const payment_breakdown = effect.itemised
               ? `<tr><td style="padding:4px 0;color:#A78BCA">Balance</td><td style="padding:4px 0;text-align:right">$${effect.balance.toFixed(2)}</td></tr>
                  <tr><td style="padding:4px 0;color:#A78BCA">Service fee (${Math.round(SERVICE_FEE_RATE * 100)}%)</td><td style="padding:4px 0;text-align:right">$${effect.fee.toFixed(2)}</td></tr>
                  <tr><td style="padding:8px 0 0;border-top:1px solid #3D2460;font-weight:900">Total paid</td><td style="padding:8px 0 0;border-top:1px solid #3D2460;text-align:right;color:#10B981;font-size:18px;font-weight:900">$${amountPaid.toFixed(2)}</td></tr>`
               : `<tr><td style="padding:4px 0;font-weight:900">Amount received</td><td style="padding:4px 0;text-align:right;color:#10B981;font-size:18px;font-weight:900">$${amountPaid.toFixed(2)}</td></tr>`;
-            try {
-              const res = await sendEmail(b.client_email, subject,
-                wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${esc(b.client_name)}</strong>! 🎉</p>
-                  <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Thank you — your balance for <strong style="color:#F3E8FF">${esc(b.service_name)}</strong> ${headline}</p>
-                  <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
-                    <table style="width:100%;border-collapse:collapse;color:#F3E8FF;font-size:14px">
-                      ${breakdownRows}
-                    </table>
-                  </div>
-                  <p style="color:#A78BCA;font-size:13px;text-align:center">Booking ref: ${esc(b.reference)} · Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`));
-              await logEmail(c, b.id, null, 'Balance Paid', subject, b.client_email, 'client', logStatus(res));
-            } catch (emailErr) {
-              console.error("Webhook: balance receipt failed:", emailErr.message);
-              await logEmail(c, b.id, null, 'Balance Paid', subject, b.client_email, 'client', 'failed', emailErr.message);
-            }
+            const r = await sendTemplate(c, b, template_key, null,
+              { extra: { payment_breakdown, outstanding } });
+            if (!r.sent) console.error('Webhook: balance receipt not sent —', r.error);
           } else {
-            // Client confirmation email
-            try {
-              const res = await sendEmail(
-                b.client_email,
-                "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events",
-                wrap(`<p style="font-size:16px;margin-bottom:16px">Hi <strong>${esc(b.client_name)}</strong>! 🎉</p>
-                  <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">We got your deposit and your event is officially <strong style="color:#10B981">CONFIRMED!</strong></p>
-                  <div style="background:#1A1035;border-radius:12px;padding:16px;margin-bottom:20px">
-                    <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</span><br><span style="font-weight:600">${esc(b.service_name)}</span></div>
-                    <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date &amp; Time</span><br><span style="font-weight:600">${dateStr}${timeStr ? " at " + esc(timeStr) : ""}</span></div>
-                    <div style="margin-bottom:10px"><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Location</span><br><span style="font-weight:600">${esc(locStr)}</span></div>
-                    <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #3D246044">
-                      <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Deposit Paid ✓</span><br><span style="color:#10B981;font-size:20px;font-weight:900">$${amountPaid.toFixed(2)}</span></div>
-                      <div><span style="color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Balance Due Day-Of</span><br><span style="color:#FFD600;font-size:20px;font-weight:900">$${balanceDue.toFixed(2)}</span></div>
-                    </div>
-                  </div>
-                  <p style="color:#A78BCA;font-size:13px;text-align:center">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`)
-              );
-              await logEmail(c, b.id, null, 'Deposit Paid', "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events", b.client_email, 'client', logStatus(res));
-            } catch(emailErr) {
-              console.error("Webhook: client email failed:", emailErr.message);
-              await logEmail(c, b.id, null, 'Deposit Paid', "Deposit received — You're CONFIRMED! 🎊 Funky Monkey Events", b.client_email, 'client', 'failed', emailErr.message);
-            }
+            const r = await sendTemplate(c, b, 'deposit_paid_receipt', null,
+              { extra: { amount_paid: amountPaid.toFixed(2) } });
+            if (!r.sent) console.error('Webhook: deposit receipt not sent —', r.error);
           }
 
-          // Admin notification email
-          const adminSubject = effect.kind === 'balance'
-            ? `💰 Balance In: ${b.client_name} — $${amountPaid.toFixed(2)}`
-            : `💰 Deposit In: ${b.client_name} — $${amountPaid.toFixed(2)}`;
-          const adminTrigger = effect.kind === 'balance' ? 'Balance Paid' : 'Deposit Paid';
-          try {
-            const res = await sendEmail(
-              NOTIFY,
-              adminSubject,
-              wrap(`<p style="font-size:15px;font-weight:700;color:#10B981;margin-bottom:16px">💰 Stripe ${effect.kind === 'balance' ? 'balance payment received!' : 'deposit received — booking auto-confirmed!'}</p>
-                <table style="width:100%;border-collapse:collapse">
-                  <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700;width:130px">Ref</td><td style="padding:7px 0;color:#FFD600;font-weight:700">${esc(b.reference)}</td></tr>
-                  <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Client</td><td style="padding:7px 0;font-weight:700">${esc(b.client_name)}</td></tr>
-                  <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Service</td><td style="padding:7px 0">${esc(b.service_name)}</td></tr>
-                  <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Date</td><td style="padding:7px 0">${dateStr}${timeStr ? " at " + esc(timeStr) : ""}</td></tr>
-                  <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">${effect.kind === 'balance' ? 'Balance Paid' : 'Deposit Paid'}</td><td style="padding:7px 0;color:#10B981;font-size:18px;font-weight:900">$${amountPaid.toFixed(2)}</td></tr>
-                  <tr><td style="padding:7px 0;color:#A78BCA;font-size:11px;text-transform:uppercase;font-weight:700">Balance Due</td><td style="padding:7px 0;color:#FFD600;font-weight:700">$${balanceDue.toFixed(2)}</td></tr>
-                </table>
-                <div style="margin-top:20px;text-align:center">
-                  <a href="https://funkymonkeyadmin.netlify.app/admin.html" style="background-color:#FF6B00;color:#0F0A1E;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:900;font-size:14px">View in Dashboard →</a>
-                </div>`)
-            );
-            await logEmail(c, b.id, null, adminTrigger, adminSubject, NOTIFY, 'admin', logStatus(res));
-          } catch(emailErr) {
-            console.error("Webhook: admin email failed:", emailErr.message);
-            await logEmail(c, b.id, null, adminTrigger, adminSubject, NOTIFY, 'admin', 'failed', emailErr.message);
+          // Admin notification
+          {
+            const isBalance = effect.kind === 'balance';
+            const r = await sendTemplate(c, b, 'payment_received_alert', null, {
+              extra: {
+                amount_paid: amountPaid.toFixed(2),
+                payment_kind_label: isBalance ? 'Balance' : 'Deposit',
+                payment_headline: isBalance
+                  ? 'Stripe balance payment received!'
+                  : 'Stripe deposit received — booking auto-confirmed!',
+              }
+            });
+            if (!r.sent) console.error('Webhook: admin payment alert not sent —', r.error);
           }
 
           // Names what it actually moved. This log is the first thing read when
@@ -400,12 +349,14 @@ exports.handler = async (event) => {
         const pi = ev.data.object;
         const email = pi.last_payment_error?.payment_method?.billing_details?.email;
         if (email) {
+          // No booking is looked up here — a failed intent often matches none —
+          // so the row is empty and the address comes from Stripe. sendTemplate
+          // skips the email_log write when there is no booking to attach it to.
           try {
-            await sendEmail(email, "Payment didn't go through — Funky Monkey Events",
-              wrap(`<p style="font-size:16px;margin-bottom:16px">Hi there! 👋</p>
-                <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Your deposit payment didn't go through — no worries, it happens!</p>
-                <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Try again with a different card, or give us a call and we'll figure it out.</p>
-                <p style="font-size:13px;color:#A78BCA;text-align:center"><a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`));
+            await withClient(async (c) => {
+              const r = await sendTemplate(c, {}, 'payment_failed', null, { to: email });
+              if (!r.sent) console.error('Webhook: payment-failed email not sent —', r.error);
+            });
           } catch(emailErr) {
             console.error("Webhook: payment-failed email error:", emailErr.message);
           }

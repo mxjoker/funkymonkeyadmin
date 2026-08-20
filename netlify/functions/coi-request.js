@@ -3,7 +3,8 @@
 
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { sendEmail, logStatus, wrap, esc, fmtEventDate, logEmail, ensureEmailLog } = require('./_email');
+const { esc, logEmail, ensureEmailLog } = require('./_email');
+const { sendTemplate } = require('./automations');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -82,104 +83,37 @@ exports.handler = async (event, context) => {
         // ──────────────────────────────────────────────────────────
         const notifyEmail = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
 
-        const eventDateStr = fmtEventDate(booking.event_date) || 'Not scheduled';
+        // The two rows the booking may not have. Everything else the alert
+        // names is a plain token on the row.
+        const detailRows = [
+          booking.event_time ? `<tr><td style="padding:8px 0;color:#6B7280">Event Time:</td><td style="padding:8px 0">${esc(booking.event_time)}</td></tr>` : '',
+          booking.venue ? `<tr><td style="padding:8px 0;color:#6B7280">Venue:</td><td style="padding:8px 0">${esc(booking.venue)}</td></tr>` : '',
+          booking.event_location ? `<tr><td style="padding:8px 0;color:#6B7280">Location:</td><td style="padding:8px 0">${esc(booking.event_location)}</td></tr>` : '',
+        ].join('');
 
-        const emailSubject = `COI Request — ${booking.reference} (${booking.client_name})`;
-
-        const emailBody = `
-          <h2 style="color: #7C3AED; margin-bottom: 20px;">Certificate of Insurance Requested</h2>
-
-          <div style="background: #F3F4F6; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-            <h3 style="margin-top: 0; color: #1F2937;">Booking Details</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 8px 0; color: #6B7280; width: 40%;">Reference:</td>
-                <td style="padding: 8px 0; font-weight: 600;">${esc(booking.reference)}</td>
-              </tr>
-              <tr>
-                <td style="padding: 8px 0; color: #6B7280;">Client:</td>
-                <td style="padding: 8px 0; font-weight: 600;">${esc(booking.client_name)}</td>
-              </tr>
-              <tr>
-                <td style="padding: 8px 0; color: #6B7280;">Email:</td>
-                <td style="padding: 8px 0;">${esc(booking.client_email)}</td>
-              </tr>
-              <tr>
-                <td style="padding: 8px 0; color: #6B7280;">Service:</td>
-                <td style="padding: 8px 0;">${esc(booking.service_name)}</td>
-              </tr>
-              <tr>
-                <td style="padding: 8px 0; color: #6B7280;">Event Date:</td>
-                <td style="padding: 8px 0; font-weight: 600;">${esc(eventDateStr)}</td>
-              </tr>
-              ${booking.event_time ? `
-              <tr>
-                <td style="padding: 8px 0; color: #6B7280;">Event Time:</td>
-                <td style="padding: 8px 0;">${esc(booking.event_time)}</td>
-              </tr>` : ''}
-              ${booking.venue ? `
-              <tr>
-                <td style="padding: 8px 0; color: #6B7280;">Venue:</td>
-                <td style="padding: 8px 0;">${esc(booking.venue)}</td>
-              </tr>` : ''}
-              ${booking.event_location ? `
-              <tr>
-                <td style="padding: 8px 0; color: #6B7280;">Location:</td>
-                <td style="padding: 8px 0;">${esc(booking.event_location)}</td>
-              </tr>` : ''}
-            </table>
-          </div>
-
-          <div style="background: #FEF3C7; border-left: 4px solid #F59E0B; padding: 16px; border-radius: 4px; margin-bottom: 20px;">
-            <p style="margin: 0; color: #92400E;">
-              <strong>Action Required:</strong> Client needs a Certificate of Insurance for this event.
-            </p>
-          </div>
-
-          <div style="margin-bottom: 20px;">
-            <h3 style="color: #1F2937;">Request Details</h3>
-            <p><strong>Requested by:</strong> ${esc(requested_by_email)}</p>
-            <p><strong>Requested from:</strong> ${esc(requested_from || 'Unknown page')}</p>
-            <p><strong>Requested at:</strong> ${esc(new Date(coiRequest.requested_at).toLocaleString('en-US', {
-              dateStyle: 'full',
-              timeStyle: 'short'
-            }))}</p>
-          </div>
-
-          <div style="background: #F3F4F6; padding: 16px; border-radius: 4px; margin-top: 24px;">
-            <p style="margin: 0; color: #6B7280; font-size: 14px;">
-              To mark this COI as fulfilled, go to the booking in your admin dashboard.
-            </p>
-          </div>
-        `;
-
-        // Send email via _email.js shared module. The COI request row is
+        // Send email via the 'coi_request_alert' rule. The COI request row is
         // already committed, so a failed notification must not turn the whole
         // request into a 500 — report it instead.
         let emailSent = true;
         let suppressed = false;
         try {
-          const res = await sendEmail(
-            notifyEmail,
-            emailSubject,
-            wrap(emailBody)
-          );
-          await logEmail(
-            client,
-            booking.id,
-            null, // No automation rule for this
-            'coi_request',
-            emailSubject,
-            notifyEmail,
-            'Admin',
-            logStatus(res)
-          );
-          suppressed = !!(res && res.suppressed);
+          const r = await sendTemplate(client, booking, 'coi_request_alert', null, {
+            extra: {
+              detail_rows: detailRows,
+              requested_by: esc(requested_by_email),
+              requested_from: esc(requested_from || 'Unknown page'),
+              requested_at: esc(new Date(coiRequest.requested_at).toLocaleString('en-US', {
+                dateStyle: 'full', timeStyle: 'short'
+              })),
+            }
+          });
+          emailSent = r.sent;
+          suppressed = !!r.suppressed;
           if (suppressed) emailSent = false;
+          if (!r.sent) console.error('COI request notification not sent —', r.error);
         } catch (e) {
           emailSent = false;
-          console.error('COI request notification failed:', notifyEmail, '|', e.message);
-          await logEmail(client, booking.id, null, 'coi_request', emailSubject, notifyEmail, 'Admin', 'failed', e.message);
+          console.error('COI request notification failed:', e.message);
         }
 
         return json(200, {

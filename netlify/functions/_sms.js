@@ -9,7 +9,8 @@
 // not tell a delivered message from a missing API key. This one returns a
 // status for every outcome and writes a row for every one of them.
 
-const { fmtEventDate, reviewLinkFor, finaliseLinkFor } = require('./_email');
+const { fmtEventDate, reviewLinkFor, finaliseLinkFor, rowTokens, stripTags, applyExtra } = require('./_email');
+const { balanceCharge, SERVICE_FEE_RATE } = require('./_items');
 
 const TZ = 'America/Chicago';
 
@@ -49,9 +50,10 @@ function isQuietHours(date = new Date()) {
 // Same token names as _email.js render(), but NOT the same function: render()
 // runs every value through esc(), so "O'Brien" would arrive as "O&#39;Brien",
 // and its {{deposit_link}} is a whole <div>. Same vocabulary, different medium.
-function renderSms(template, booking = {}, link) {
+function renderSms(template, booking = {}, link, extra) {
   const firstName = (booking.client_name || '').split(' ')[0] || 'there';
-  return String(template || '')
+  const derived = rowTokens(booking);
+  return applyExtra(String(template || '')
     .replace(/{{client_first_name}}/g, firstName)
     .replace(/{{client_name}}/g,       booking.client_name || '')
     .replace(/{{guests_of_honour}}/g,  booking.guests_of_honour || booking.child_name || 'everyone')
@@ -66,6 +68,11 @@ function renderSms(template, booking = {}, link) {
     // never be texted a demand for money the booking does not want.
     .replace(/{{deposit_amount}}/g,    Number(booking.deposit_amount || 0).toFixed(2))
     .replace(/{{balance_due}}/g,       Number(booking.balance_due    || 0).toFixed(2))
+    // Same three tokens render() resolves: the rule editor shows both bodies
+    // side by side and copy moves between them.
+    .replace(/{{service_fee}}/g,       balanceCharge(booking).fee.toFixed(2))
+    .replace(/{{balance_total}}/g,     balanceCharge(booking).total.toFixed(2))
+    .replace(/{{service_fee_pct}}/g,   String(Math.round(SERVICE_FEE_RATE * 100)))
     .replace(/{{reference}}/g,         booking.reference || '')
     // For the admin's own alerts: which status the booking is in, and whether
     // any money has actually arrived. An unstaffed gig that is merely
@@ -90,7 +97,24 @@ function renderSms(template, booking = {}, link) {
     // message, so resolve it to the same raw URL rather than leaving a
     // literal "{{deposit_link}}" in the text.
     .replace(/{{deposit_link}}/g,      link || booking.stripe_payment_link || '')
-    .replace(/{{finalise_link}}/g,     finaliseLinkFor(booking));
+    // The same row tokens render() resolves. The two list-shaped ones arrive
+    // as HTML there and as plain text here — an <li> in a text message is
+    // gibberish, and leaving the literal token would be worse than either.
+    .replace(/{{client_email}}/g,      booking.client_email    || '')
+    .replace(/{{client_phone}}/g,      booking.client_phone    || '')
+    .replace(/{{event_location}}/g,    booking.event_location  || '')
+    .replace(/{{event_type}}/g,        booking.event_type      || '')
+    .replace(/{{guest_count}}/g,       String(booking.guest_count ?? ''))
+    .replace(/{{service_price}}/g,     Number(booking.service_price || 0).toFixed(2))
+    .replace(/{{mileage_cost}}/g,      Number(booking.mileage_cost  || 0).toFixed(2))
+    .replace(/{{notes}}/g,             booking.notes           || '')
+    .replace(/{{referral_source}}/g,   booking.referral_source || '')
+    .replace(/{{location_label}}/g,    derived.location_label)
+    .replace(/{{event_datetime}}/g,    derived.event_datetime)
+    .replace(/{{addon_list}}/g,        stripTags(derived.addon_list))
+    .replace(/{{mileage_line}}/g,      stripTags(derived.mileage_line))
+    .replace(/{{admin_link}}/g,        'https://funkymonkeyadmin.netlify.app/admin.html')
+    .replace(/{{finalise_link}}/g,     finaliseLinkFor(booking)), extra);
 }
 
 // ── GSM-7 encoding ──────────────────────────────────────────────────────────

@@ -3,7 +3,8 @@
 
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { esc, sendEmail, wrap, fmtEventDate, logChange } = require('./_email');
+const { logChange } = require('./_email');
+const { sendTemplate } = require('./automations');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -199,27 +200,13 @@ exports.handler = async (event) => {
           `$${Number(amount).toFixed(2)} via Stripe - ${reason || refundDescription}`
         );
 
-        // Send confirmation email — failure must not fail the refund response
+        // Send confirmation email — failure must not fail the refund response.
+        // Wording lives in the 'refund_issued' rule; the amount does not, since
+        // it is what Stripe actually sent back.
         try {
-          const emailHTML = `
-            <h2>Refund Processed</h2>
-            <p>Hi ${esc(booking.client_name || 'there')},</p>
-            <p>Your refund has been processed:</p>
-            <ul>
-              <li><strong>Amount:</strong> $${Number(amount).toFixed(2)}</li>
-              <li><strong>Booking:</strong> ${esc(booking.service_name)} on ${esc(fmtEventDate(booking.event_date))}</li>
-              <li><strong>Reference:</strong> ${esc(booking.reference)}</li>
-            </ul>
-            <p>The refund should appear in your account within 5-10 business days.</p>
-            <p>If you have any questions, please don't hesitate to contact us.</p>
-            <p>Thank you,<br>Funky Monkey Events</p>
-          `;
-
-          await sendEmail(
-            booking.client_email,
-            `Refund Processed - ${booking.reference}`,
-            wrap(emailHTML)
-          );
+          const r = await sendTemplate(client, booking, 'refund_issued', null,
+            { extra: { refund_amount: Number(amount).toFixed(2) } });
+          if (!r.sent) console.error('Refund confirmation not sent —', r.error);
         } catch(emailError) {
           console.error('Refund confirmation email failed:', emailError.message);
         }

@@ -1,6 +1,7 @@
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
 const { esc, sendEmail } = require('./_email');
+const { sendTemplate } = require('./automations');
 
 const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
 const SITE   = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
@@ -181,19 +182,10 @@ exports.handler = async (event) => {
         let finalSubject = subject;
         let htmlBody;
 
-        if (type === 'rebook') {
-          const name    = esc(clientName || 'there');
-          const svc     = esc(lastService || 'your last event');
-          const dateStr = lastDate ? new Date(lastDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : '';
-          finalSubject  = "We'd love to see you again! 🐒 — Funky Monkey Events";
-          htmlBody = wrap(
-            '<p style="font-size:16px;margin-bottom:16px">Hi <strong>' + name + '</strong>! 🎉</p>' +
-            '<p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">We had such an amazing time at <strong>' + svc + '</strong>' + (dateStr ? ' back in <strong>' + esc(dateStr) + '</strong>' : '') + ' and wanted to reach out!</p>' +
-            '<p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">Planning another event? <strong style="color:#FFD600">Returning clients get 10% off</strong> their next booking — just mention this email when you book!</p>' +
-            '<div style="text-align:center;margin-bottom:24px"><a href="https://funkymonkeyevents.com/booking-form.html" style="background-color:#FF6B00;color:#0F0A1E;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px">Book Your Next Event →</a></div>' +
-            '<p style="font-size:13px;color:#A78BCA;text-align:center">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>'
-          );
-        } else if (type === 'custom') {
+        // The rebook invitation's wording lives in the 'rebook_invite' rule
+        // and is built below. The 'custom' body is typed by Joe in the moment,
+        // so there is nothing to template.
+        if (type === 'custom') {
           if (!subject || !message) return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'subject and message required' }) };
           const name = esc(clientName || 'there');
           htmlBody = wrap(
@@ -205,14 +197,35 @@ exports.handler = async (event) => {
           return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'Unknown POST type' }) };
         }
 
-        // Shared sendEmail throws on failure. Only log the interaction if the
-        // send actually happened — a failed send must not leave a "sent" note.
+        // Only log the interaction if the send actually happened — a failed
+        // send must not leave a "sent" note in a client's history. sendEmail
+        // throws; sendTemplate reports, so both outcomes are checked.
         let res;
-        try {
-          res = await sendEmail(email, finalSubject, htmlBody);
-        } catch (e) {
-          console.error('client.js email failed:', email, '|', e.message);
-          return { statusCode: 502, headers: CORS, body: JSON.stringify({ error: 'Email send failed', detail: e.message }) };
+        if (type === 'rebook') {
+          // No booking to attach it to, so sendTemplate writes no email_log
+          // row — the client_interactions note below is this send's record.
+          res = await sendTemplate(c, { client_name: clientName, client_email: email },
+            'rebook_invite', null, {
+              to: email,
+              extra: {
+                last_service: esc(lastService || 'your last event'),
+                last_when: lastDate
+                  ? ' back in <strong>' + esc(new Date(lastDate + 'T00:00:00')
+                      .toLocaleDateString('en-US', { month: 'long', year: 'numeric' })) + '</strong>'
+                  : '',
+              }
+            });
+          if (!res.sent && !res.suppressed) {
+            console.error('client.js rebook email failed:', email, '|', res.error);
+            return { statusCode: 502, headers: CORS, body: JSON.stringify({ error: 'Email send failed', detail: res.error }) };
+          }
+        } else {
+          try {
+            res = await sendEmail(email, finalSubject, htmlBody);
+          } catch (e) {
+            console.error('client.js email failed:', email, '|', e.message);
+            return { statusCode: 502, headers: CORS, body: JSON.stringify({ error: 'Email send failed', detail: e.message }) };
+          }
         }
 
         // A suppressed send never left the building. The interaction note is

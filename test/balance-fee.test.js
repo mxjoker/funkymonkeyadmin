@@ -266,21 +266,31 @@ const { balanceReceiptCopy } = require('../netlify/functions/stripe-webhook.js')
 // full" while balance_due still shows money owed misleads them into
 // thinking they can stop paying — the receipt copy must reflect which case
 // this is, not assume every balance payment finishes the booking.
-test('a fully settled balance payment keeps the exact subject and "settled in full" wording', () => {
+const { TEMPLATES } = require('../netlify/functions/_templates.js');
+const { render } = require('../netlify/functions/_email.js');
+const receipt = (k) => TEMPLATES.find((t) => t.template_key === k);
+
+test('a fully settled balance payment gets the paid-up receipt, word for word', () => {
   const copy = balanceReceiptCopy({ balance_due: 0 });
-  assert.strictEqual(copy.subject, "Payment received — you're all paid up! 🎉 Funky Monkey Events");
-  assert.match(copy.headline, /settled in full/);
+  assert.strictEqual(copy.template_key, 'balance_paid_receipt_full');
+  const t = receipt(copy.template_key);
+  assert.strictEqual(t.subject, "Payment received — you're all paid up! 🎉 Funky Monkey Events");
+  assert.match(t.body_html, /settled in full/);
 });
 
 test('a balance payment that leaves a shortfall does not claim to be settled', () => {
   const copy = balanceReceiptCopy({ balance_due: 580 });
-  assert.ok(!/settled in full/.test(copy.headline), 'a booking still owed $580 was told it was settled in full');
-  assert.notStrictEqual(copy.subject, "Payment received — you're all paid up! 🎉 Funky Monkey Events");
+  assert.strictEqual(copy.template_key, 'balance_paid_receipt_partial');
+  const t = receipt(copy.template_key);
+  assert.ok(!/settled in full/.test(t.body_html), 'a booking still owed $580 was told it was settled in full');
+  assert.notStrictEqual(t.subject, "Payment received — you're all paid up! 🎉 Funky Monkey Events");
 });
 
 test('the shortfall wording names the amount still owed, matching effect.balance_due exactly', () => {
   const effect = paymentEffect({ balance_due: 500 }, 420, 'balance', { balance: 400, fee: 20 });
   assert.strictEqual(effect.balance_due, 100);
   const copy = balanceReceiptCopy(effect);
-  assert.match(copy.headline, /\$100\.00/);
+  const out = render(receipt(copy.template_key).body_html, { client_name: 'A' }, null,
+    { outstanding: copy.outstanding, payment_breakdown: '' });
+  assert.match(out, /\$100\.00/);
 });

@@ -14,9 +14,14 @@ const SITE = "https://funkymonkeyadmin.netlify.app";
 const createStripeLink = async (booking) => {
   if (!process.env.STRIPE_SECRET_KEY) return null;
 
-  const amountCents = Math.round(Number(booking.deposit_amount || 100) * 100);
+  // NOT `|| 100`. A booking with no deposit — a school, a library, or one
+  // where Joe pressed "Waive deposit" — must not be billed $100 that exists
+  // nowhere in the booking. The caller already skips this path at 0; this is
+  // the second lock on the same door, because that caller has been wrong
+  // before.
+  const amountCents = Math.round(Number(booking.deposit_amount || 0) * 100);
   if (!amountCents || amountCents < 50) {
-    console.error("Invalid Stripe amount:", amountCents);
+    console.error("Invalid Stripe amount:", amountCents, "— no link created for booking", booking.id);
     return null;
   }
 
