@@ -28,3 +28,21 @@ test('the grid still uses minmax(0,1fr), the reason the badges need pinning', ()
   assert.ok(/\.cal-grid\{[^}]*minmax\(0,1fr\)/.test(HTML),
     '.cal-grid no longer uses minmax(0,1fr) — mobile columns will overflow again');
 });
+
+// The actual cause of the missing initials: loadBookings() ends with
+// refreshAllViews() -> renderCalendar(), so in init() the grid was built while
+// calStaffMap was still {}. The map then filled (44 bookings) and nothing
+// re-rendered, so the badges were absent from the DOM while the data was
+// present in memory — which is why every check of the data looked healthy.
+test('init loads the staff map before the calendar is rendered', () => {
+  const raw = HTML.split('async function init()')[1].split('\n}')[0];
+  // Comments explain the bug and name renderCalendar(), so they must be
+  // stripped before asking where the call actually sits.
+  const init = raw.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.ok(/Promise\.all\(\[[^\]]*loadCalStaffMap\(\)/s.test(init),
+    'loadCalStaffMap must be awaited alongside loadBookings, not after it');
+  const renderIdx = init.indexOf('renderCalendar()');
+  const awaitIdx = init.indexOf('await Promise.all');
+  assert.ok(renderIdx > awaitIdx && awaitIdx !== -1,
+    'init must call renderCalendar() after the data load — loadBookings renders it too early');
+});

@@ -867,6 +867,7 @@ function commsPreferenceFrom(emailId, smsId) {
 let allBookings = [];
 let allStaff    = [];
 let calStaffMap = {}; // booking_id → [{initials, color}]
+let calStaffMapError = null; // non-null when the fetch failed, so the calendar can say so
 let allServiceSlots = []; // service_id slot requirements from staff_slots table
 let allRolePay = {}; // role_name -> 'hourly' | 'flat' | undefined (unset = use staff setting)
 let activeActionBadge = null; // 'review' | 'deposit' | null
@@ -1042,9 +1043,19 @@ async function init() {
     return;
   }
   
-  // Admin-only initialization
-  await Promise.all([loadBookings(), loadStaffList(), loadServiceSlots(), loadRolePay()]);
-  await loadCalStaffMap();
+  // Admin-only initialization.
+  //
+  // loadCalStaffMap belongs IN the Promise.all, not after it. loadBookings()
+  // ends with refreshAllViews() -> renderCalendar(), so the calendar grid was
+  // built while calStaffMap was still {} and nothing ever re-rendered it: the
+  // staff initials were missing from the DOM even though the map held 44
+  // bookings a moment later. renderDashboard() is called again below, which is
+  // why the dashboard's badges survived and only the calendar lost them.
+  //
+  // The explicit renderCalendar() after the await is the actual fix — the
+  // parallel load just stops it costing a second round trip.
+  await Promise.all([loadBookings(), loadStaffList(), loadServiceSlots(), loadRolePay(), loadCalStaffMap()]);
+  renderCalendar();
   renderDashboard();
   showPage('dashboard');
   loadOtto(); // populates the nav badge so Otto's open items are visible from any page
@@ -1087,12 +1098,27 @@ async function saveRolePay(roleName, payType) {
   } catch (e) { alert('Could not save pay type: ' + e.message); }
 }
 
+// The calendar's staff initials. Every failure here is reported: a silent
+// `return` left the badges missing with no error, no gap and no way to tell
+// "nobody is assigned" from "the request failed" — which is exactly the state
+// this function was found in. The calendar still works without initials, so
+// nothing throws; it just says so.
 async function loadCalStaffMap() {
   try {
     // Fetch all assignments in one go for calendar rendering
     const res = await apiFetch('/api/staff-assignments?all=true');
-    if (!res.ok) return;
+    if (!res.ok) {
+      console.error(`loadCalStaffMap: /api/staff-assignments?all=true returned ${res.status} — calendar staff initials will be MISSING`);
+      calStaffMapError = `HTTP ${res.status}`;
+      return;
+    }
     const data = await res.json();
+    if (!Array.isArray(data.assignments)) {
+      console.error('loadCalStaffMap: response had no assignments array — calendar staff initials will be MISSING', data);
+      calStaffMapError = 'malformed response';
+      return;
+    }
+    calStaffMapError = null;
     calStaffMap = {};
     (data.assignments || []).forEach(a => {
       if (a.status !== 'assigned') return;
@@ -1103,7 +1129,14 @@ async function loadCalStaffMap() {
         calStaffMap[a.booking_id].push({ staff_id: a.staff_id, initials, color: a.color || '#7c3aed' });
       }
     });
-  } catch(e) { /* fail silently — calendar works without staff initials */ }
+    if (!Object.keys(calStaffMap).length && data.assignments.length) {
+      console.error(`loadCalStaffMap: ${data.assignments.length} assignment(s) returned but none mapped — check status values`, data.assignments[0]);
+    }
+    console.log(`loadCalStaffMap: ${data.assignments.length} assignment(s) → ${Object.keys(calStaffMap).length} booking(s) with staff`);
+  } catch(e) {
+    console.error('loadCalStaffMap FAILED — calendar staff initials will be MISSING:', e.message);
+    calStaffMapError = e.message;
+  }
 }
 
 async function loadBookings() {
