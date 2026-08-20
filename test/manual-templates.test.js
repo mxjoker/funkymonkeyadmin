@@ -49,3 +49,30 @@ test('a template key is unique, or the seed silently keeps only one', () => {
   const keys = MANUAL_TEMPLATES.map((t) => t.template_key);
   assert.strictEqual(new Set(keys).size, keys.length, `duplicate template_key: ${keys.join(', ')}`);
 });
+
+// create-stripe-link.js calls sendTemplate without ever running ensureTables(),
+// so on a cold database the templates would not exist and a client would get a
+// Stripe link with no email about it. sendTemplate seeds and retries once.
+test('sendTemplate seeds the templates if the lookup misses', async () => {
+  const { sendTemplate } = require('../netlify/functions/automations.js');
+  let seeded = false;
+  let lookups = 0;
+  const client = {
+    query: async (sql) => {
+      if (/INSERT INTO automation_rules/i.test(sql)) { seeded = true; return { rows: [] }; }
+      if (/SELECT \* FROM automation_rules WHERE template_key/i.test(sql)) {
+        lookups++;
+        return { rows: seeded ? [{ id: 9, name: 'Deposit link ready', subject: 'S', body_html: '<p>B</p>', channel: 'email', body_sms: '' }] : [] };
+      }
+      return { rows: [] };
+    }
+  };
+  const res = await sendTemplate(client, { id: 1, client_email: 'a@b.com' }, 'deposit_link_ready', null);
+
+  assert.ok(seeded, 'a missing template must trigger a seed, not a silent no-send');
+  assert.strictEqual(lookups, 2, 'the template must be looked up again after seeding');
+  // No RESEND_API_KEY in tests, so the send itself fails — but it must fail on
+  // the transport, having found the template, not on the template being absent.
+  assert.ok(!/is missing/.test(res.error || ''),
+    `sendTemplate gave up before seeding: ${JSON.stringify(res)}`);
+});

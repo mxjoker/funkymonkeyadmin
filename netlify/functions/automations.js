@@ -308,11 +308,20 @@ async function seedManualTemplates(client) {
 // sending the same rule twice for a booking, which is correct for a trigger
 // and wrong for a button Joe presses on purpose to re-send.
 async function sendTemplate(client, booking, templateKey, link) {
-  const { rows } = await client.query(
+  const lookup = () => client.query(
     'SELECT * FROM automation_rules WHERE template_key=$1', [templateKey]);
+  let { rows } = await lookup();
+  // create-stripe-link.js calls this without ever running ensureTables(), so on
+  // a cold database the templates may not be seeded yet and the client would
+  // get a payment link and no email telling them about it. Seed and retry once
+  // rather than making the caller responsible for ordering.
+  if (!rows[0]) {
+    await seedManualTemplates(client);
+    ({ rows } = await lookup());
+  }
   const rule = rows[0];
-  // A missing template is a broken deploy, not a quiet no-op: say so and send
-  // nothing, rather than mailing a blank body.
+  // Still missing after seeding is a broken deploy, not a quiet no-op: say so
+  // and send nothing, rather than mailing a blank body.
   if (!rule) {
     console.error('sendTemplate: no template with key', templateKey, '— nothing sent');
     return { sent: false, error: `Email template "${templateKey}" is missing` };
