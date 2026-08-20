@@ -81,6 +81,25 @@ async function ensureTables(client) {
   `);
   await client.query('CREATE INDEX IF NOT EXISTS idx_booking_comms_booking ON booking_comms (booking_id)');
 
+  // The unstaffed alert used to be hardcoded in automations-scheduled.js: a
+  // fixed 3-day window, a fixed status list and a fixed message, with only the
+  // destination number configurable. It is a rule like any other now, so the
+  // window, the statuses it watches and the wording are all editable.
+  //
+  // trigger_event='unstaffed' matches none of the four trigger queries, so the
+  // rules engine never fires it — automations-scheduled.js reads it directly.
+  //
+  // Seeded by trigger_event rather than by name, so renaming it in the UI does
+  // not cause a duplicate to reappear on the next cold start.
+  await client.query(
+    `INSERT INTO automation_rules
+       (name, active, trigger_event, trigger_status, trigger_days, recipient, subject, body_html, body_sms, channel, sort_order)
+     SELECT 'Unstaffed alert (admin)', TRUE, 'unstaffed', NULL, 3, 'admin', 'Unstaffed gig', '',
+            'UNSTAFFED: {{service_name}} on {{event_date}} ({{event_zip}}) has nobody assigned. Status: {{status}}, {{deposit_state}}.',
+            'sms', 800
+     WHERE NOT EXISTS (SELECT 1 FROM automation_rules WHERE trigger_event='unstaffed')`
+  );
+
   // scheduled_emails: a one-off follow-up on a date Joe picks, per booking.
   // Not an automation_rule — a rule is "every booking N days from its event",
   // this is "this client, this date, this message", and modelling it as a rule
@@ -159,7 +178,7 @@ async function ensureTables(client) {
       await client.query(
         `INSERT INTO automation_rules (name, trigger_event, trigger_status, trigger_days, recipient, subject, body_html, sort_order)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [r.name, r.trigger_event, r.trigger_status||null, r.trigger_days||null, r.recipient, r.subject, r.body_html, r.sort_order]
+        [r.name, r.trigger_event, r.trigger_status||null, r.trigger_days ?? null, r.recipient, r.subject, r.body_html, r.sort_order]
       );
     }
   }
@@ -787,7 +806,11 @@ exports.handler = async (event) => {
              WHERE id=$14`,
             [orNull('name'), r.active !== false, orNull('trigger_event'),
              has('trigger_status'), r.trigger_status || null,
-             has('trigger_days'), r.trigger_days || null,
+             // ?? not ||: 0 is a legitimate day count — "day of the event" for
+             // days_before_event, "today only" for unstaffed — and || turns it
+             // into null, which then reads as absent and silently restores a
+             // default the user just changed away from.
+             has('trigger_days'), r.trigger_days ?? null,
              orNull('recipient'), orNull('subject'), orNull('body_html'), orNull('sort_order'),
              orNull('channel'), orNull('body_sms'), r.id]
           );
@@ -796,7 +819,7 @@ exports.handler = async (event) => {
             `INSERT INTO automation_rules (name,active,trigger_event,trigger_status,trigger_days,recipient,subject,body_html,sort_order,channel,body_sms)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
             [r.name,r.active!==false,r.trigger_event,r.trigger_status||null,
-             r.trigger_days||null,r.recipient||'client',r.subject,r.body_html,r.sort_order||0,
+             r.trigger_days ?? null,r.recipient||'client',r.subject,r.body_html,r.sort_order||0,
              r.channel||'email',r.body_sms||'']
           );
         }

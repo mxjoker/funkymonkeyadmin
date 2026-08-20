@@ -145,7 +145,20 @@ test('a misconfigured Twilio blocks the whole flush loudly instead of silently s
 test('the unstaffed-alert dedupe query is scoped to today, not the booking\'s lifetime', async () => {
   process.env.NOTIFY_SMS = '+14055550199';
   const queries = [];
-  const c = { query: async (sql, params) => { queries.push(sql); return { rows: [] }; } };
+  // The window, statuses and wording now come from a rule, so the fake has to
+  // hand one back — without it the function correctly returns before it ever
+  // reaches the bookings query.
+  const RULE = {
+    id: 1, active: true, trigger_event: 'unstaffed', trigger_status: null, trigger_days: 3,
+    body_sms: 'UNSTAFFED: {{service_name}} on {{event_date}}.'
+  };
+  const c = {
+    query: async (sql, params) => {
+      queries.push(sql);
+      if (/FROM automation_rules/i.test(sql)) return { rows: [RULE] };
+      return { rows: [] };
+    }
+  };
   const { unstaffedAlerts } = require('../netlify/functions/automations-scheduled.js');
 
   await unstaffedAlerts(c, new Date());

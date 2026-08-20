@@ -5575,6 +5575,7 @@ function openRuleModal(rule) {
             <option value="days_before_event" ${r.trigger_event==='days_before_event'?'selected':''}>X days before event</option>
             <option value="days_after_event" ${r.trigger_event==='days_after_event'?'selected':''}>X days after event</option>
             <option value="deposit_paid" ${r.trigger_event==='deposit_paid'?'selected':''}>Deposit paid</option>
+            <option value="unstaffed" ${r.trigger_event==='unstaffed'?'selected':''}>Gig unstaffed, X days out</option>
           </select>
         </div>
         <div id="rule-trigger-detail">
@@ -5582,6 +5583,15 @@ function openRuleModal(rule) {
             ? `<label class="form-label">Status</label>
                <select class="form-control" id="rule-status">
                  ${['confirmed','cancelled','completed','accepted'].map(s=>`<option value="${s}" ${r.trigger_status===s?'selected':''}>${s}</option>`).join('')}
+               </select>`
+            : r.trigger_event === 'unstaffed'
+            ? `<label class="form-label">Days ahead</label>
+               <input class="form-control" id="rule-days" type="number" min="0" value="${r.trigger_days ?? 3}">
+               <label class="form-label" style="margin-top:8px">Watch which bookings</label>
+               <select class="form-control" id="rule-status">
+                 <option value="" ${!r.trigger_status?'selected':''}>Accepted and confirmed</option>
+                 <option value="confirmed" ${r.trigger_status==='confirmed'?'selected':''}>Confirmed only (deposit paid)</option>
+                 <option value="accepted" ${r.trigger_status==='accepted'?'selected':''}>Accepted only (unpaid)</option>
                </select>`
             : r.trigger_event.startsWith('days_')
             ? `<label class="form-label">Days</label><input class="form-control" id="rule-days" type="number" min="0" value="${r.trigger_days||1}">`
@@ -5612,6 +5622,7 @@ function openRuleModal(rule) {
           ${[['Who','client_first_name','client_name','guests_of_honour','child_name'],
              ['Gig','service_name','event_date','event_time','event_zip','reference'],
              ['Money','total_price','deposit_amount','balance_due'],
+             ['Booking','status','deposit_state'],
              ['Links','payment_link','balance_link','deposit_link','review_link','finalise_link']]
             .map(g => `<span style="display:inline-block;min-width:52px;font-weight:700;color:#6b7280">${g[0]}</span>` +
               g.slice(1).map(t => `<code style="background:#f3f4f6;padding:1px 5px;border-radius:3px;margin-right:4px">{{${t}}}</code>`).join('')).join('<br>')}
@@ -5631,6 +5642,15 @@ function updateRuleTriggerUI() {
   const det = document.getElementById('rule-trigger-detail');
   if (trigger === 'status_change') {
     det.innerHTML = `<label class="form-label">Status</label><select class="form-control" id="rule-status">${['confirmed','cancelled','completed','accepted'].map(s=>`<option value="${s}">${s}</option>`).join('')}</select>`;
+  } else if (trigger === 'unstaffed') {
+    det.innerHTML = `<label class="form-label">Days ahead</label>
+      <input class="form-control" id="rule-days" type="number" min="0" value="3">
+      <label class="form-label" style="margin-top:8px">Watch which bookings</label>
+      <select class="form-control" id="rule-status">
+        <option value="">Accepted and confirmed</option>
+        <option value="confirmed">Confirmed only (deposit paid)</option>
+        <option value="accepted">Accepted only (unpaid)</option>
+      </select>`;
   } else if (trigger.startsWith('days_')) {
     det.innerHTML = `<label class="form-label">Days</label><input class="form-control" id="rule-days" type="number" min="0" value="1">`;
   } else {
@@ -5644,8 +5664,13 @@ async function saveRule(ruleId) {
     id: ruleId || undefined,
     name:          document.getElementById('rule-name').value.trim(),
     trigger_event: trigger,
-    trigger_status: trigger==='status_change' ? document.getElementById('rule-status')?.value : null,
-    trigger_days:   trigger.startsWith('days_') ? parseInt(document.getElementById('rule-days')?.value||1) : null,
+    // 'unstaffed' carries BOTH: a day window and an optional status filter.
+    // An empty status means "accepted and confirmed", so '' must be sent as
+    // null rather than dropped — otherwise narrowing it could never be undone.
+    trigger_status: (trigger==='status_change' || trigger==='unstaffed')
+      ? (document.getElementById('rule-status')?.value || null) : null,
+    trigger_days:   (trigger.startsWith('days_') || trigger==='unstaffed')
+      ? parseInt(document.getElementById('rule-days')?.value ?? (trigger==='unstaffed' ? 3 : 1)) : null,
     recipient:     document.getElementById('rule-recipient').value,
     subject:       document.getElementById('rule-subject').value.trim(),
     body_html:     document.getElementById('rule-body').value.trim(),

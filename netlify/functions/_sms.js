@@ -67,6 +67,12 @@ function renderSms(template, booking = {}, link) {
     .replace(/{{deposit_amount}}/g,    Number(booking.deposit_amount || 0).toFixed(2))
     .replace(/{{balance_due}}/g,       Number(booking.balance_due    || 0).toFixed(2))
     .replace(/{{reference}}/g,         booking.reference || '')
+    // For the admin's own alerts: which status the booking is in, and whether
+    // any money has actually arrived. An unstaffed gig that is merely
+    // 'accepted' with no deposit is a different problem from a paid, confirmed
+    // one with nobody on it, and the text should say which.
+    .replace(/{{status}}/g,            booking.status || '')
+    .replace(/{{deposit_state}}/g,     booking.deposit_paid === true ? 'deposit paid' : 'no deposit yet')
     // Falls back to the booking's own deposit link. The three scheduled loops
     // in automations.js call sendAutomationMessage(..., booking, null), so on a
     // days_before/days_after rule `link` is null and this token used to render

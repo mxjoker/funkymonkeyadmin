@@ -21,8 +21,7 @@
 
 const { withClient } = require('./_db');
 const { runScheduledAutomations, ensureTables, sendDueScheduledEmails } = require('./automations');
-const { ensureSmsTables, sendSms, flushHeldSms } = require('./_sms');
-const { fmtEventDate } = require('./_email');
+const { ensureSmsTables, sendSms, flushHeldSms, renderSms } = require('./_sms');
 const { wantsSms } = require('./staff-assignments');
 
 // ── Day-of reminder: call time and address, to everyone working today ────────
@@ -69,11 +68,31 @@ async function unstaffedAlerts(client, now) {
     console.error('unstaffedAlerts: NOTIFY_SMS unset — no alert sent');
     return 0;
   }
+
+  // Window, statuses and wording all come from the rule now. Editable in
+  // Automations; previously all three were literals in this file.
+  const { rows: ruleRows } = await client.query(
+    "SELECT * FROM automation_rules WHERE trigger_event='unstaffed' ORDER BY id LIMIT 1");
+  const rule = ruleRows[0];
+  if (!rule) {
+    console.error('unstaffedAlerts: no unstaffed rule found — no alert sent');
+    return 0;
+  }
+  if (!rule.active) return 0;
+
+  // Blank trigger_status means "both", which is the historical behaviour and
+  // the default. A single status narrows it — the useful case being confirmed
+  // only, so an accepted-but-unpaid booking stops nagging.
+  const statuses = rule.trigger_status ? [rule.trigger_status] : ['accepted', 'confirmed'];
+  // A rule saved with no day count must not silently become "today only".
+  const days = Number.isFinite(Number(rule.trigger_days)) && Number(rule.trigger_days) >= 0
+    ? Number(rule.trigger_days) : 3;
+
   const { rows } = await client.query(`
-    SELECT b.id, b.service_name, b.event_date, b.event_zip
+    SELECT b.*
     FROM bookings b
-    WHERE b.status IN ('accepted','confirmed')
-      AND b.event_date::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + 3)
+    WHERE b.status = ANY($1)
+      AND b.event_date::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + $2::int)
       AND NOT EXISTS (SELECT 1 FROM staff_assignments sa WHERE sa.booking_id = b.id AND sa.status = 'assigned')
       -- Dedupe is per DAY, not per booking. A lifetime-once guard means a gig
       -- alerts on day 1, stays unstaffed, and goes silent for the rest of the
@@ -87,18 +106,16 @@ async function unstaffedAlerts(client, now) {
           AND l.created_at::date = CURRENT_DATE
       )
     ORDER BY b.event_date
-  `);
+  `, [statuses, days]);
+
   let sent = 0;
   for (const b of rows) {
-    // Was String(event_date).slice(0,10) + 'T00:00:00Z'. pg hands back a Date
-    // object, so String() gives "Mon Aug 24 2026 00:00:00 GMT-0500 (...)" and
-    // slice(0,10) takes "Mon Aug 24" — which parses to Invalid Date and was
-    // texted as the literal words. Same defect as the two staff SMS paths and
-    // accept-quote; this one hid from the first sweep because the grep excluded
-    // the 'Z' suffix.
-    const d = fmtEventDate(b.event_date, { weekday: 'short', month: 'numeric', day: 'numeric', year: undefined });
-    const res = await sendSms(client, notify,
-      `UNSTAFFED: ${b.service_name} on ${d} (${b.event_zip || 'OKC'}) has nobody assigned.`,
+    const body = renderSms(rule.body_sms || '', b);
+    if (!body.trim()) {
+      console.error('unstaffedAlerts: the rule has an empty message — nothing sent for booking', b.id);
+      continue;
+    }
+    const res = await sendSms(client, notify, body,
       { booking_id: b.id, trigger_label: 'Unstaffed alert', now });
     if (res.status === 'queued') sent++;
   }
