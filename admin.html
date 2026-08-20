@@ -1830,22 +1830,67 @@ function wireAddressZip() {
   });
 }
 
-// Every quarter hour of the day, stored as 24h "HH:MM" (what the DB and
-// fmtTime already expect) and shown as "2:30 PM".
+// Event time as three selects — hour, minute, AM/PM — over one hidden input
+// holding the 24h "HH:MM" the VARCHAR column actually stores. The hidden input
+// carries the .bk-edit/data-f contract, so saveBookingEdits needs no knowledge
+// of any of this.
 //
-// A <select> rather than <input type="time" step="900">: step only constrains
-// the spinner arrows, so a typed or pasted 12:07 still stuck. Rounding it in
-// onchange worked but silently moved what someone had just typed — a dropdown
-// cannot produce an off-slot time in the first place.
+// Was <input type="time" step="900">: step only constrains the spinner arrows,
+// so a typed or pasted 12:07 still stuck and had to be silently rounded after
+// the fact. Selects cannot produce an off-slot value at all.
+const MINUTE_OPTIONS = ['00', '15', '30', '45'];
+
+function timeSelects(name, v) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(v || ''));
+  const h24 = m ? Number(m[1]) : null;
+  const min = m ? m[2] : null;
+  const h12 = h24 === null ? '' : String(h24 % 12 || 12);
+  const ampm = h24 === null ? '' : (h24 < 12 ? 'AM' : 'PM');
+  // Booking 26-152 really is stored as 20:10. An off-slot minute is kept as a
+  // selectable option rather than dropped, or opening that booking and saving
+  // anything would silently move its start time.
+  const mins = min && !MINUTE_OPTIONS.includes(min)
+    ? [...MINUTE_OPTIONS, min].sort()
+    : MINUTE_OPTIONS;
+  const sel = `class="tf-part" onchange="syncTimeField('${name}')" style="padding:4px 6px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:.85rem"`;
+  const opt = (val, label, chosen) => `<option value="${esc(val)}"${String(val) === String(chosen) ? ' selected' : ''}>${esc(label)}</option>`;
+  return `<span style="display:inline-flex;gap:4px;align-items:center">
+    <select id="tf-h-${name}" ${sel}>${opt('', '––', h12)}${Array.from({ length: 12 }, (_, i) => opt(i + 1, i + 1, h12)).join('')}</select>
+    <span style="color:#6b7280;font-weight:700">:</span>
+    <select id="tf-m-${name}" ${sel}>${opt('', '––', min)}${mins.map(x => opt(x, x, min)).join('')}</select>
+    <select id="tf-a-${name}" ${sel}>${opt('', '––', ampm)}${['AM', 'PM'].map(x => opt(x, x, ampm)).join('')}</select>
+    <span id="tf-warn-${name}" style="color:#dc2626;font-size:.72rem"></span>
+    <input type="hidden" class="bk-edit" data-f="${name}" data-orig="${esc(v || '')}" id="tf-v-${name}" value="${esc(v || '')}">
+  </span>`;
+}
+
+// Composes the three selects into the hidden input.
 //
-// Full 24 hours rather than business hours only: the unmatched-option fallback
-// in bookingField covers legacy values, but a 6am setup slot is a real booking,
-// not a data error, and should be selectable rather than merely tolerated.
-const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
-  const h = Math.floor(i / 4), m = (i % 4) * 15;
-  const v = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-  return { v, t: `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` };
-});
+// A part-filled time must never save as something plausible. Picking 2 and 30
+// without AM/PM is genuinely ambiguous, so it stores nothing AND says why —
+// the alternative is guessing twelve hours wrong on a gig start. A missing
+// minute is not ambiguous, so it fills 00 rather than nagging.
+function syncTimeField(name) {
+  const h = document.getElementById(`tf-h-${name}`);
+  const mm = document.getElementById(`tf-m-${name}`);
+  const a = document.getElementById(`tf-a-${name}`);
+  const out = document.getElementById(`tf-v-${name}`);
+  const warn = document.getElementById(`tf-warn-${name}`);
+  if (!h || !mm || !a || !out) return;
+
+  if (h.value && !mm.value) mm.value = '00';
+
+  if (!h.value && !mm.value && !a.value) { out.value = ''; if (warn) warn.textContent = ''; return; }
+
+  if (!h.value || !a.value) {
+    out.value = '';
+    if (warn) warn.textContent = !h.value ? 'pick an hour' : 'AM or PM?';
+    return;
+  }
+  if (warn) warn.textContent = '';
+  const h24 = (Number(h.value) % 12) + (a.value === 'PM' ? 12 : 0);
+  out.value = `${String(h24).padStart(2, '0')}:${mm.value}`;
+}
 
 function bookingField(label, name, value, type = 'text', opts = null) {
   const v = value === null || value === undefined ? '' : String(value);
@@ -1864,7 +1909,9 @@ function bookingField(label, name, value, type = 'text', opts = null) {
          ${unmatched ? `<option value="${esc(v)}" selected>${esc(v)}</option>` : ''}
          ${opts.map(o => `<option value="${esc(optValue(o))}" ${optValue(o) === v ? 'selected' : ''}>${esc(optLabel(o))}</option>`).join('')}
        </select>`
-    : `<input class="bk-edit" data-f="${name}" data-orig="${esc(v)}" type="${type}" value="${esc(v)}">`;
+    : type === 'time'
+      ? timeSelects(name, v)
+      : `<input class="bk-edit" data-f="${name}" data-orig="${esc(v)}" type="${type}" value="${esc(v)}">`;
   return `<div class="detail-field"><label>${label}</label>${input}</div>`;
 }
 
@@ -1983,7 +2030,7 @@ function openBooking(id, seed) {
       ${bookingField('Referral', 'referral_source', b.referral_source, 'text', REFERRAL_SOURCES)}
       ${bookingField('Customer Type', 'customer_type', b.customer_type, 'text', CUSTOMER_TYPES)}
       ${bookingField('Event Date', 'event_date', (b.event_date || '').slice(0, 10), 'date')}
-      ${bookingField('Event Time', 'event_time', b.event_time, 'time', TIME_OPTIONS)}
+      ${bookingField('Event Time', 'event_time', b.event_time, 'time')}
       ${bookingField('Occasion', 'occasion', b.occasion, 'text',
         ['Birthday','Fun day / Carnival','Wedding','Corporate','Community','School','Library','Other'])}
       ${bookingField('Event Type', 'event_type', b.event_type, 'text', EVENT_TYPE_LABELS)}
