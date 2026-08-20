@@ -22,6 +22,7 @@
 const { withClient } = require('./_db');
 const { runScheduledAutomations, ensureTables, sendDueScheduledEmails } = require('./automations');
 const { ensureSmsTables, sendSms, flushHeldSms } = require('./_sms');
+const { fmtEventDate } = require('./_email');
 const { wantsSms } = require('./staff-assignments');
 
 // ── Day-of reminder: call time and address, to everyone working today ────────
@@ -89,8 +90,13 @@ async function unstaffedAlerts(client, now) {
   `);
   let sent = 0;
   for (const b of rows) {
-    const d = new Date(String(b.event_date).slice(0, 10) + 'T00:00:00Z')
-      .toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'numeric', day: 'numeric' });
+    // Was String(event_date).slice(0,10) + 'T00:00:00Z'. pg hands back a Date
+    // object, so String() gives "Mon Aug 24 2026 00:00:00 GMT-0500 (...)" and
+    // slice(0,10) takes "Mon Aug 24" — which parses to Invalid Date and was
+    // texted as the literal words. Same defect as the two staff SMS paths and
+    // accept-quote; this one hid from the first sweep because the grep excluded
+    // the 'Z' suffix.
+    const d = fmtEventDate(b.event_date, { weekday: 'short', month: 'numeric', day: 'numeric', year: undefined });
     const res = await sendSms(client, notify,
       `UNSTAFFED: ${b.service_name} on ${d} (${b.event_zip || 'OKC'}) has nobody assigned.`,
       { booking_id: b.id, trigger_label: 'Unstaffed alert', now });
