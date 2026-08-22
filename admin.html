@@ -406,10 +406,11 @@ input,select,textarea{font-family:inherit}
             <input type="text" id="filter-search" placeholder="🔍 Search name, ref, service..." oninput="renderBookingsTable()" style="flex:1;min-width:200px;max-width:300px"/>
             
             <select id="filter-status" onchange="renderBookingsTable()" style="min-width:140px">
+              <!-- Defaulted, not first: 158 of 717 bookings are cancelled, and
+                   the list is almost always wanted without them. "All Statuses"
+                   is one click away when you are looking for a dead one. -->
+              <option value="!cancelled" selected>All but Cancelled</option>
               <option value="">All Statuses</option>
-              <!-- 158 of 717 bookings are cancelled, so "everything that is
-                   still real" is the view this list is usually wanted in. -->
-              <option value="!cancelled">All but Cancelled</option>
             </select>
             
             <select id="filter-date-range" onchange="renderBookingsTable()" style="min-width:140px">
@@ -433,10 +434,6 @@ input,select,textarea{font-family:inherit}
             <label style="display:flex;align-items:center;cursor:pointer;user-select:none">
               <input type="checkbox" id="filter-hide-past" onchange="renderBookingsTable()" checked style="margin-right:6px"/>
               <span>Hide Past Events</span>
-            </label>
-            <label style="display:flex;align-items:center;cursor:pointer;user-select:none">
-              <input type="checkbox" id="filter-hide-cancelled" onchange="renderBookingsTable()" style="margin-right:6px"/>
-              <span>Hide Cancelled</span>
             </label>
             <label style="display:flex;align-items:center;cursor:pointer;user-select:none">
               <input type="checkbox" id="filter-hide-completed" onchange="renderBookingsTable()" style="margin-right:6px"/>
@@ -1204,7 +1201,7 @@ function showBookingsFiltered(status) {
   set('filter-search', '');
   set('filter-date-range', 'all');
   set('filter-deposit', '');
-  for (const id of ['filter-hide-past', 'filter-hide-cancelled', 'filter-hide-completed']) {
+  for (const id of ['filter-hide-past', 'filter-hide-completed']) {
     const el = document.getElementById(id);
     if (el) el.checked = false;
   }
@@ -1623,6 +1620,18 @@ function addressLooksComplete(location) {
   return { ok: true, reason: null, message: '' };
 }
 
+// "TBD" and "$0.00" are different facts. balance_due is NULL on a booking
+// nobody has quoted yet, and 0 on one that has been settled — including by the
+// check Joe just recorded. Printing TBD for both told him a paid-up booking had
+// never been priced.
+function balanceDueLabel(b) {
+  const raw = b && b.balance_due;
+  if (raw === null || raw === undefined || raw === '') return 'TBD';
+  const n = Number(raw);
+  if (!isFinite(n)) return 'TBD';
+  return n > 0 ? '$' + n.toFixed(2) : '$0.00 ✅';
+}
+
 // Sending someone a link to finalise their booking IS quoting them, so the
 // board should say so without Joe setting it by hand. Only ever a promotion:
 // STATUSES is in ladder order, so anything already at or past 'quoted' —
@@ -1757,7 +1766,6 @@ function renderBookingsTable() {
   const dateRange = document.getElementById('filter-date-range').value;
   const depositFilter = document.getElementById('filter-deposit').value;
   const hidePast = document.getElementById('filter-hide-past').checked;
-  const hideCancelled = document.getElementById('filter-hide-cancelled').checked;
   const hideCompleted = document.getElementById('filter-hide-completed').checked;
 
   const today = new Date().toISOString().split('T')[0];
@@ -1804,9 +1812,6 @@ function renderBookingsTable() {
   // Quick toggle filters
   if (hidePast) {
     list = list.filter(b => !b.event_date || b.event_date >= today);
-  }
-  if (hideCancelled) {
-    list = list.filter(b => b.status !== 'cancelled');
   }
   if (hideCompleted) {
     list = list.filter(b => b.status !== 'completed');
@@ -2211,7 +2216,7 @@ function openBooking(id, seed) {
           <input class="bk-edit" data-f="deposit_ref" data-orig="${esc(b.deposit_ref || '')}" value="${esc(b.deposit_ref || '')}" placeholder="ref" style="max-width:110px">
         </span>
       </div>
-      <div class="q-row"><span>Balance Due at Event</span><span id="balance-due-${b.id}">${Number(b.balance_due||0)>0?'$'+Number(b.balance_due).toFixed(2):'TBD'}</span></div>
+      <div class="q-row"><span>Balance Due at Event</span><span id="balance-due-${b.id}">${balanceDueLabel(b)}</span></div>
     </div>
 
     ${isNew ? '' : `
@@ -2354,6 +2359,14 @@ function openBooking(id, seed) {
                  value="${Number(b.payment_amount) > 0 ? Number(b.payment_amount).toFixed(2) : ''}"/>
         </div>
         <div class="pay-field">
+          <label>Settles</label>
+          <select id="pay-what-${b.id}" title="Which part of the bill this payment clears">
+            <option value="deposit">Deposit</option>
+            <option value="balance">Balance</option>
+            <option value="both">Deposit + Balance (paid in full)</option>
+          </select>
+        </div>
+        <div class="pay-field">
           <label>Method</label>
           <select id="pay-meth-${b.id}">
             ${['cash','square','stripe','venmo','paypal','check','zelle'].map(m =>
@@ -2372,7 +2385,7 @@ function openBooking(id, seed) {
         <button id="pay-btn-${b.id}" class="btn btn-success btn-sm" onclick="recordClientPayment('${b.id}')">${Number(b.payment_amount) > 0 || b.deposit_paid ? 'Update Payment' : 'Save Payment'}</button>
         ${(Number(b.payment_amount) > 0 || b.deposit_paid) && !b.stripe_payment_intent_id ? `
         <button id="pay-clear-${b.id}" class="btn btn-outline btn-sm" onclick="clearClientPayment('${b.id}')"
-                style="color:#dc2626;border-color:#dc2626" title="Marks the deposit unpaid and wipes the recorded amount, method, note and ref">Clear Payment</button>` : ''}
+                style="color:#dc2626;border-color:#dc2626" title="Marks the deposit unpaid and wipes the recorded amount, method, note and ref. A balance already marked settled stays settled — re-price it in the quote if that is wrong.">Clear Payment</button>` : ''}
         <span class="save-flash" id="pay-flash-${b.id}">✓ Saved</span>
       </div>
       ${isNew ? '' : `
@@ -3323,8 +3336,7 @@ async function saveBookingEdits(id) {
     // front of the owner is routine, not rare. Refresh just that one span,
     // not the whole modal — cheaper and doesn't disturb scroll position.
     const bdEl = document.getElementById('balance-due-' + id);
-    if (bdEl) bdEl.textContent = Number(updated.balance_due || 0) > 0
-      ? '$' + Number(updated.balance_due).toFixed(2) : 'TBD';
+    if (bdEl) bdEl.textContent = balanceDueLabel(updated);
     flash('bk-flash-' + id);
     renderBookingsTable();
   } catch (e) {
@@ -3799,12 +3811,30 @@ async function sendFinalisationLink(id) {
   } catch (e) { alert('Could not send: ' + e.message); }
 }
 
-// ── Record client deposit payment — inline feedback, reopens modal to show updated deposit status ──
+// ── Record a payment that arrived off-system — a check, cash, Venmo ─────────
+// "Settles" is the part that matters. Marking a $745 balance check as a deposit
+// left balance_due at $745, so the Balance Link block kept offering to bill a
+// client who had already paid — the gap this whole payment row appeared to
+// close but did not.
+//
+// Zeroing balance_due directly is the sanctioned out-of-band pattern: the
+// formula (total + mileage - deposit) cannot express "settled by check", and
+// booking.js's balanceIsDerivable guard exists precisely so a later recompute
+// leaves such a booking alone rather than re-billing it.
+//
+// deposit_amount is never touched. It is the QUOTE — what was asked for — not
+// the receipt, and rewriting it here would re-price the booking.
+//
+// ponytail: payment_amount/method/ref record the LATEST payment, not a ledger.
+// Recording a balance after a deposit overwrites those three fields; the
+// previous values survive in the change log, which is what the log is for. A
+// real payments table is the upgrade path if that ever stops being enough.
 async function recordClientPayment(id) {
   const amt = document.getElementById('pay-amt-' + id).value;
   const method = document.getElementById('pay-meth-' + id).value;
   const note = document.getElementById('pay-note-' + id).value;
   const ref  = document.getElementById('pay-ref-' + id)?.value || '';
+  const settles = document.getElementById('pay-what-' + id)?.value || 'deposit';
 
   if (!amt || isNaN(Number(amt)) || Number(amt) <= 0) {
     document.getElementById('pay-amt-' + id).style.borderColor = '#dc2626';
@@ -3816,13 +3846,15 @@ async function recordClientPayment(id) {
   btn.disabled = true; btn.textContent = 'Saving…';
 
   try {
-    await patch(id, {
+    const payload = {
       payment_amount: Number(amt),
       payment_method: method,
       payment_note: note,
       payment_ref: ref,
-      deposit_paid: true
-    });
+    };
+    if (settles === 'deposit' || settles === 'both') payload.deposit_paid = true;
+    if (settles === 'balance' || settles === 'both') payload.balance_due = 0;
+    await patch(id, payload);
     await loadBookings();
     flash('pay-flash-' + id);
     btn.textContent = 'Save Payment';

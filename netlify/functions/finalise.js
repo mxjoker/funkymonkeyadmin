@@ -12,7 +12,7 @@ const { CORS, preflight } = require('./_auth');
 const { esc, logChange, ensureBookingChanges, ensureEmailLog, finaliseLinkFor } = require('./_email');
 const { normaliseAddress } = require('./_address');
 const { sanitiseClientEdit, zipChanged, describeFieldChange } = require('./_finalise');
-const { ensureBookingItems, getItems } = require('./_items');
+const { ensureBookingItems, getItems, balanceCharge } = require('./_items');
 const { buildSessionParams } = require('./create-stripe-link');
 const { sendTemplate } = require('./automations');
 
@@ -119,7 +119,13 @@ exports.handler = async (event) => {
       return withClient(async (c) => {
         const booking = await authenticate(c, reference, email);
         if (!booking) return json(404, { error: 'Booking not found' });
-        if (booking.deposit_paid) {
+
+        // Deposit or balance, both minted here for the same reason: a stored
+        // checkout URL is a dead page 24 hours later. This is the only endpoint
+        // a client can reach, so both guards that keep the two links from being
+        // live at once live here as well as in create-stripe-link.js.
+        const kind = body.kind === 'balance' ? 'balance' : 'deposit';
+        if (kind === 'deposit' && booking.deposit_paid) {
           return json(409, { error: 'This deposit is already paid — nothing further to pay here.' });
         }
         // The one place the address is MANDATORY rather than advised (Joe,
@@ -137,11 +143,32 @@ exports.handler = async (event) => {
             field: 'event_location',
           });
         }
-        const deposit = Number(booking.deposit_amount || 0);
+        // What we are about to charge. Both figures come from the row: this
+        // endpoint is public — reference + email is the whole key — so a
+        // browser must never be able to name the price of anything.
+        //
         // NOT a fallback amount. A $0 deposit is the deliberate school/library
         // booking, and billing one $100 is a bug this codebase has shipped.
-        if (!(deposit > 0)) {
-          return json(400, { error: 'This booking has no deposit to pay.' });
+        const charge = kind === 'balance'
+          ? balanceCharge(booking)
+          : { balance: Number(booking.deposit_amount || 0), fee: 0, total: Number(booking.deposit_amount || 0) };
+
+        if (!(charge.balance > 0)) {
+          return json(400, { error: kind === 'balance'
+            ? 'There is no balance left to pay on this booking.'
+            : 'This booking has no deposit to pay.' });
+        }
+        if (kind === 'balance') {
+          // Both links live at once is a money bug: the balance payment zeroes
+          // balance_due, and a still-live deposit link's webhook then recomputes
+          // it as total + mileage - deposit. Same guard as create-stripe-link.js.
+          if (booking.deposit_paid !== true && Number(booking.deposit_amount) > 0) {
+            return json(400, { error: 'Please pay the deposit first — we will send the balance when it is due.' });
+          }
+          if (charge.total > 25000) {
+            console.error('finalise: balance too large to bill by link —', booking.reference, charge.total);
+            return json(400, { error: 'Please call us on (405) 431-6625 to settle this one.' });
+          }
         }
         const stripeKey = process.env.STRIPE_SECRET_KEY;
         if (!stripeKey) {
@@ -150,7 +177,7 @@ exports.handler = async (event) => {
         }
         try {
           const params = buildSessionParams({
-            kind: 'deposit', amount: deposit, fee: 0,
+            kind, amount: charge.balance, fee: charge.fee,
             service: booking.service_name, client: booking.client_name,
             email: booking.client_email, bookingRef: booking.reference,
             bookingId: booking.reference, dbId: booking.id,
@@ -165,10 +192,15 @@ exports.handler = async (event) => {
             console.error('finalise: Stripe session failed for', booking.reference, '|', JSON.stringify(session.error || {}));
             return json(502, { error: 'Could not start checkout — call us on (405) 431-6625.' });
           }
-          // Persisted so the admin's "Last link", the {{payment_link}} token
-          // and my-booking's fallback all point at the newest session rather
-          // than one this client has already replaced.
-          await c.query('UPDATE bookings SET stripe_payment_link=$1, updated_at=NOW() WHERE id=$2',
+          // Its OWN column, same as create-stripe-link.js: stripe_payment_link
+          // means "the deposit link" to four other readers, and overwriting it
+          // with a balance demand would point them all at the wrong thing.
+          const col = kind === 'balance' ? 'stripe_balance_link' : 'stripe_payment_link';
+          if (kind === 'balance') {
+            await c.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_balance_link TEXT DEFAULT ''")
+              .catch((e) => console.error('finalise: could not ensure stripe_balance_link |', e.message));
+          }
+          await c.query(`UPDATE bookings SET ${col}=$1, updated_at=NOW() WHERE id=$2`,
             [session.url, booking.id]);
           return json(200, { url: session.url });
         } catch (e) {

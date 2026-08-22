@@ -460,6 +460,12 @@
 
     function addressField() { return document.getElementById('f-event_location'); }
 
+    // The exact address a client insisted on after being warned about it. An
+    // empty address is never overridable; a badly-SHAPED one is, on a second
+    // press, because some real addresses have no house number and being unable
+    // to finish your own booking is worse than a warning nobody heeded.
+    let addressOverride = null;
+
     // Shown under the field as they type, never as an alert: the address is the
     // one thing on this page the crew cannot work without, and a client who is
     // told about it once in a popup has already forgotten.
@@ -570,11 +576,24 @@
             <span class="detail-label">Notes</span>
             <span class="detail-value" style="font-weight:400;line-height:1.6">${esc(booking.notes)}</span>
           </div>` : '';
+        // A confirmed booking still owes its balance, and this is where a
+        // client lands from the balance email. The button mints its own
+        // checkout for the same reason the deposit one does — a link emailed
+        // yesterday is a dead page today.
+        const owed = Number(booking.balance_due || 0);
         document.getElementById('booking-details').innerHTML = readOnlyHtml + detailsHtml + notesHtml + `
           <div class="info-box" style="margin-top:24px">
             <h3>✅ This booking is confirmed</h3>
             <p>Your deposit is paid and your details are locked in. Need to change anything? Call us at <strong>(405) 431-6625</strong>.</p>
           </div>
+          ${owed > 0 ? `
+          <div class="info-box" style="margin-top:16px">
+            <h3>💳 Balance</h3>
+            <p style="margin-bottom:12px">$${owed.toFixed(2)} is due for your event. You can settle it here whenever suits — or on the day.</p>
+            <button class="btn" id="pay-btn" onclick="payNow('balance')" style="display:block;width:100%">Pay Balance — $${owed.toFixed(2)}</button>
+            <div id="pay-msg" style="margin-top:10px;font-size:14px;text-align:center"></div>
+            <p style="margin-top:10px;font-size:12px;color:#A78BCA;text-align:center">Card payments carry a 5% service fee, shown before you confirm.</p>
+          </div>` : ''}
         `;
         return;
       }
@@ -608,7 +627,7 @@
           ${Number(booking.deposit_amount) > 0 ? `
             <h3>💳 Ready for your deposit?</h3>
             <p style="margin-bottom:12px">Secure your date with a deposit payment.</p>
-            <button class="btn" id="pay-btn" onclick="payDeposit()" style="display:block;width:100%">Pay Deposit — $${Number(booking.deposit_amount).toFixed(2)}</button>
+            <button class="btn" id="pay-btn" onclick="payNow('deposit')" style="display:block;width:100%">Pay Deposit — $${Number(booking.deposit_amount).toFixed(2)}</button>
             <div id="pay-msg" style="margin-top:10px;font-size:14px;text-align:center"></div>
           ` : `
             <h3>💳 Deposit</h3>
@@ -644,7 +663,7 @@
     // FM-KNNVZY8J on 2026-08-20: her button pointed at a session created 26
     // hours earlier and simply refused her. Asking for the URL at press time
     // makes that impossible rather than unlikely.
-    async function payDeposit() {
+    async function payNow(kind) {
       const btn = document.getElementById('pay-btn');
       const msg = document.getElementById('pay-msg');
       if (btn.disabled) return;
@@ -652,6 +671,7 @@
       // The server refuses this too (finalise.js pay_link) — asked here first
       // so the client gets the field focused rather than a rejected checkout.
       // The address must be SAVED, not just typed: the server reads the row.
+      // The confirmed view has no address field to focus, so it only nudges.
       if (!String(currentBooking.event_location || '').trim()) {
         const el = addressField();
         if (el) { el.focus(); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
@@ -670,6 +690,7 @@
           // reference from the loaded booking and whatever is in the email box.
           body: JSON.stringify({
             action: 'pay_link',
+            kind: kind || 'deposit',
             reference: currentBooking.reference,
             email: document.getElementById('email').value.trim().toLowerCase(),
           }),
@@ -692,15 +713,23 @@
       const btn = document.getElementById('save-btn');
       const updates = buildUpdates();
 
-      // Empty is refused; a bad-looking address is only flagged. Blocking a
-      // save on the SHAPE would strand anyone whose address genuinely has no
-      // house number, and they would have no way past it.
+      // The address is mandatory here (Joe, 2026-08-20). Empty is refused
+      // outright. A badly-shaped one — "Edmond", a town where a street should
+      // be — is refused ONCE and accepted on a second press, so the warning
+      // cannot trap someone whose address genuinely has no house number.
       const verdict = checkAddress();
-      if (!verdict.ok && verdict.reason === 'missing') {
-        const el = addressField();
-        if (el) { el.focus(); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
-        showNotice('Please add the event address — we need it to get the crew to you.');
-        return;
+      if (!verdict.ok) {
+        const typed = (addressField()?.value || '').trim();
+        const insisted = verdict.reason !== 'missing' && addressOverride === typed;
+        if (!insisted) {
+          addressOverride = verdict.reason === 'missing' ? null : typed;
+          const el = addressField();
+          if (el) { el.focus(); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+          showNotice(verdict.reason === 'missing'
+            ? 'Please add the event address — we need it to get the crew to you.'
+            : verdict.message + ' Press Save again if that is really the address.');
+          return;
+        }
       }
 
       if (!Object.keys(updates).length) {

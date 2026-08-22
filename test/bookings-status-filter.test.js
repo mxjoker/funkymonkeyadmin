@@ -46,8 +46,8 @@ test('a booking with no status survives "All but Cancelled"', () => {
 // The option and the rule are in different parts of the file; a value typo in
 // one is invisible until someone picks it and sees an empty table.
 test('the dropdown option matches the rule the filter implements', () => {
-  assert.match(HTML, /<option value="!cancelled">All but Cancelled<\/option>/,
-    'the "All but Cancelled" option is gone or renamed');
+  assert.match(HTML, /<option value="!cancelled" selected>All but Cancelled<\/option>/,
+    'the "All but Cancelled" option is gone, renamed, or no longer the default');
 });
 
 // The CSV export used to carry its own copy of the status test. Exporting a
@@ -96,7 +96,6 @@ test('opening a filtered view sets the status and clears the other filters', () 
   values['filter-date-range'] = 'upcoming';
   values['filter-deposit'] = 'unpaid';
   checks['filter-hide-past'] = true;
-  checks['filter-hide-cancelled'] = true;
   checks['filter-hide-completed'] = true;
 
   ctx.showBookingsFiltered('review');
@@ -108,8 +107,25 @@ test('opening a filtered view sets the status and clears the other filters', () 
   assert.strictEqual(values['filter-search'], '');
   assert.strictEqual(values['filter-date-range'], 'all');
   assert.strictEqual(values['filter-deposit'], '');
-  for (const id of ['filter-hide-past', 'filter-hide-cancelled', 'filter-hide-completed']) {
+  for (const id of ['filter-hide-past', 'filter-hide-completed']) {
     assert.strictEqual(checks[id], false, `${id} was left on`);
   }
   assert.strictEqual(rendered, 1, 'the table must be re-rendered with the new filter');
+});
+
+// ── The default view ────────────────────────────────────────────────────────
+// 158 of 717 bookings are cancelled. The list is almost always wanted without
+// them, and the separate "Hide Cancelled" checkbox that used to do this job was
+// a second control for one rule.
+test('the bookings list opens without cancelled bookings', () => {
+  const select = HTML.slice(HTML.indexOf('<select id="filter-status"'),
+                            HTML.indexOf('</select>', HTML.indexOf('<select id="filter-status"')));
+  const selected = select.match(/<option value="([^"]*)" selected>/);
+  assert.ok(selected, 'no default is marked on the status filter');
+  assert.strictEqual(selected[1], '!cancelled');
+});
+
+test('the Hide Cancelled checkbox is gone, and nothing still reads it', () => {
+  assert.ok(!/filter-hide-cancelled/.test(HTML),
+    'the checkbox is back — two controls for one rule is how they end up disagreeing');
 });

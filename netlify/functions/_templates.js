@@ -28,6 +28,12 @@
 const TEMPLATES = [
   // ── Money → the client ────────────────────────────────────────────────────
   {
+    // Points at the finalisation PAGE, not at a Stripe URL (Joe, 2026-08-20:
+    // "why would we not just use that finalization link always?"). A checkout
+    // session dies 24 hours after it is minted, so a client who opens this
+    // email on Thursday finds a dead page; the finalisation link mints checkout
+    // when they press Pay and cannot go stale. It also collects the details we
+    // need — the address especially — on the way past.
     template_key: 'deposit_link_ready',
     name: 'Deposit link — to the client',
     trigger_event: 'manual', recipient: 'client', sort_order: 10,
@@ -39,15 +45,18 @@ const TEMPLATES = [
       <div style="font-size:36px;font-weight:900;color:#10B981">\${{deposit_amount}}</div>
       <div style="font-size:12px;color:#A78BCA;margin-top:4px">Secure your date — balance due day of event</div></div>
       <div style="text-align:center;margin-bottom:24px">
-      <a href="{{payment_link}}" style="background-color:#10B981;color:#ffffff;padding:16px 40px;border-radius:12px;text-decoration:none;font-weight:900;font-size:16px;display:inline-block">Pay Deposit Now →</a>
+      <a href="{{finalise_link}}" style="background-color:#10B981;color:#ffffff;padding:16px 40px;border-radius:12px;text-decoration:none;font-weight:900;font-size:16px;display:inline-block">Pay Deposit Now →</a>
       <div style="font-size:11px;color:#A78BCA;margin-top:14px;line-height:1.5">Button not working? Copy this link into your browser:<br>
-      <a href="{{payment_link}}" style="color:#06B6D4;word-break:break-all">{{payment_link}}</a></div></div>
+      <a href="{{finalise_link}}" style="color:#06B6D4;word-break:break-all">{{finalise_link}}</a></div></div>
       <div style="background:#FFFFFF08;border-radius:10px;padding:12px;font-size:11px;color:#A78BCA;line-height:1.6;text-align:center">
       🔒 Secure payment powered by Stripe · Accepts all major cards, Apple Pay &amp; Google Pay<br>Booking ref: {{reference}}</div>
       <p style="font-size:13px;color:#A78BCA;text-align:center;margin-top:16px">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`,
     body_sms: ''
   },
   {
+    // Points at the finalisation page, like the deposit email: the page mints
+    // a balance session when they press Pay, so this email cannot arrive
+    // carrying a checkout that expired overnight.
     template_key: 'balance_link_ready',
     name: 'Balance link — to the client',
     trigger_event: 'manual', recipient: 'client', sort_order: 11,
@@ -61,9 +70,9 @@ const TEMPLATES = [
       <tr><td style="padding:8px 0 0;border-top:1px solid #3D2460;font-weight:900">Total due</td><td style="padding:8px 0 0;border-top:1px solid #3D2460;text-align:right;color:#10B981;font-size:20px;font-weight:900">\${{balance_total}}</td></tr>
       </table></div>
       <div style="text-align:center;margin-bottom:24px">
-      <a href="{{payment_link}}" style="background-color:#10B981;color:#ffffff;padding:16px 40px;border-radius:12px;text-decoration:none;font-weight:900;font-size:16px;display:inline-block">Pay Balance Now →</a>
+      <a href="{{finalise_link}}" style="background-color:#10B981;color:#ffffff;padding:16px 40px;border-radius:12px;text-decoration:none;font-weight:900;font-size:16px;display:inline-block">Pay Balance Now →</a>
       <div style="font-size:11px;color:#A78BCA;margin-top:14px;line-height:1.5">Button not working? Copy this link into your browser:<br>
-      <a href="{{payment_link}}" style="color:#06B6D4;word-break:break-all">{{payment_link}}</a></div></div>
+      <a href="{{finalise_link}}" style="color:#06B6D4;word-break:break-all">{{finalise_link}}</a></div></div>
       <div style="background:#FFFFFF08;border-radius:10px;padding:12px;font-size:11px;color:#A78BCA;line-height:1.6;text-align:center">
       🔒 Secure payment powered by Stripe · Booking ref: {{reference}}</div>
       <p style="font-size:13px;color:#A78BCA;text-align:center;margin-top:16px">Questions? <a href="tel:4054316625" style="color:#06B6D4;font-weight:700">(405) 431-6625</a></p>`,

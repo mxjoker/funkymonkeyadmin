@@ -27,11 +27,14 @@ test('the finalisation page mints a session instead of carrying one', () => {
 test('pay_link takes its amount from the row, never from the request', () => {
   const block = FINALISE.slice(FINALISE.indexOf("body.action === 'pay_link'"),
                                FINALISE.indexOf("return withClient(async (c) => {\n      await ensureBookingChanges"));
-  assert.match(block, /Number\(booking\.deposit_amount \|\| 0\)/, 'the amount must come from the booking row');
+  // Deposit from the row's deposit_amount, balance from balanceCharge(row).
+  // The request names the KIND and nothing else.
+  assert.match(block, /Number\(booking\.deposit_amount \|\| 0\)/, 'the deposit amount must come from the row');
+  assert.match(block, /balanceCharge\(booking\)/, 'the balance amount must come from the row');
   assert.ok(!/body\.amount|opts\.amount/.test(block), 'the request can name the price');
   // The $100 fallback this codebase has shipped twice.
   assert.ok(!/\|\|\s*100\b/.test(block), 'a fallback deposit amount is back');
-  assert.match(block, /deposit > 0/, 'a $0 deposit must not be billable');
+  assert.match(block, /charge\.balance > 0/, 'a $0 deposit or a settled balance must not be billable');
 });
 
 test('pay_link refuses a booking whose deposit is already paid', () => {
@@ -69,4 +72,20 @@ test('the status is promoted after the send, not before it', () => {
     'the status is written before the send is known to have worked');
   assert.match(fn.slice(promote), /patch\(id, \{ status: promoted \}\)/,
     'the promotion no longer goes through patch(), so it will not be logged');
+});
+
+// ── One link, not two ───────────────────────────────────────────────────────
+// Joe, 2026-08-20: "why would we not just use that finalization link always?"
+// Both client-facing emails now point at the finalisation page, which mints
+// checkout on press. Neither carries a session that can be dead on arrival.
+test('no client template emails a raw Stripe checkout URL', () => {
+  const { TEMPLATES } = require('../netlify/functions/_templates.js');
+  for (const t of TEMPLATES.filter((t) => t.recipient === 'client')) {
+    assert.ok(!/pay\.stripe\.com|checkout\.stripe\.com/.test(t.body_html),
+      `${t.template_key} hardcodes a Stripe URL`);
+    // {{payment_link}} resolves to whatever session the caller passes, which is
+    // exactly the thing that expires. The finalisation page is the durable one.
+    assert.ok(!t.body_html.includes('{{payment_link}}'),
+      `${t.template_key} still sends a checkout session that expires in 24h`);
+  }
 });

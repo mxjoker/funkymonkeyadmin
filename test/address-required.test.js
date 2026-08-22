@@ -81,7 +81,7 @@ test('all three copies of the rule agree, verdict for verdict', () => {
 // calendar, and that gig needs somewhere to be.
 test('checkout is refused when the booking has no address', () => {
   const src = read('netlify/functions/finalise.js');
-  const block = src.slice(src.indexOf("body.action === 'pay_link'"), src.indexOf('const deposit ='));
+  const block = src.slice(src.indexOf("body.action === 'pay_link'"), src.indexOf('const charge ='));
   assert.match(block, /booking\.event_location/, 'pay_link no longer checks for an address');
   assert.match(block, /field: 'event_location'/, 'the refusal should name the field so the page can focus it');
   // Emptiness only. Refusing a real rural address at the checkout button would
@@ -92,7 +92,9 @@ test('checkout is refused when the booking has no address', () => {
 
 test('the client page asks before spending a round trip on a refusal', () => {
   const page = read('my-booking.html');
-  const pay = page.slice(page.indexOf('async function payDeposit'), page.indexOf('async function saveBooking'));
+  const start = page.indexOf('async function payNow');
+  assert.ok(start !== -1, 'payNow is gone from the page');
+  const pay = page.slice(start, page.indexOf('async function saveBooking'));
   assert.match(pay, /currentBooking\.event_location/, 'the page no longer checks the address before paying');
   assert.match(pay, /Save My Details/, 'the client must be told the address has to be SAVED, not just typed');
 });

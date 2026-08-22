@@ -54,14 +54,26 @@ test('the no-deposit finalisation template never asks for a deposit', () => {
   assert.ok(!out.includes('pay'), `no-deposit template asks for payment: ${out}`);
 });
 
-test('the deposit template carries a real pay link and the right amount', () => {
-  const out = render(byKey('deposit_link_ready').body_html, BOOKING, BOOKING.stripe_payment_link);
-  assert.ok(out.includes('https://pay.stripe.com/dep_123'), 'deposit template lost its pay link');
+// The deposit email points at the finalisation PAGE, not at a Stripe session:
+// a session dies 24 hours after it is minted, and a client opening the email on
+// Thursday found a dead page (FM-KNNVZY8J, 2026-08-20). The page mints checkout
+// when they press Pay.
+test('the deposit template links to the finalisation page, not a Stripe session', () => {
+  const t = byKey('deposit_link_ready');
+  const out = render(t.body_html, BOOKING, BOOKING.stripe_payment_link);
+  assert.ok(!out.includes('pay.stripe.com'),
+    'the deposit email carries a Stripe URL again — it will be expired by tomorrow');
+  assert.match(t.body_html, /\{\{finalise_link\}\}/, 'the deposit email lost its link entirely');
+  assert.ok(out.includes('/my-booking.html') || out.includes('reference='),
+    `the finalise link did not render: ${out.slice(0, 200)}`);
+});
+
+test('the deposit template still names the right amount', () => {
+  const out = render(byKey('deposit_link_ready').body_html, BOOKING, null);
   assert.ok(out.includes('$150.00'), 'deposit template lost the deposit amount');
   // NOT the $100 fallback this codebase has been bitten by before.
   assert.ok(!out.includes('$100.00'), 'a fallback amount leaked into the deposit template');
 });
-
 test('a template key is unique, or the seed silently keeps only one', () => {
   const keys = MANUAL_TEMPLATES.map((t) => t.template_key);
   assert.strictEqual(new Set(keys).size, keys.length, `duplicate template_key: ${keys.join(', ')}`);
@@ -98,11 +110,13 @@ test('sendTemplate seeds the templates if the lookup misses', async () => {
 // It was an HTML literal in create-stripe-link.js until 2026-08-20: the only
 // way to reword a bill was a code change and a deploy.
 test('the balance template itemises the balance, the fee and the total', () => {
-  const out = render(byKey('balance_link_ready').body_html, BOOKING, 'https://pay.stripe.com/bal_789');
+  const out = render(byKey('balance_link_ready').body_html, BOOKING, null);
   assert.ok(out.includes('$450.00'), 'lost the balance');
   assert.ok(out.includes('$22.50'), 'lost the 5% service fee');
   assert.ok(out.includes('$472.50'), 'lost the total due');
-  assert.ok(out.includes('https://pay.stripe.com/bal_789'), 'lost the pay link');
+  // The link is the finalisation page, which mints the session on press — a
+  // checkout URL emailed here would be expired by the next evening.
+  assert.ok(out.includes('reference=') || out.includes('/my-booking.html'), 'lost the pay link');
 });
 
 // The three figures must agree with the Stripe session to the cent — this is
