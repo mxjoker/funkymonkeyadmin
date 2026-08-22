@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { rollupItems, normaliseItems, balanceIsDerivable } = require('../netlify/functions/_items');
+const { rollupItems, normaliseItems, balanceIsDerivable, ITEM_KINDS } = require('../netlify/functions/_items');
 
 test('a single service rolls up to the legacy columns unchanged', () => {
   const r = rollupItems([
@@ -177,4 +177,114 @@ test('deposit + items in one PATCH must land on the rollup balance, not the pre-
   // recompute in the system stays armed on this row.
   assert.strictEqual(balanceIsDerivable(
     { total_price: roll.total_price, mileage_cost: roll.mileage_cost, deposit_amount: depositAmount, balance_due: correctBalance }), true);
+});
+
+// ── Discounts ───────────────────────────────────────────────────────────────
+// A discount is a line item of its own kind, entered POSITIVE and subtracted in
+// exactly one place. The alternative was a negative price, which would have
+// meant relaxing clampPrice — the guard that stops a malformed payload writing
+// a negative into any money column.
+const DISCOUNTED = [
+  { kind: 'service', name: 'Foam Party — Double Cannon', price: 535, quantity: 1, sort_order: 0 },
+  { kind: 'service', name: 'Magic School Assembly',      price: 385, quantity: 1, sort_order: 1 },
+  { kind: 'discount', name: 'Repeat client 10%',         price: 92,  quantity: 1, sort_order: 2 },
+];
+
+test('a discount comes off total_price and nothing else', () => {
+  const r = rollupItems(DISCOUNTED);
+  assert.strictEqual(r.total_price, 828);
+  // Gross on purpose: the accounting export wants "sold $920, gave $92 away".
+  assert.strictEqual(r.service_price, 920);
+  assert.strictEqual(r.discount_total, 92);
+  assert.strictEqual(r.service_name, 'Foam Party — Double Cannon + Magic School Assembly');
+});
+
+test('a discount does not become an addon or a service', () => {
+  const r = rollupItems(DISCOUNTED);
+  assert.deepStrictEqual(r.addons, []);
+  assert.strictEqual(r.addon_total, 0);
+  assert.ok(!r.service_name.includes('Repeat client'), 'the discount leaked into the service name');
+});
+
+test('a discount larger than the bill floors the total at zero, never negative', () => {
+  const r = rollupItems([
+    { kind: 'service', name: 'Foam Party', price: 500, quantity: 1, sort_order: 0 },
+    { kind: 'discount', name: 'Comped', price: 900, quantity: 1, sort_order: 1 },
+  ]);
+  assert.strictEqual(r.total_price, 0, 'a negative total would be refused by Stripe and clamped by the balance formula');
+  assert.strictEqual(r.discount_total, 900, 'the over-discount must still be visible, not swallowed');
+});
+
+test('travel is charged in full regardless of a discount on the services', () => {
+  const r = rollupItems([...DISCOUNTED,
+    { kind: 'travel', name: 'Travel (12 miles)', price: 30, quantity: 1, sort_order: 3 }]);
+  assert.strictEqual(r.mileage_cost, 30);
+  assert.strictEqual(r.total_price, 828, 'travel must not be discounted or double-counted');
+});
+
+test('a quantity on a discount multiplies it, like any other line', () => {
+  const r = rollupItems([
+    { kind: 'service', name: 'Party', price: 500, quantity: 1, sort_order: 0 },
+    { kind: 'discount', name: '$25 per referral', price: 25, quantity: 3, sort_order: 1 },
+  ]);
+  assert.strictEqual(r.total_price, 425);
+});
+
+test('a discount survives normaliseItems as a real kind, not "custom"', () => {
+  const [row] = normaliseItems([{ name: 'Repeat client', price: 92, kind: 'discount' }]);
+  assert.strictEqual(row.kind, 'discount');
+  assert.strictEqual(row.price, 92, 'a discount is stored positive; the sign lives in rollupItems');
+});
+
+// The balance formula reads total_price, which is already net. If it were not,
+// a discounted booking would be billed the full amount at the event.
+test('a discounted booking has a derivable balance', () => {
+  const r = rollupItems(DISCOUNTED);
+  const row = { total_price: r.total_price, mileage_cost: 0, deposit_amount: 100, balance_due: 728 };
+  assert.strictEqual(balanceIsDerivable(row), true);
+});
+
+// The modal's arithmetic and the server's must agree to the cent, including the
+// zero floor — admin.html cannot require this module, so the two are separate
+// implementations of one rule.
+test('the quote modal and the server agree on every discount case', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const html = fs.readFileSync(path.join(__dirname, '../admin.html'), 'utf8');
+  const a = html.indexOf('function itemsSubtotals');
+  const b = html.indexOf('function renderItemsTotal');
+  assert.ok(a !== -1 && b > a, 'itemsSubtotals is gone from admin.html');
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(html.slice(a, b) + '\nout = itemsSubtotals;', ctx);
+
+  const cases = [
+    DISCOUNTED,
+    [...DISCOUNTED, { kind: 'travel', name: 'Travel', price: 30, quantity: 1, sort_order: 3 }],
+    [{ kind: 'service', name: 'P', price: 500, quantity: 1, sort_order: 0 },
+     { kind: 'discount', name: 'Comped', price: 900, quantity: 1, sort_order: 1 }],
+    [{ kind: 'service', name: 'P', price: 500, quantity: 1, sort_order: 0 },
+     { kind: 'discount', name: 'Per referral', price: 25, quantity: 3, sort_order: 1 }],
+  ];
+  for (const items of cases) {
+    const server = rollupItems(items);
+    const modal = ctx.out(items.map(i => ({ ...i, price: Number(i.price), quantity: Number(i.quantity) })));
+    assert.strictEqual(modal.total, server.total_price,
+      `modal says ${modal.total}, server says ${server.total_price}`);
+    assert.strictEqual(modal.travel, server.mileage_cost);
+    assert.strictEqual(modal.discount, server.discount_total);
+  }
+});
+
+// The dropdown in the modal must offer exactly the kinds the server accepts:
+// an option the server rejects silently becomes 'custom' and stops discounting.
+test('the modal kind dropdown matches ITEM_KINDS', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '../admin.html'), 'utf8');
+  const m = html.match(/const kinds = \[([^\]]+)\]/);
+  assert.ok(m, 'the kind list is gone from itemRowHtml');
+  const kinds = m[1].split(',').map(s => s.trim().replace(/^'|'$/g, ''));
+  assert.deepStrictEqual(kinds, ITEM_KINDS, 'admin.html and _items.js offer different item kinds');
 });

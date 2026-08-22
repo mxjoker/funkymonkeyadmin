@@ -197,10 +197,13 @@ test('staff emails point at the staff portal, not the admin dashboard', () => {
   assert.ok(tpl('post_gig_survey_alert').body_html.includes('{{admin_link}}'),
     'the survey notice to Joe should link to the dashboard');
 
-  // The staff SMS bodies are still built here — they carry the reply codes the
-  // inbound webhook parses, so they are not template copy.
-  assert.ok((SRC.match(/\$\{PORTAL\}/g) || []).length >= 1,
-    'the "you\'re booked" text must still link to the portal');
+  // The staff texts are template copy too since the reply codes went (both
+  // templates are channel 'both'), so the portal link they carry is a token.
+  for (const key of ['staff_gig_available', 'staff_assigned']) {
+    assert.ok(tpl(key).body_sms.includes('{{portal_link}}'), `the ${key} text must link to the portal`);
+    assert.strictEqual(tpl(key).channel, 'both', `${key} must send on both channels`);
+  }
+  assert.ok(SRC.includes('portal_link: PORTAL'), 'PORTAL must still be what fills that token');
 });
 
 // ── Client and server must agree on what "exclusive" means ──────────────────

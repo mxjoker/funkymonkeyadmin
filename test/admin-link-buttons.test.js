@@ -12,7 +12,11 @@ function loadHelpers() {
   assert.ok(a !== -1 && b !== -1, 'pure-helper sentinels missing from admin.html');
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(HTML.slice(a, b) + '\nout = { depositLinkAmount, depositWaivable, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS, reportButtonVisible, payLabel };', ctx);
+  // STATUSES lives above the sentinel block but statusAfterFinalisationSent
+  // reads it for the ladder order, so it comes into the context too.
+  const sa = HTML.indexOf('const STATUSES = [');
+  const sb = HTML.indexOf('];', sa) + 2;
+  vm.runInContext(HTML.slice(sa, sb) + '\n' + HTML.slice(a, b) + '\nout = { depositLinkAmount, depositWaivable, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS, reportButtonVisible, payLabel, statusAfterFinalisationSent, STATUSES };', ctx);
   return ctx.out;
 }
 
@@ -303,4 +307,42 @@ test('waiving unlocks the balance link on a booking that had a deposit due', () 
   assert.strictEqual(balanceLinkEligible(before), false);
   // What waiveDeposit() leaves behind: no deposit, balance grown by it.
   assert.strictEqual(balanceLinkEligible({ ...before, deposit_amount: 0, balance_due: 845 }), true);
+});
+
+// ── Sending a finalisation link quotes the booking ──────────────────────────
+// Joe: "when I send a finalization link it should automatically change the
+// booking to quoted status." The whole risk in that is the other direction —
+// a confirmed booking dropping back to quoted would fall off the worklists the
+// crew is staffed from.
+const { statusAfterFinalisationSent, STATUSES } = loadHelpers();
+
+test('a booking earlier than quoted is promoted', () => {
+  assert.strictEqual(statusAfterFinalisationSent('review'), 'quoted');
+  assert.strictEqual(statusAfterFinalisationSent('draft'), 'quoted');
+  // A booking with no status at all reads as 'review', the intake rung.
+  assert.strictEqual(statusAfterFinalisationSent(''), 'quoted');
+  assert.strictEqual(statusAfterFinalisationSent(undefined), 'quoted');
+});
+
+test('a booking at or past quoted is never moved backwards', () => {
+  for (const s of ['quoted', 'accepted', 'confirmed', 'completed', 'cancelled']) {
+    assert.strictEqual(statusAfterFinalisationSent(s), null, `${s} was demoted to quoted`);
+  }
+});
+
+test('an unknown status is left alone rather than guessed at', () => {
+  assert.strictEqual(statusAfterFinalisationSent('pending'), null);
+  assert.strictEqual(statusAfterFinalisationSent('nonsense'), null);
+});
+
+// The rule is "earlier in STATUSES than quoted", so a status added to the
+// ladder is classified by where it sits, not by a hardcoded list.
+test('the promotion follows the STATUSES ladder, not a copy of it', () => {
+  const ladder = STATUSES.map(s => s.id);
+  const quoted = ladder.indexOf('quoted');
+  assert.ok(quoted > 0, 'quoted must exist in the ladder');
+  ladder.forEach((id, i) => {
+    assert.strictEqual(statusAfterFinalisationSent(id), i < quoted ? 'quoted' : null,
+      `${id} at rung ${i} was classified wrongly`);
+  });
 });

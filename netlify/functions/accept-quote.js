@@ -84,7 +84,10 @@ exports.handler = async (event) => {
 
       const items = await getItems(c, booking.id);
       const lines = items.length
-        ? items.map(i => `<li>${esc(i.name)}${i.quantity > 1 ? ` ×${i.quantity}` : ''} — $${(Number(i.price) * Math.max(1, i.quantity)).toFixed(2)}</li>`).join('')
+        // A discount is stored positive and subtracted by rollupItems, so it
+        // prints with its sign here or the list will not add up to the total
+        // underneath it.
+        ? items.map(i => `<li>${esc(i.name)}${i.quantity > 1 ? ` ×${i.quantity}` : ''} — ${i.kind === 'discount' ? '-' : ''}$${(Number(i.price) * Math.max(1, i.quantity)).toFixed(2)}</li>`).join('')
         : `<li>${esc(updated.service_name || 'Service')} — $${Number(updated.service_price || 0).toFixed(2)}</li>`;
 
       // Owner notification. Wording lives in the 'quote_accepted_alert' rule;

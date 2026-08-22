@@ -25,19 +25,6 @@ const wantsSms = (s) => ['sms', 'both'].includes(s && s.comms_preference);
 // gigs is exactly that shape.
 const wantsEmail = (s) => (s && s.comms_preference) !== 'sms';
 
-// Fire-and-forget, same contract as notify() above: a Twilio outage must never
-// fail the assignment it accompanies. sendSms does not throw, but ensureSmsTables
-// can, so the whole thing is guarded.
-async function notifySms(client, staff, body, meta = {}) {
-  if (!wantsSms(staff) || !staff.phone) return;
-  try {
-    await ensureSmsTables(client);
-    await sendSms(client, staff.phone, body, { ...meta, staff_id: staff.id });
-  } catch (e) {
-    console.error('staff notifySms failed:', staff.staff_id, '|', e.message);
-  }
-}
-
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 const PORTAL = `${SITE}/staff-portal.html`;
 
@@ -955,37 +942,35 @@ exports.handler = async (event) => {
                 </div>`;
             }
 
-            // Wording in the 'staff_assigned' rule. The opt-out check stays
-            // here — notify() owns it for every other send in this file, and a
-            // staff member who unchecked Email must not start getting mail
-            // because their email moved into a template.
-            if (wantsEmail(s)) {
-              try {
-                const r = await sendTemplate(client, b, 'staff_assigned', null, {
-                  to: s.email,
-                  extra: {
-                    staff_name: esc(s.preferred_name || s.name || ''),
-                    staff_role: esc(tag_filled || ''),
-                    schedule_block: scheduleHtml,
-                    portal_link: PORTAL,
-                  }
-                });
-                if (!r.sent) console.error('staff assigned email not sent —', r.error);
-              } catch (e) {
-                // Fire-and-forget, same contract as notify(): a mail failure
-                // must never fail the assignment it accompanies.
-                console.error('staff assigned email failed:', s.email, '|', e.message);
-              }
-            }
-
-            // Shift start, not just the event time: the whole point of the text
-            // is the number the crew member has to set an alarm for.
+            // Wording in the 'staff_assigned' rule, on both channels. The
+            // opt-outs are checked here, not inside sendTemplate: a staff
+            // member who chose SMS only must not start getting mail because
+            // their email moved into a template.
+            //
+            // Shift start, not the event time: the whole point of the text is
+            // the number the crew member has to set an alarm for.
             const smsTime = fa.schedule_start
               ? toStr(toMins(fa.schedule_start))
               : (b.event_time || 'TBD');
-            await notifySms(client, s,
-              `You're booked: ${b.service_name}, ${dateStr}. Load up ${smsTime}, ${b.event_zip || 'OKC'}. Details in the portal: ${PORTAL}`,
-              { booking_id: b.id, trigger_label: "You're booked" });
+            try {
+              const r = await sendTemplate(client, b, 'staff_assigned', null, {
+                to: wantsEmail(s) ? s.email : null,
+                toPhone: wantsSms(s) ? s.phone : null,
+                staff_id: s.id,
+                extra: {
+                  staff_name: esc(s.preferred_name || s.name || ''),
+                  staff_role: esc(tag_filled || ''),
+                  schedule_block: scheduleHtml,
+                  portal_link: PORTAL,
+                  load_time: smsTime,
+                }
+              });
+              if (!r.sent && !r.skipped) console.error('staff assigned notice not sent —', r.error);
+            } catch (e) {
+              // Fire-and-forget: a mail or Twilio failure must never fail the
+              // assignment it accompanies.
+              console.error('staff assigned notice failed:', s.staff_id, '|', e.message);
+            }
           }
 
           return json(200, assignment);
@@ -1204,28 +1189,10 @@ function payOverrideLog(before, after, staffName) {
   return { action: 'Pay override changed', detail };
 }
 
-const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
-
-// One letter per role this staff member matched on this booking. The value is
-// {booking_id, tag_filled} rather than a bare booking id because the interest
-// insert is keyed on (booking_id, staff_id, tag_filled) — someone who matches
-// two roles on one gig is two distinct rows, not one.
-function buildOfferMap(matchedTags, bookingId) {
-  if (matchedTags.length > LETTERS.length) {
-    console.error(`buildOfferMap: ${matchedTags.length} roles exceeds the ${LETTERS.length}-letter alphabet — booking ${bookingId}, extras dropped`);
-  }
-  const map = {};
-  matchedTags.forEach((tag, i) => { map[LETTERS[i]] = { booking_id: bookingId, tag_filled: tag }; });
-  return map;
-}
-
-// Written for the medium: two segments is the budget. GSM-7 normalization in
-// sendSms converts smart punctuation, but this template avoids them anyway.
-function offerText(booking, dateStr, offerMap) {
-  const lines = Object.entries(offerMap).map(([ltr, v]) => `${ltr}) ${v.tag_filled}`).join('\n');
-  const when = `${dateStr}${booking.event_time ? ' ' + booking.event_time : ''}`;
-  return `Gig available: ${booking.service_name}\n${when} - ${booking.event_zip || 'OKC'}\n${lines}\nReply with any combination (a, ab) if you're interested. Reply STOP to opt out.`;
-}
+// Reply codes are gone (Joe, 2026-08-20). A gig offer names the gig and points
+// at the portal, which is where interest is registered — and was always the
+// only place that showed the whole gig. The letter map that used to be built
+// here, and the parser in sms-webhook.js that read the replies, are both gone.
 
 // ── The one gig-available notifier ───────────────────────────────────────────
 // Both the manual "Notify Staff" button and the automatic on-booking hook run
@@ -1265,25 +1232,24 @@ async function notifyStaffForBooking(client, booking) {
   const timeStr = booking.event_time || '';
 
   for (const { staff, matched } of eligible) {
-    if (wantsEmail(staff)) {
-      try {
-        const r = await sendTemplate(client, booking, 'staff_gig_available', null, {
-          to: staff.email,
-          extra: {
-            staff_name: esc(staff.preferred_name || staff.name || ''),
-            matching_skills: esc(matched.join(', ')),
-            portal_link: PORTAL,
-          }
-        });
-        if (!r.sent) console.error('gig-available email not sent —', r.error);
-      } catch (e) {
-        console.error('gig-available email failed:', staff.email, '|', e.message);
-      }
+    // One call, both channels. wantsEmail / wantsSms are the staff member's
+    // own preference and are checked here rather than inside sendTemplate: a
+    // missing phone is an error worth logging, an opt-out is not.
+    try {
+      const r = await sendTemplate(client, booking, 'staff_gig_available', null, {
+        to: wantsEmail(staff) ? staff.email : null,
+        toPhone: wantsSms(staff) ? staff.phone : null,
+        staff_id: staff.id,
+        extra: {
+          staff_name: esc(staff.preferred_name || staff.name || ''),
+          matching_skills: esc(matched.join(', ')),
+          portal_link: PORTAL,
+        }
+      });
+      if (!r.sent && !r.skipped) console.error('gig-available not sent —', r.error);
+    } catch (e) {
+      console.error('gig-available notify failed:', staff.staff_id, '|', e.message);
     }
-    const offerMap = buildOfferMap(matched, booking.id);
-    await notifySms(client, staff, offerText(booking, dateStr, offerMap), {
-      booking_id: booking.id, trigger_label: 'Gig available', offer_map: offerMap
-    });
   }
 
   console.log(`notifyStaffForBooking: notified ${eligible.length} staff for booking ${booking.id} (tags: ${tags.join(', ')})`);
@@ -1295,18 +1261,18 @@ async function notifyStaffForBooking(client, booking) {
 //
 // Staff express interest, Joe assigns — so there is no race and no atomic claim
 // here on purpose. Interest is not exclusive: two people wanting a one-slot role
-// is normal and harmless. The ON CONFLICT is what makes a Twilio webhook retry
-// idempotent: a replayed "ab" updates two rows rather than creating four.
+// is normal and harmless. The ON CONFLICT is what makes a double-tap in the
+// portal idempotent: the second one updates the row rather than creating one.
 async function expressInterest(client, { booking_id, staff_id, tag_filled, status }) {
   const { rows } = await client.query(
     // 'assigned' is a stronger state than interest and must never be downgraded
-    // by this upsert. A staff member can text a stale offer letter (one that
-    // sat on their phone since before Joe assigned them) long after the 'assign'
-    // action already wrote status='assigned' for the same
-    // (booking_id, staff_id, tag_filled) row — that late reply must not flip
-    // them back to 'interested' and drop them off the day-of reminder / onto
-    // the unstaffed-alert list. Only demotion path is the admin 'unassign'
-    // action, which updates the row directly and does not go through here.
+    // by this upsert. A staff member can open a gig in the portal and tap
+    // "interested" long after the 'assign' action already wrote
+    // status='assigned' for the same (booking_id, staff_id, tag_filled) row —
+    // that must not flip them back to 'interested' and drop them off the day-of
+    // reminder / onto the unstaffed-alert list. The only demotion path is the
+    // admin 'unassign' action, which updates the row directly and does not go
+    // through here.
     `INSERT INTO staff_assignments (booking_id, staff_id, tag_filled, status)
      VALUES ($1,$2,$3,$4)
      ON CONFLICT (booking_id, staff_id, tag_filled) DO UPDATE
@@ -1343,8 +1309,6 @@ exports.slotTags = slotTags;
 exports.eligibleStaff = eligibleStaff;
 exports.wantsSms = wantsSms;
 exports.wantsEmail = wantsEmail;
-exports.buildOfferMap = buildOfferMap;
-exports.offerText = offerText;
 exports.expressInterest = expressInterest;
 exports.buildChecklistTimestampClause = buildChecklistTimestampClause;
 exports.CHECKLIST_STATUSES = CHECKLIST_STATUSES;

@@ -257,9 +257,16 @@ async function sendDueScheduledEmails(client, now = new Date()) {
 // only seeds and sends; the wording is data.
 const { TEMPLATES: MANUAL_TEMPLATES } = require('./_templates');
 
-// INSERT ... DO NOTHING, never DO UPDATE: re-running this on every cold start
-// must not overwrite wording Joe has since edited. A missing row is restored;
-// an edited one is left alone.
+// Re-running this on every cold start must not overwrite wording Joe has since
+// edited, so name/subject/body/channel are INSERT-only: a missing row is
+// restored, an edited one is left alone.
+//
+// The three STRUCTURAL columns are updated, because they are owned by the code
+// rather than by the editor. The first three templates were seeded with
+// sort_order 900 before the Automations tab grouped anything, which files them
+// under "Other messages" instead of beside the rest of the money copy — and
+// trigger_event/recipient decide what the tab says fires a message and where
+// sendTemplate delivers it. None of the three is wording.
 async function seedManualTemplates(client) {
   for (const t of MANUAL_TEMPLATES) {
     try {
@@ -267,7 +274,10 @@ async function seedManualTemplates(client) {
         `INSERT INTO automation_rules
            (name, active, trigger_event, recipient, subject, body_html, body_sms, channel, sort_order, template_key)
          VALUES ($1, TRUE, $6, $7, $2, $3, $4, $8, $9, $5)
-         ON CONFLICT (template_key) DO NOTHING`,
+         ON CONFLICT (template_key) DO UPDATE SET
+           trigger_event = EXCLUDED.trigger_event,
+           recipient     = EXCLUDED.recipient,
+           sort_order    = EXCLUDED.sort_order`,
         [t.name, t.subject, t.body_html, t.body_sms, t.template_key,
          // 'manual' = a button on a booking sends it. 'system' = a code path
          // does, on payment, on refund, on a client finalising. Neither value
@@ -316,7 +326,14 @@ async function sendTemplate(client, booking, templateKey, link, opts = {}) {
   const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
   const toClient = !opts.to && rule.recipient !== 'admin';
   const to = opts.to || (rule.recipient === 'admin' ? NOTIFY : booking.client_email);
-  if (!to) {
+
+  // Passing `to: null` (or `toPhone: null`) is a caller saying "this recipient
+  // has opted out of this channel" — a staff member who set their preference to
+  // SMS only. That is not the same as having no address, which is a fault, so
+  // the two are distinguished: one is silent, the other is reported.
+  const emailOptOut = 'to' in opts && !opts.to;
+  const smsOptOut   = 'toPhone' in opts && !opts.toPhone;
+  if (!to && !emailOptOut) {
     return { sent: false, error: 'This booking has no client email address, so nothing was sent' };
   }
 
@@ -324,14 +341,18 @@ async function sendTemplate(client, booking, templateKey, link, opts = {}) {
   const html = wrap(render(rule.body_html, booking, link, opts.extra));
   let res;
   try {
-    res = await sendEmail(to, subject, html);
-    // email_log.booking_id is NOT NULL. A Stripe payment_intent that failed
-    // often matches no booking at all, and losing the send to a constraint
-    // error would be a silent non-delivery of the loudest kind.
-    if (booking.id) {
-      await logEmail(client, booking.id, rule.id, rule.name, subject, to, rule.recipient || 'client', logStatus(res));
+    if (emailOptOut) {
+      console.log('sendTemplate: email skipped —', templateKey, '— recipient does not want email');
     } else {
-      console.log('sendTemplate: sent', templateKey, 'to', to, '— no booking to log it against');
+      res = await sendEmail(to, subject, html);
+      // email_log.booking_id is NOT NULL. A Stripe payment_intent that failed
+      // often matches no booking at all, and losing the send to a constraint
+      // error would be a silent non-delivery of the loudest kind.
+      if (booking.id) {
+        await logEmail(client, booking.id, rule.id, rule.name, subject, to, rule.recipient || 'client', logStatus(res));
+      } else {
+        console.log('sendTemplate: sent', templateKey, 'to', to, '— no booking to log it against');
+      }
     }
   } catch (e) {
     console.error('sendTemplate email failed:', to, '|', e.message);
@@ -342,22 +363,39 @@ async function sendTemplate(client, booking, templateKey, link, opts = {}) {
   // The rule editor shows an SMS box for every rule including these. Ignoring
   // what Joe types into it would be a silent failure; honour it on the same
   // consent terms as any other client text.
+  let smsSent = false;
   if ((rule.channel === 'sms' || rule.channel === 'both') && (rule.body_sms || '').trim()) {
-    const toPhone = opts.toPhone || booking.client_phone;
+    const toPhone = opts.toPhone || (smsOptOut ? null : booking.client_phone);
     // Consent is a question about the CLIENT. Joe's own alert number and a
     // staff member's work number are not texted on the strength of a box a
     // customer ticked, and must not be silenced by one they didn't.
-    if (toClient && booking.sms_consent !== true) {
+    if (smsOptOut) {
+      console.log('sendTemplate: SMS skipped —', templateKey, 'recipient does not want texts');
+    } else if (toClient && booking.sms_consent !== true) {
       console.log('sendTemplate SMS skipped — no client SMS consent | booking:', booking.id);
     } else if (!toPhone) {
       console.error('sendTemplate SMS skipped — no phone | booking:', booking.id);
     } else {
-      await sendSms(client, toPhone, renderSms(rule.body_sms, booking, link, opts.extra),
+      const sms = await sendSms(client, toPhone, renderSms(rule.body_sms, booking, link, opts.extra),
         { booking_id: booking.id, rule_id: rule.id, trigger_label: rule.name, staff_id: opts.staff_id });
+      // 'held' is a quiet-hours deferral, not a failure: flushHeldSms sends it
+      // at 9am. Anything else is one of sendSms's five non-send outcomes.
+      smsSent = sms.status === 'queued' || sms.status === 'held';
     }
   }
 
-  return { sent: true, suppressed: !!(res && res.suppressed), label: rule.name };
+  // A crew member who takes texts and not email is a successful send, not a
+  // failure — `sent` is true if ANY channel went. `skipped` says nothing went
+  // out and nothing was wrong: every channel this recipient allows was off.
+  // Without that distinction the log fills with errors every time someone
+  // prefers texts to email.
+  const emailSent = !emailOptOut;
+  return {
+    sent: emailSent || smsSent,
+    skipped: !emailSent && !smsSent && (emailOptOut || smsOptOut),
+    suppressed: !!(res && res.suppressed),
+    label: rule.name,
+  };
 }
 
 // ── Send one rule, on whichever channels it asks for ─────────────────────────

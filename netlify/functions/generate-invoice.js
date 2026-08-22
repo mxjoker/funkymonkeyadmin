@@ -11,6 +11,48 @@ const pdfHeaders = {
   'Access-Control-Allow-Methods': CORS['Access-Control-Allow-Methods'],
 };
 
+// The invoice's line items, as data. Pure so the arithmetic can be tested
+// without a database or a PDF: this is the document a client checks a bill
+// against, and every one of its numbers is a promise.
+//
+// booking_items is authoritative when the booking has any; bookings created
+// before Phase 3 and never re-saved fall back to the legacy columns, which the
+// backfill has already mirrored anyway.
+function buildInvoiceLines(booking) {
+  if (booking.items && booking.items.length) {
+    return booking.items.map(i => ({
+      label: i.name,
+      qty: i.quantity,
+      // A discount is stored as a positive amount and subtracted by rollupItems
+      // (_items.js). It prints negative, because a line reading
+      // "Repeat client  $92.00" beside a total that went DOWN by 92 is the kind
+      // of arithmetic a client rings up about.
+      amount: (i.kind === 'discount' ? -1 : 1)
+              * Number(i.price || 0) * Math.max(1, Number(i.quantity) || 1),
+      primary: i.kind === 'service',
+      discount: i.kind === 'discount',
+    }));
+  }
+  return [
+    { label: booking.service_name || 'Service', qty: 1, amount: Number(booking.service_price || 0), primary: true },
+    ...(Array.isArray(booking.addons) ? booking.addons : []).map(a => ({
+      label: a.name, qty: 1, amount: Number(a.price || 0), primary: false,
+    })),
+    ...(Number(booking.mileage_cost) > 0
+      ? [{ label: `Travel (${booking.mileage_miles || 0} miles)`, qty: 1, amount: Number(booking.mileage_cost), primary: false }]
+      : []),
+  ];
+}
+
+// What the discount lines add up to. The invoice prints a Subtotal above the
+// Total only when this is non-zero — without it the discount line and the
+// Total do not visibly reconcile on the page.
+function invoiceDiscountTotal(booking) {
+  return (booking.items || [])
+    .filter(i => i.kind === 'discount')
+    .reduce((s, i) => s + Number(i.price || 0) * Math.max(1, Number(i.quantity) || 1), 0);
+}
+
 exports.handler = async (event, context) => {
   const pre = preflight(event);
   if (pre) return pre;
@@ -158,34 +200,20 @@ exports.handler = async (event, context) => {
       page.drawLine({ start: { x: 50, y }, end: { x: 562, y }, thickness: 1, color: lightGray });
       y -= 15;
 
-      // Line items. booking_items is authoritative when the booking has any;
-      // bookings created before Phase 3 and never re-saved fall back to the
-      // legacy columns, which the backfill has already mirrored anyway.
-      const invoiceLines = (booking.items && booking.items.length)
-        ? booking.items.map(i => ({
-            label: i.name,
-            qty: i.quantity,
-            amount: Number(i.price || 0) * Math.max(1, Number(i.quantity) || 1),
-            primary: i.kind === 'service',
-          }))
-        : [
-            { label: booking.service_name || 'Service', qty: 1, amount: Number(booking.service_price || 0), primary: true },
-            ...(Array.isArray(booking.addons) ? booking.addons : []).map(a => ({
-              label: a.name, qty: 1, amount: Number(a.price || 0), primary: false,
-            })),
-            ...(Number(booking.mileage_cost) > 0
-              ? [{ label: `Travel (${booking.mileage_miles || 0} miles)`, qty: 1, amount: Number(booking.mileage_cost), primary: false }]
-              : []),
-          ];
+      const invoiceLines = buildInvoiceLines(booking);
 
       for (const line of invoiceLines) {
         const size = line.primary ? 10 : 9;
         const useFont = line.primary ? fontBold : font;
-        const colour = line.primary ? darkBlue : gray;
-        page.drawText(`${line.primary ? '' : '  + '}${String(line.label).substring(0, 46)}`,
+        const colour = line.discount ? green : line.primary ? darkBlue : gray;
+        const prefix = line.primary ? '' : line.discount ? '  \u2212 ' : '  + ';
+        page.drawText(`${prefix}${String(line.label).substring(0, 46)}`,
           { x: 60, y, size, font: useFont, color: colour });
         page.drawText(String(line.qty), { x: 400, y, size, font, color: line.primary ? darkGray : gray });
-        page.drawText(`$${line.amount.toFixed(2)}`, { x: 480, y, size, font, color: line.primary ? darkGray : gray });
+        // The minus goes before the $, not inside it: "-$92.00" reads as money
+        // off, "$-92.00" reads as a bug.
+        page.drawText(`${line.amount < 0 ? '-' : ''}$${Math.abs(line.amount).toFixed(2)}`,
+          { x: 480, y, size, font, color: line.discount ? green : line.primary ? darkGray : gray });
         y -= line.primary ? 20 : 18;
       }
 
@@ -200,6 +228,17 @@ exports.handler = async (event, context) => {
       const depositAmount = Number(booking.deposit_amount || 0);
       const depositPaid = booking.deposit_paid;
       const balanceDue = Number(booking.balance_due || 0);
+
+      // Subtotal, only when something was taken off.
+      const discountTotal = invoiceDiscountTotal(booking);
+      if (discountTotal > 0) {
+        page.drawText('Subtotal:', { x: 400, y, size: 10, font, color: gray });
+        page.drawText(`$${(totalPrice + discountTotal).toFixed(2)}`, { x: 480, y, size: 10, font, color: gray });
+        y -= 16;
+        page.drawText('Discount:', { x: 400, y, size: 10, font, color: green });
+        page.drawText(`-$${discountTotal.toFixed(2)}`, { x: 480, y, size: 10, font, color: green });
+        y -= 18;
+      }
 
       // Total
       page.drawText('Total:', { x: 400, y, size: 10, font, color: darkGray });
@@ -323,3 +362,6 @@ function wrapText(text, maxChars) {
   if (currentLine) lines.push(currentLine);
   return lines;
 }
+
+module.exports.buildInvoiceLines = buildInvoiceLines;
+module.exports.invoiceDiscountTotal = invoiceDiscountTotal;

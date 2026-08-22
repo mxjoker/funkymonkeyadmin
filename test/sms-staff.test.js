@@ -35,30 +35,47 @@ test('email goes out unless SMS-only was explicitly chosen', () => {
   assert.strictEqual(wantsEmail(null), true);
 });
 
-const { buildOfferMap, offerText } = require('../netlify/functions/staff-assignments.js');
 const { smsSegments } = require('../netlify/functions/_sms.js');
+const { renderSms } = require('../netlify/functions/_sms.js');
+const { TEMPLATES } = require('../netlify/functions/_templates.js');
+const tpl = (k) => TEMPLATES.find((t) => t.template_key === k);
 
-// The letter→role map is stored on the outbound sms_log row so a reply resolves
-// against what was actually offered, not against the open-gig list at reply
-// time. Slots change; "b" must not mean something different two hours later.
-test('an offer map keys each letter to a booking and a role', () => {
-  const map = buildOfferMap(['Foam Operator', 'Setup'], 42);
-  assert.deepStrictEqual(map, {
-    a: { booking_id: 42, tag_filled: 'Foam Operator' },
-    b: { booking_id: 42, tag_filled: 'Setup' }
-  });
-});
+// The gig offer used to list lettered roles for the crew to reply with, and
+// sms-webhook.js parsed those replies. Removed 2026-08-20 — the text names the
+// gig and sends them to the portal, which is where interest is registered.
+const GIG = {
+  service_name: 'Foam Party', event_zip: '73013', event_time: '6:00 PM',
+  event_date: new Date(2026, 7, 23),
+};
+const OFFER_EXTRA = { portal_link: 'https://funkymonkeyadmin.netlify.app/staff-portal.html' };
 
-test('a single matching role still gets a letter', () => {
-  assert.deepStrictEqual(buildOfferMap(['Driver'], 7), { a: { booking_id: 7, tag_filled: 'Driver' } });
-});
-
-test('the offer text lists every letter and the STOP notice', () => {
-  const map = buildOfferMap(['Foam Operator', 'Setup'], 42);
-  const txt = offerText({ service_name: 'Foam Party', event_zip: '73013', event_time: '6:00 PM' }, 'Sun, 8/23/2026', map);
-  assert.match(txt, /a\) Foam Operator/);
-  assert.match(txt, /b\) Setup/);
+test('the gig offer text names the gig, the portal and the opt-out', () => {
+  const txt = renderSms(tpl('staff_gig_available').body_sms, GIG, null, OFFER_EXTRA);
+  assert.match(txt, /Foam Party/);
+  assert.match(txt, /staff-portal\.html/);
   assert.match(txt, /Reply STOP to opt out/);
-  const segs = smsSegments(txt);
-  assert.ok(segs <= 2, `offer must fit two segments, was ${segs} (${txt.length} chars)`);
+});
+
+test('the gig offer text asks for no reply codes at all', () => {
+  const txt = renderSms(tpl('staff_gig_available').body_sms, GIG, null, OFFER_EXTRA);
+  assert.ok(!/\ba\)/.test(txt) && !/reply with/i.test(txt),
+    `the offer still asks for a coded reply: ${txt}`);
+});
+
+test('both staff texts fit two segments', () => {
+  for (const key of ['staff_gig_available', 'staff_assigned']) {
+    const txt = renderSms(tpl(key).body_sms, GIG, null,
+      { ...OFFER_EXTRA, load_time: '4:30 PM' });
+    const segs = smsSegments(txt);
+    assert.ok(segs <= 2, `${key} must fit two segments, was ${segs} (${txt.length} chars)`);
+  }
+});
+
+// A text quoting a load time with no way to see the rest of the gig is the
+// failure the portal link prevents.
+test('the assignment text carries the load time and the portal', () => {
+  const txt = renderSms(tpl('staff_assigned').body_sms, GIG, null,
+    { ...OFFER_EXTRA, load_time: '4:30 PM' });
+  assert.match(txt, /Load up 4:30 PM/);
+  assert.match(txt, /staff-portal\.html/);
 });

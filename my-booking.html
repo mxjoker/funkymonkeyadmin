@@ -436,13 +436,56 @@
     ];
     const ALL_EDITABLE_KEYS = [...CLIENT_EDITABLE_FIELDS.map(f => f[0]), 'notes'];
 
+    // Mirrors addressLooksComplete() in netlify/functions/_address.js — this is
+    // a static page with no shared import, the same reason the editable-field
+    // list is duplicated above. A test pins the two together.
+    //
+    // Weak on purpose: some digits and more than one word. It is here to catch
+    // a town typed into an address box ("Edmond", on a real booking), not to
+    // validate postal correctness — anything stricter starts rejecting rural
+    // addresses, and this page is the last step before we get paid.
+    function addressLooksComplete(location) {
+      const raw = String(location || '').trim();
+      if (!raw) return { ok: false, reason: 'missing', message: 'We need the event address.' };
+      if (!/\d/.test(raw)) {
+        return { ok: false, reason: 'no_number',
+                 message: 'That looks like a town or a venue name — we need a street address with a number.' };
+      }
+      if (raw.split(/\s+/).filter(Boolean).length < 2) {
+        return { ok: false, reason: 'too_short',
+                 message: 'That address looks incomplete — we need the street name too.' };
+      }
+      return { ok: true, reason: null, message: '' };
+    }
+
+    function addressField() { return document.getElementById('f-event_location'); }
+
+    // Shown under the field as they type, never as an alert: the address is the
+    // one thing on this page the crew cannot work without, and a client who is
+    // told about it once in a popup has already forgotten.
+    function checkAddress() {
+      const el = addressField();
+      const note = document.getElementById('address-note');
+      if (!el || !note) return { ok: true };
+      const verdict = addressLooksComplete(el.value);
+      note.textContent = verdict.ok ? '' : verdict.message;
+      note.style.display = verdict.ok ? 'none' : 'block';
+      el.style.borderColor = verdict.ok ? '' : '#f59e0b';
+      return verdict;
+    }
+
     function editableFieldHtml(key, label, value, type) {
       const v = value === undefined || value === null ? '' : String(value);
       const missing = v.trim() === '';
+      // The address carries its own example and its own live check. Everything
+      // else on this form is a detail; this one decides whether a van arrives.
+      const isAddress = key === 'event_location';
+      const placeholder = isAddress ? '123 Main St, Edmond' : (missing ? 'Please fill this in' : '');
       return `
         <div class="form-group${missing ? ' missing' : ''}">
-          <label for="f-${key}">${esc(label)}</label>
-          <input type="${type}" id="f-${key}" value="${esc(v)}" placeholder="${missing ? 'Please fill this in' : ''}">
+          <label for="f-${key}">${esc(label)}${isAddress ? ' <span style="color:#FFD600">· required</span>' : ''}</label>
+          <input type="${type}" id="f-${key}" value="${esc(v)}" placeholder="${esc(placeholder)}"${isAddress ? ' oninput="checkAddress()"' : ''}>
+          ${isAddress ? '<div id="address-note" style="display:none;margin-top:6px;font-size:13px;color:#fbbf24"></div>' : ''}
         </div>`;
     }
 
@@ -481,8 +524,8 @@
       const itemsHtml = (Array.isArray(booking.items) && booking.items.length)
         ? booking.items.map(i => `
           <div class="detail-row">
-            <span class="detail-label">${i.kind === 'service' ? 'Service' : i.kind === 'travel' ? 'Travel' : 'Add-on'}</span>
-            <span class="detail-value">${esc(i.name)}${i.quantity > 1 ? ` ×${i.quantity}` : ''} — $${(Number(i.price) * Math.max(1, Number(i.quantity) || 1)).toFixed(2)}</span>
+            <span class="detail-label">${i.kind === 'service' ? 'Service' : i.kind === 'travel' ? 'Travel' : i.kind === 'discount' ? 'Discount' : 'Add-on'}</span>
+            <span class="detail-value"${i.kind === 'discount' ? ' style="color:#059669"' : ''}>${esc(i.name)}${i.quantity > 1 ? ` ×${i.quantity}` : ''} — ${i.kind === 'discount' ? '-' : ''}$${(Number(i.price) * Math.max(1, Number(i.quantity) || 1)).toFixed(2)}</span>
           </div>`).join('')
         : `
           <div class="detail-row">
@@ -557,18 +600,19 @@
         ` : ''}
         ${booking._justAccepted ? `
           <div style="margin-top:20px;padding-top:20px;border-top:1px solid rgba(255,255,255,.12);text-align:center">
-            <p style="color:#4ade80;font-weight:700">🎉 Accepted! We'll email your deposit link shortly.</p>
+            <p style="color:#4ade80;font-weight:700">🎉 Accepted! Pay your deposit below to lock in the date.</p>
           </div>
         ` : ''}
 
         <div class="info-box" style="margin-top:24px">
-          ${booking.stripe_payment_link ? `
+          ${Number(booking.deposit_amount) > 0 ? `
             <h3>💳 Ready for your deposit?</h3>
             <p style="margin-bottom:12px">Secure your date with a deposit payment.</p>
-            <a class="btn" href="${esc(booking.stripe_payment_link)}" style="display:block;text-align:center;text-decoration:none">Pay Deposit Now</a>
+            <button class="btn" id="pay-btn" onclick="payDeposit()" style="display:block;width:100%">Pay Deposit — $${Number(booking.deposit_amount).toFixed(2)}</button>
+            <div id="pay-msg" style="margin-top:10px;font-size:14px;text-align:center"></div>
           ` : `
             <h3>💳 Deposit</h3>
-            <p>Your details are saved. We'll email your deposit link shortly.</p>
+            <p>There's no deposit to pay on this booking — you're all set.</p>
           `}
         </div>
       `;
@@ -594,10 +638,70 @@
       return updates;
     }
 
+    // Checkout is minted when the button is pressed, never carried in the page.
+    // A Stripe Checkout Session expires 24 hours after it is created — a stored
+    // link is a dead page by the next day, which is exactly what happened to
+    // FM-KNNVZY8J on 2026-08-20: her button pointed at a session created 26
+    // hours earlier and simply refused her. Asking for the URL at press time
+    // makes that impossible rather than unlikely.
+    async function payDeposit() {
+      const btn = document.getElementById('pay-btn');
+      const msg = document.getElementById('pay-msg');
+      if (btn.disabled) return;
+
+      // The server refuses this too (finalise.js pay_link) — asked here first
+      // so the client gets the field focused rather than a rejected checkout.
+      // The address must be SAVED, not just typed: the server reads the row.
+      if (!String(currentBooking.event_location || '').trim()) {
+        const el = addressField();
+        if (el) { el.focus(); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        if (msg) msg.innerHTML = '<span style="color:#fbbf24">We need the event address first — add it above and press Save My Details.</span>';
+        return;
+      }
+      btn.disabled = true;
+      const label = btn.textContent;
+      btn.textContent = 'Opening secure checkout…';
+      if (msg) msg.textContent = '';
+      try {
+        const res = await fetch('/api/finalise', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          // Same two credentials every other call on this page uses: the
+          // reference from the loaded booking and whatever is in the email box.
+          body: JSON.stringify({
+            action: 'pay_link',
+            reference: currentBooking.reference,
+            email: document.getElementById('email').value.trim().toLowerCase(),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.url) throw new Error(data.error || 'Could not start checkout');
+        window.location.href = data.url;
+      } catch (e) {
+        // Left on the page rather than alerted: this is the last step before we
+        // get paid, and a client who hits an error must be told what to do next.
+        btn.disabled = false;
+        btn.textContent = label;
+        if (msg) msg.innerHTML = '<span style="color:#fca5a5">' + esc(e.message) +
+          '</span><br><span style="color:#A78BCA">Please call or text us on <strong>(405) 431-6625</strong> and we will take it from there.</span>';
+      }
+    }
+
     async function saveBooking() {
       if (!currentBooking) return;
       const btn = document.getElementById('save-btn');
       const updates = buildUpdates();
+
+      // Empty is refused; a bad-looking address is only flagged. Blocking a
+      // save on the SHAPE would strand anyone whose address genuinely has no
+      // house number, and they would have no way past it.
+      const verdict = checkAddress();
+      if (!verdict.ok && verdict.reason === 'missing') {
+        const el = addressField();
+        if (el) { el.focus(); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        showNotice('Please add the event address — we need it to get the crew to you.');
+        return;
+      }
 
       if (!Object.keys(updates).length) {
         showNotice('Nothing changed to save.');

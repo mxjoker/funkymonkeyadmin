@@ -360,9 +360,9 @@ async function loadPortal() {
       if (sr.shared_notes) {
         noteEl.innerHTML = `
           <div style="background:rgba(134,239,172,.1);border:1px solid rgba(134,239,172,.4);border-radius:10px;padding:12px 16px;margin-bottom:16px">
-            <div style="font-size:.68rem;text-transform:uppercase;font-weight:700;color:#86efac;margin-bottom:4px;letter-spacing:.07em">💬 Shared Notes</div>
+            <div style="font-size:.68rem;text-transform:uppercase;font-weight:700;color:#86efac;margin-bottom:4px;letter-spacing:.07em">💬 Note from Joe</div>
             <div style="font-size:.875rem;color:#f0fdf4;line-height:1.6;white-space:pre-wrap">${esc(sr.shared_notes)}</div>
-            <div style="font-size:.72rem;color:#86efac;margin-top:8px;font-style:italic">You can edit this in ⚙️ Preferences</div>
+            <div style="font-size:.72rem;color:#86efac;margin-top:8px;font-style:italic">Write back in ⚙️ Preferences → Your Note to Joe</div>
           </div>`;
         noteEl.style.display = 'block';
       } else {
@@ -767,17 +767,22 @@ async function openPreferences() {
         </div>
       </div>
     </div>
+    <!-- Each note goes ONE way (Joe, 2026-08-20). This one is Joe's half: he
+         writes it, you read it. A box both people could edit meant either of
+         them could silently delete what the other had written, and neither
+         could tell whose words they were looking at. The server enforces the
+         direction too — shared_notes is not in staff.js's staffColMap. -->
+    ${s.shared_notes ? `
     <div style="margin-bottom:16px">
-      <label style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#a78bca;font-weight:700;display:block;margin-bottom:4px">💬 Shared Notes (visible to Joe)</label>
-      <textarea id="pf-shared" rows="3" placeholder="Communication with Joe — both of you can edit this…"
-        style="width:100%;padding:9px 12px;background:#0F0A1E;border:1.5px solid rgba(134,239,172,.4);border-radius:8px;color:#fff;font-size:.85rem;resize:vertical;font-family:inherit">${esc(s.shared_notes||'')}</textarea>
-      <div style="font-size:.72rem;color:#86efac;margin-top:4px">Both you and Joe can read and edit this</div>
-    </div>
+      <label style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#a78bca;font-weight:700;display:block;margin-bottom:4px">💬 Note from Joe</label>
+      <div style="padding:9px 12px;background:rgba(134,239,172,.08);border:1.5px solid rgba(134,239,172,.4);border-radius:8px;color:#f0fdf4;font-size:.85rem;line-height:1.6;white-space:pre-wrap">${esc(s.shared_notes)}</div>
+      <div style="font-size:.72rem;color:#86efac;margin-top:4px">Joe writes this one — reply in your own note below.</div>
+    </div>` : ''}
     <div style="margin-bottom:16px">
-      <label style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#a78bca;font-weight:700;display:block;margin-bottom:4px">📝 Private Notes to Joe</label>
+      <label style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#a78bca;font-weight:700;display:block;margin-bottom:4px">📝 Your Note to Joe</label>
       <textarea id="pf-notes" rows="4" placeholder="Availability, questions, preferences (only Joe can see)…"
         style="width:100%;padding:9px 12px;background:#0F0A1E;border:1.5px solid rgba(168,85,247,.25);border-radius:8px;color:#fff;font-size:.85rem;resize:vertical;font-family:inherit">${esc(s.staff_notes||'')}</textarea>
-      <div style="font-size:.72rem;color:#a78bca;margin-top:4px">Only Joe can see this</div>
+      <div style="font-size:.72rem;color:#a78bca;margin-top:4px">Yours to write — Joe can read it but cannot change it. No other staff see it.</div>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="savePreferences()">Save</button>
@@ -805,7 +810,8 @@ async function savePreferences() {
     pronouns:         document.getElementById('pf-pronouns').value.trim(),
     phone, email,
     comms_preference: comms,
-    shared_notes:     document.getElementById('pf-shared').value.trim(),
+    // shared_notes is deliberately absent: it is Joe's note TO this person and
+    // staff.js refuses it from a staff caller.
     staff_notes:      document.getElementById('pf-notes').value.trim(),
   };
   try {

@@ -5,7 +5,12 @@
 // sync. rollupItems() is the single place that derives them from the items, so
 // there is exactly one definition of what a booking costs.
 
-const ITEM_KINDS = ['service', 'addon', 'travel', 'custom'];
+// 'discount' is entered as a POSITIVE amount and subtracted in rollupItems.
+// The alternative — a negative price — would mean relaxing clampPrice, which is
+// the one guard stopping a malformed payload from writing a negative line into
+// any of the four money columns. One kind that flips sign in one place beats a
+// sign that can appear anywhere.
+const ITEM_KINDS = ['service', 'addon', 'travel', 'custom', 'discount'];
 
 // ponytail: 50 lines is far past any real package (the largest historical
 // booking has 4). The cap exists so a malformed client payload cannot write
@@ -79,11 +84,22 @@ function rollupItems(items) {
   const list = Array.isArray(items) ? items : [];
   const byOrder = [...list].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
 
-  const services = byOrder.filter((i) => i.kind === 'service');
-  const addons   = byOrder.filter((i) => i.kind === 'addon');
-  const travel   = byOrder.filter((i) => i.kind === 'travel');
-  const billable = byOrder.filter((i) => i.kind !== 'travel');
+  const services  = byOrder.filter((i) => i.kind === 'service');
+  const addons    = byOrder.filter((i) => i.kind === 'addon');
+  const travel    = byOrder.filter((i) => i.kind === 'travel');
+  const discounts = byOrder.filter((i) => i.kind === 'discount');
+  const billable  = byOrder.filter((i) => i.kind !== 'travel' && i.kind !== 'discount');
 
+  // service_price and addon_total say what those things COST and are left
+  // gross on purpose: they feed the accounting export and the PPM sync, where
+  // "we sold $920 of foam party and gave $92 away" is the useful shape.
+  // total_price is the only figure that nets the discount off, and it is the
+  // one the balance formula and every invoice read.
+  //
+  // Floored at zero: a discount larger than the bill must not produce a
+  // negative total that Stripe would refuse and balance_due would clamp
+  // anyway. The discount line stays visible on the quote and the invoice, so
+  // an over-discount shows up as a $0.00 total rather than disappearing.
   return {
     service_id:    services.length ? String(services[0].service_id || '') : '',
     service_name:  services.map((i) => i.name).join(' + '),
@@ -91,7 +107,8 @@ function rollupItems(items) {
     addons:        addons.map((i) => ({ name: i.name, price: clampPrice(i.price) })),
     addon_total:   sum(addons),
     mileage_cost:  sum(travel),
-    total_price:   sum(billable),
+    discount_total: sum(discounts),
+    total_price:   Math.max(0, sum(billable) - sum(discounts)),
   };
 }
 

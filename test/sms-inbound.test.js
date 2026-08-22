@@ -1,7 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { classifyInbound, replyForLetters } = require('../netlify/functions/sms-webhook.js');
-const { parseLetters } = require('../netlify/functions/_sms.js');
+const { classifyInbound } = require('../netlify/functions/sms-webhook.js');
+const fs = require('node:fs');
+const path = require('node:path');
 
 // STOP/START/HELP are carrier-level obligations and must never reach gig logic.
 test('opt-out keywords are recognised in the shapes people send them', () => {
@@ -25,47 +26,44 @@ test('a keyword inside a sentence is not an opt-out', () => {
   assert.strictEqual(classifyInbound(''), 'message');
 });
 
-// Unrecognised letters get an answer, not silence.
-test('an unrecognised letter is named back to the sender', () => {
-  const out = replyForLetters(['a'], ['d'], { a: { tag_filled: 'Foam Operator' }, b: { tag_filled: 'Setup' }, c: { tag_filled: 'Driver' } });
-  assert.match(out, /Didn't recognise 'd'/);
-  assert.match(out, /a, b, c/);
+// ── The reply codes are gone (2026-08-20) ──────────────────────────────────
+// A gig offer used to list lettered roles and the webhook parsed the reply into
+// an interest row. Joe: "too confusing. Just tell them to check the portal."
+// A staff member texting "a" now reaches a human, which is the point — but only
+// if none of the parsing survives to swallow it first.
+const SRC = (f) => fs.readFileSync(path.join(__dirname, '../netlify/functions', f), 'utf8');
+
+test('nothing parses an inbound message into a gig selection any more', () => {
+  for (const f of ['sms-webhook.js', '_sms.js', 'staff-assignments.js']) {
+    const src = SRC(f);
+    for (const gone of ['parseLetters', 'buildOfferMap', 'offerText', 'replyForLetters', 'latestOffer']) {
+      assert.ok(!src.includes(gone), `${f} still references ${gone}`);
+    }
+  }
 });
 
-test('a clean selection confirms the roles by name', () => {
-  const out = replyForLetters(['a', 'b'], [], { a: { tag_filled: 'Foam Operator' }, b: { tag_filled: 'Setup' } });
-  assert.match(out, /Foam Operator/);
-  assert.match(out, /Setup/);
-  assert.doesNotMatch(out, /Didn't recognise/);
+// The offer_map column stays on sms_log — the rows already written are the
+// record of what was offered to whom — but nothing may write it again, because
+// a written offer_map is what made a reply parseable.
+test('no new sms_log row carries an offer map', () => {
+  const src = SRC('_sms.js');
+  const insert = src.slice(src.indexOf('INSERT INTO sms_log'), src.indexOf('RETURNING id'));
+  assert.ok(!insert.includes('offer_map'), 'logSms is writing an offer_map again');
 });
 
-// The combined case, driven through the real parser rather than hand-built
-// arrays: "ad" against an offer with only a/b/c picks 'a' and flags 'd'.
-test('a reply mixing a valid and an invalid letter confirms one and flags the other', () => {
-  const offerMap = { a: { tag_filled: 'Foam Operator' }, b: { tag_filled: 'Setup' }, c: { tag_filled: 'Driver' } };
-  const { picked, unknown, freeform } = parseLetters('ad', offerMap);
-  assert.strictEqual(freeform, false);
-  assert.deepStrictEqual(picked, ['a']);
-  assert.deepStrictEqual(unknown, ['d']);
-  const out = replyForLetters(picked, unknown, offerMap);
-  assert.match(out, /Foam Operator/);
-  assert.match(out, /Didn't recognise 'd'/);
+// A staff member who replies to a gig text must reach Joe rather than silence.
+test('an unrecognised message is forwarded, not answered by a parser', () => {
+  const src = SRC('sms-webhook.js');
+  assert.match(src, /NOTIFY_SMS/, 'the forward to Joe is gone');
+  assert.ok(!/expressInterest/.test(src), 'the webhook still registers interest from a text');
 });
 
-// A booking that closed between the offer going out and the reply arriving
-// (completed/cancelled/fully staffed) must not silently register interest,
-// and the sender must not be met with silence either.
-test('a letter for a gig that has since closed is named, not silently registered', () => {
-  const out = replyForLetters(['a'], [], { a: { tag_filled: 'Foam Operator' }, b: { tag_filled: 'Setup' } }, ['b']);
-  assert.match(out, /Foam Operator/);
-  assert.match(out, /Setup/);
-  assert.match(out, /already closed/);
-});
-
-// Every letter offered has since closed: nothing gets registered, but the
-// reply must still say something — an empty string is silent-nothing by SMS.
-test('a reply where every letter has closed still gets a non-empty reply', () => {
-  const out = replyForLetters([], [], { a: { tag_filled: 'Foam Operator' } }, ['a']);
-  assert.notStrictEqual(out, '');
-  assert.match(out, /already closed/);
+// HELP is a carrier obligation and must not describe a feature that no longer
+// exists — "reply with the letters" would now be a lie.
+test('the HELP reply points at the portal, not at reply codes', () => {
+  const src = SRC('sms-webhook.js');
+  const help = src.slice(src.indexOf("kind === 'help'"), src.indexOf("kind === 'help'") + 400);
+  assert.ok(!/letters/i.test(help), 'HELP still tells people to reply with letters');
+  assert.match(help, /portal/i, 'HELP should point staff at the portal');
+  assert.match(help, /STOP/, 'HELP must still name the opt-out keyword');
 });

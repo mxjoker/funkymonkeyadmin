@@ -158,8 +158,12 @@ async function getRevenueByService(client, startDate, endDate) {
              COALESCE(bi.name, b.service_name) AS service_name,
              COALESCE(bi.price * GREATEST(bi.quantity, 1), b.total_price) AS line_amount
       FROM bookings b
+      -- Discounts are excluded alongside travel: this CTE splits b.total_price
+      -- (already NET of the discount) across the lines, so counting the
+      -- discount as a line would invent a service called "Repeat client 10%"
+      -- with positive revenue and shrink every real service's share.
       LEFT JOIN booking_items bi
-        ON bi.booking_id = b.id AND bi.kind <> 'travel'
+        ON bi.booking_id = b.id AND bi.kind NOT IN ('travel', 'discount')
       WHERE b.event_date >= $1 AND b.event_date <= $2
         AND b.status IN ('confirmed', 'completed')
     ),

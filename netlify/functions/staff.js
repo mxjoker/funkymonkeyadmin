@@ -233,12 +233,22 @@ exports.handler = async (event) => {
     let u;
     try { u = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
-    // Build allowed column map based on role
+    // ── Who may write which note ────────────────────────────────────────────
+    // Three note columns, each one-way (Joe, 2026-08-20: "These should be one
+    // way each. Not available for both to edit."):
+    //
+    //   admin_notes   Joe writes, only Joe reads. Stripped from staff reads.
+    //   shared_notes  Joe writes, the staff member reads. NOT in staffColMap.
+    //   staff_notes   the staff member writes, Joe reads. NOT in adminColMap.
+    //
+    // A box both people could edit meant either could silently overwrite the
+    // other, with nothing to say whose words were on screen. The UIs render it
+    // that way; these two maps are what make it true.
     const adminColMap = {
       name: 'name', preferred_name: 'preferred_name', pronouns: 'pronouns',
       role: 'role', color: 'color', phone: 'phone', email: 'email',
       comms_preference: 'comms_preference', skills: 'skills',
-      admin_notes: 'admin_notes', staff_notes: 'staff_notes', shared_notes: 'shared_notes',
+      admin_notes: 'admin_notes', shared_notes: 'shared_notes',
       active: 'active', sort_order: 'sort_order',
       pay_type: 'pay_type', flat_rate: 'flat_rate', hourly_rate: 'hourly_rate',
       payment_method: 'payment_method', payment_handle: 'payment_handle',
@@ -247,7 +257,7 @@ exports.handler = async (event) => {
     const staffColMap = {
       preferred_name: 'preferred_name', pronouns: 'pronouns', color: 'color',
       phone: 'phone', email: 'email', comms_preference: 'comms_preference',
-      skills: 'skills', shared_notes: 'shared_notes', staff_notes: 'staff_notes',
+      skills: 'skills', staff_notes: 'staff_notes',
     };
 
     const colMap = auth.role === 'admin' ? adminColMap : staffColMap;

@@ -340,7 +340,7 @@ input,select,textarea{font-family:inherit}
           <div>
             <strong id="stale-review-count" style="color:#991b1b"></strong>
             <span style="color:#7f1d1d"> stuck in Review for 2+ days — </span>
-            <a href="#" onclick="showPage('bookings');return false" style="color:#991b1b;font-weight:600">Review now →</a>
+            <a href="#" onclick="showBookingsFiltered('review');return false" style="color:#991b1b;font-weight:600">Review now →</a>
           </div>
         </div>
       </div>
@@ -407,6 +407,9 @@ input,select,textarea{font-family:inherit}
             
             <select id="filter-status" onchange="renderBookingsTable()" style="min-width:140px">
               <option value="">All Statuses</option>
+              <!-- 158 of 717 bookings are cancelled, so "everything that is
+                   still real" is the view this list is usually wanted in. -->
+              <option value="!cancelled">All but Cancelled</option>
             </select>
             
             <select id="filter-date-range" onchange="renderBookingsTable()" style="min-width:140px">
@@ -1187,6 +1190,27 @@ function showPage(name) {
   closeNav(); // close drawer after navigation on mobile
 }
 
+// Open the bookings page already filtered to one status. A dashboard alert
+// that counts something and then lands you on an unfiltered list of 717 rows
+// has made you do the search it just did for you.
+//
+// The other filters are cleared for the same reason: arriving with a stale
+// date range or search box still set would show fewer rows than the alert
+// promised, and the obvious conclusion is that the alert was wrong.
+function showBookingsFiltered(status) {
+  showPage('bookings');
+  const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; };
+  set('filter-status', status);
+  set('filter-search', '');
+  set('filter-date-range', 'all');
+  set('filter-deposit', '');
+  for (const id of ['filter-hide-past', 'filter-hide-cancelled', 'filter-hide-completed']) {
+    const el = document.getElementById(id);
+    if (el) el.checked = false;
+  }
+  renderBookingsTable();
+}
+
 // ══════════════════════════════════════════════════
 // DASHBOARD
 // ══════════════════════════════════════════════════
@@ -1424,9 +1448,21 @@ function renderDashboard() {
 // ══════════════════════════════════════════════════
 // BOOKINGS TABLE
 // ══════════════════════════════════════════════════
+
+// The status dropdown holds three shapes of answer: '' (everything), a bare
+// status, and '!cancelled' (everything still live). Kept as one function so
+// the table and the CSV export cannot disagree about what the screen is
+// showing — exporting a different set from the one on screen is the sort of
+// thing nobody notices until the numbers are in a spreadsheet.
+function matchesStatusFilter(booking, filter) {
+  if (!filter) return true;
+  if (filter.startsWith('!')) return (booking.status || '') !== filter.slice(1);
+  return booking.status === filter;
+}
+
 function exportBookingsCSV() {
   const statusFilter = document.getElementById('filter-status')?.value || '';
-  const rows = allBookings.filter(b => !statusFilter || b.status === statusFilter);
+  const rows = allBookings.filter(b => matchesStatusFilter(b, statusFilter));
   const cols = [
     ['Reference',      b => b.reference],
     ['Status',         b => b.status],
@@ -1566,6 +1602,40 @@ function balanceLinkEligible(b) {
   return b && (b.deposit_paid === true || depositLinkAmount(b) <= 0);
 }
 
+// Mirrors addressLooksComplete() in netlify/functions/_address.js and the copy
+// on my-booking.html — three static consumers, no shared import, and a test
+// pins all three together.
+//
+// Weak on purpose: some digits and more than one word. It catches a town typed
+// into an address box ("Edmond", on a real booking, 2026-08-20); anything
+// stricter starts rejecting rural addresses that genuinely have no number.
+function addressLooksComplete(location) {
+  const raw = String(location || '').trim();
+  if (!raw) return { ok: false, reason: 'missing', message: 'We need the event address.' };
+  if (!/\d/.test(raw)) {
+    return { ok: false, reason: 'no_number',
+             message: 'That looks like a town or a venue name — we need a street address with a number.' };
+  }
+  if (raw.split(/\s+/).filter(Boolean).length < 2) {
+    return { ok: false, reason: 'too_short',
+             message: 'That address looks incomplete — we need the street name too.' };
+  }
+  return { ok: true, reason: null, message: '' };
+}
+
+// Sending someone a link to finalise their booking IS quoting them, so the
+// board should say so without Joe setting it by hand. Only ever a promotion:
+// STATUSES is in ladder order, so anything already at or past 'quoted' —
+// accepted, confirmed, completed, cancelled — is left exactly where it is.
+// Demoting a confirmed booking to quoted would drop it off the worklists the
+// crew is staffed from and re-fire whatever the quoted rung ever grows.
+function statusAfterFinalisationSent(status) {
+  const ladder = STATUSES.map(s => s.id);
+  const now = ladder.indexOf(status || 'review');
+  const quoted = ladder.indexOf('quoted');
+  return now !== -1 && now < quoted ? 'quoted' : null;
+}
+
 // A deposit can only be waived while it is still outstanding. Waiving one that
 // was already collected would zero deposit_amount on a booking where money
 // actually arrived, and the balance recompute would then bill the client for
@@ -1702,7 +1772,7 @@ function renderBookingsTable() {
 
   // Apply filters
   if (statusFilter) {
-    list = list.filter(b => b.status === statusFilter);
+    list = list.filter(b => matchesStatusFilter(b, statusFilter));
   }
   
   if (search) {
@@ -1815,6 +1885,26 @@ function wireAddressZip() {
   const zipEl  = document.querySelector('.bk-edit[data-f="event_zip"]');
   const hint   = document.getElementById('addr-zip-hint');
   if (!addrEl || !zipEl) return;
+
+  // An example, so the box says what it wants before it complains.
+  addrEl.placeholder = '123 Main St, Edmond';
+
+  // Flagged, never blocked. Joe can type whatever he has; this is here so a
+  // town in the address box is visible while the client is still on the phone,
+  // rather than on the morning of the gig. The client's own page (my-booking)
+  // enforces the empty case, and finalise.js refuses checkout without one.
+  const shapeHint = document.getElementById('addr-shape-hint');
+  const showShape = () => {
+    if (!shapeHint) return;
+    const verdict = addressLooksComplete(addrEl.value);
+    // 'missing' says nothing useful here: an admin creating a booking has not
+    // typed it yet, and nagging an empty box is noise.
+    const show = !verdict.ok && verdict.reason !== 'missing';
+    shapeHint.textContent = show ? '⚠ ' + verdict.message : '';
+    shapeHint.style.display = show ? 'inline' : 'none';
+  };
+  addrEl.addEventListener('input', showShape);
+  showShape();
 
   addrEl.addEventListener('blur', () => {
     const m = String(addrEl.value || '').trim().match(/[,\s]+(\d{5})(?:-\d{4})?\s*$/);
@@ -1948,15 +2038,30 @@ function readItemRows(bookingId) {
   }).filter(i => i.name.trim() !== '');
 }
 
-// Mirrors rollupItems() in _items.js: travel is excluded from the total.
+// Mirrors rollupItems() in _items.js: travel is excluded from the total, and a
+// discount comes off it. test/booking-items.test.js pins the two together — a
+// modal that shows one total and saves another is the worst kind of money bug,
+// because the number you approved is the one you never see again.
+function itemsSubtotals(rows) {
+  const of = (pred) => rows.filter(pred).reduce((s, i) => s + i.price * Math.max(1, i.quantity), 0);
+  const gross = of(i => i.kind !== 'travel' && i.kind !== 'discount');
+  const discount = of(i => i.kind === 'discount');
+  return { gross, discount, travel: of(i => i.kind === 'travel'), total: Math.max(0, gross - discount) };
+}
+
 function renderItemsTotal(bookingId) {
-  const rows = readItemRows(bookingId);
-  const total = rows.filter(i => i.kind !== 'travel')
-                    .reduce((s, i) => s + i.price * Math.max(1, i.quantity), 0);
-  const travel = rows.filter(i => i.kind === 'travel')
-                     .reduce((s, i) => s + i.price * Math.max(1, i.quantity), 0);
+  const { gross, discount, travel, total } = itemsSubtotals(readItemRows(bookingId));
   const el = document.getElementById('items-total-' + bookingId);
-  if (el) el.textContent = `Total $${total.toFixed(2)}` + (travel > 0 ? ` + $${travel.toFixed(2)} travel` : '');
+  if (!el) return;
+  // Spelled out when there is a discount: "Total $828" on its own gives no way
+  // to check the sum, and this is the number a client is quoted.
+  el.innerHTML = discount > 0
+    ? `<span style="font-weight:400;color:#6b7280">$${gross.toFixed(2)} </span>`
+      + `<span style="color:#059669">-$${discount.toFixed(2)}</span>`
+      + `<span style="font-weight:400;color:#6b7280"> = </span>`
+      + `Total $${total.toFixed(2)}`
+      + (travel > 0 ? `<span style="font-weight:400;color:#6b7280"> + $${travel.toFixed(2)} travel</span>` : '')
+    : `Total $${total.toFixed(2)}` + (travel > 0 ? ` + $${travel.toFixed(2)} travel` : '');
 }
 
 function addItemRow(bookingId, seed) {
@@ -2045,7 +2150,10 @@ function openBooking(id, seed) {
       ${bookingField('Guests', 'guest_count', b.guest_count, 'number')}
       ${bookingField('ZIP', 'event_zip', b.event_zip)}
       ${bookingField('Address', 'event_location', b.event_location)}
-      <div style="grid-column:1/-1;margin-top:-6px"><span id="addr-zip-hint" style="font-size:.72rem;color:#9ca3af"></span></div>
+      <div style="grid-column:1/-1;margin-top:-6px">
+        <span id="addr-zip-hint" style="font-size:.72rem;color:#9ca3af"></span>
+        <span id="addr-shape-hint" style="font-size:.72rem;color:#b45309;display:none"></span>
+      </div>
       ${bookingField('Venue Name', 'venue', b.venue)}
       ${bookingField('Surface', 'surface_type', b.surface_type, 'text',
         ['Grass','Concrete','Asphalt','Indoor — hard floor','Indoor — carpet','Turf','Other'])}
@@ -2066,6 +2174,8 @@ function openBooking(id, seed) {
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin:10px 0">
         <button class="btn btn-outline btn-sm" onclick="addItemRow('${b.id}')">+ Line</button>
+        <button class="btn btn-outline btn-sm" onclick="addItemRow('${b.id}', { kind: 'discount', name: 'Discount', price: 0, quantity: 1, service_id: '' })"
+                title="A discount line. Enter the amount to take off as a positive number.">− Discount</button>
         <select id="item-picker-${b.id}" onchange="addItemFromCatalogue('${b.id}', this)" style="max-width:260px">
           ${catalogueOptionsHtml()}
         </select>
@@ -3613,8 +3723,11 @@ async function sendFinalisationLink(id) {
   if (!b.client_email) { alert('This booking has no client email, so there is nobody to send the link to.'); return; }
   if (!confirm(`Email ${b.client_email} a link to finalise their details and pay the deposit?`)) return;
   try {
-    // Create the deposit link first. The finalisation page only ever surfaces
-    // a link that already exists — it cannot create one, by design.
+    // Create a deposit link first. The finalisation PAGE mints its own session
+    // when the client presses Pay (finalise.js action:'pay_link'), so this is
+    // no longer what makes payment possible — it is what keeps the emailed
+    // deposit link, the {{payment_link}} token and the "needs a deposit link"
+    // worklist pointing at something live.
     //
     // NOTE: sends the same fields sendStripeLink() above sends — bookingId/
     // bookingRef/client/email/service/amount. create-stripe-link.js requires
@@ -3626,8 +3739,15 @@ async function sendFinalisationLink(id) {
     // rule and this modal's "set to 0, no Stripe link is created" copy above
     // — a school/library booking with deposit_amount=0 must not be billed a
     // fallback amount for money the booking never asked for.
+    // ALWAYS a fresh session, never the stored one. A Stripe Checkout Session
+    // expires 24 hours after it is created (and 24h is also the longest expiry
+    // Stripe accepts), so re-sending a finalisation email that reuses a link
+    // minted yesterday emails a dead page. FM-KNNVZY8J on 2026-08-20: link
+    // minted 2026-08-19 22:37Z, finalisation re-sent 2026-08-21 00:44Z, client
+    // could not pay. The manual deposit button worked precisely because it has
+    // always minted a new one.
     const depositAmount = Number(b.deposit_amount) || 0;
-    if (!b.stripe_payment_link && depositAmount > 0) {
+    if (depositAmount > 0) {
       const linkRes = await apiFetch('/api/create-stripe-link', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3658,8 +3778,24 @@ async function sendFinalisationLink(id) {
       body: JSON.stringify({ action: 'send_template', booking_id: b.id, template_key: key })
     });
     if (!res.ok) throw new Error((await res.json()).error || 'Send failed');
-    alert('Sent.');
+
+    // Only AFTER the email is away. Promoting a booking whose send failed
+    // would tell the board this client has been quoted when nothing reached
+    // them. booking.js logs the change and fires any rules on the quoted rung.
+    const promoted = statusAfterFinalisationSent(b.status);
+    if (promoted) {
+      try {
+        await patch(id, { status: promoted });
+        await loadBookings();
+      } catch (e) {
+        // The client HAS their link; a failed status write is a bookkeeping
+        // problem, not a reason to report the send as failed.
+        console.error('finalisation sent but status stayed', b.status, '|', e.message);
+      }
+    }
+    alert(promoted ? 'Sent — booking moved to Quoted.' : 'Sent.');
     await loadComms(b.id);
+    if (promoted) openBooking(id);
   } catch (e) { alert('Could not send: ' + e.message); }
 }
 
@@ -6318,7 +6454,10 @@ function legacyToItems(b) {
 }
 
 function itemRowHtml(i, idx) {
-  const kinds = ['service', 'addon', 'travel', 'custom'];
+  // Same list as ITEM_KINDS in _items.js, and a test pins them together. A
+  // discount is typed as a POSITIVE amount and subtracted from the total —
+  // never entered as a negative, which the server would clamp back to 0.
+  const kinds = ['service', 'addon', 'travel', 'custom', 'discount'];
   return `<div class="q-row item-row" data-item-row="${idx}">
     <select class="item-f" data-if="kind" style="max-width:96px">
       ${kinds.map(k => `<option value="${k}" ${k === i.kind ? 'selected' : ''}>${k}</option>`).join('')}

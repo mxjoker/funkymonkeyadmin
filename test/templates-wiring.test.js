@@ -110,3 +110,75 @@ test('no template renders undefined, NaN or an Invalid Date from a real row', ()
     }
   }
 });
+
+// The seed must never overwrite wording, and must always correct structure.
+// The first three templates went into production with sort_order 900, which
+// the grouped Automations tab files under "Other messages"; the fix is for the
+// seed to update the structural columns while leaving the body alone.
+test('the seed updates structure but never the wording', () => {
+  const src = fs.readFileSync(path.join(FN, 'automations.js'), 'utf8');
+  // The seed in seedManualTemplates, not the unstaffed-rule insert above it.
+  const seed = src.indexOf('async function seedManualTemplates');
+  const stmt = src.slice(seed, src.indexOf('ON CONFLICT', seed) + 400);
+  for (const col of ['trigger_event', 'recipient', 'sort_order']) {
+    assert.ok(new RegExp(`${col}\\s*=\\s*EXCLUDED`).test(stmt), `the seed does not correct ${col}`);
+  }
+  for (const col of ['subject', 'body_html', 'body_sms', 'name', 'channel']) {
+    assert.ok(!new RegExp(`${col}\\s*=\\s*EXCLUDED`).test(stmt),
+      `the seed overwrites ${col} — a cold start would wipe an edit made in the tab`);
+  }
+});
+
+// ── Per-channel opt-outs ────────────────────────────────────────────────────
+// A crew member who chose SMS only must not start getting email because their
+// message moved into a template, and the send must not then be logged as a
+// failure. sendTemplate distinguishes "opted out" (a null the caller passed)
+// from "no address" (a fault worth reporting).
+const { sendTemplate } = require('../netlify/functions/automations.js');
+
+function fakeClient(rule) {
+  return {
+    query: async (sql) => {
+      if (/SELECT \* FROM automation_rules WHERE template_key/i.test(sql)) return { rows: [rule] };
+      return { rows: [] };
+    }
+  };
+}
+const RULE = {
+  id: 5, name: 'Gig available', template_key: 'staff_gig_available', recipient: 'staff',
+  subject: 'Gig', body_html: '<p>Gig</p>', body_sms: 'Gig in the portal', channel: 'both',
+};
+
+test('a staff member who takes neither channel is skipped, not failed', async () => {
+  const r = await sendTemplate(fakeClient(RULE), { id: 1 }, 'staff_gig_available', null,
+    { to: null, toPhone: null });
+  assert.strictEqual(r.skipped, true, 'an all-channels-off recipient should be skipped');
+  assert.strictEqual(r.sent, false);
+  assert.ok(!r.error, `an opt-out is not an error: ${r.error}`);
+});
+
+// No Twilio credentials in the test environment, so the SMS half cannot
+// actually go — what is pinned here is that the email half is not attempted at
+// all for someone who opted out of it.
+test('an email opt-out never reaches sendEmail', async () => {
+  let mailed = false;
+  const origKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = '';   // sendEmail throws without it
+  try {
+    const r = await sendTemplate(fakeClient(RULE), { id: 1 }, 'staff_gig_available', null,
+      { to: null, toPhone: null });
+    mailed = !!r.error;
+  } finally {
+    if (origKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = origKey;
+  }
+  assert.strictEqual(mailed, false, 'the email was attempted for a recipient who opted out of email');
+});
+
+// The distinction that makes the above safe: no address at all is still a
+// reported fault, not a silent skip.
+test('a missing address is still reported', async () => {
+  const clientRule = { ...RULE, recipient: 'client', channel: 'email' };
+  const r = await sendTemplate(fakeClient(clientRule), { id: 1 }, 'staff_gig_available', null, {});
+  assert.strictEqual(r.sent, false);
+  assert.match(r.error || '', /no client email/i);
+});

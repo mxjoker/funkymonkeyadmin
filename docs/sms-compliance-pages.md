@@ -206,7 +206,11 @@ so paste it, do not paraphrase:
 
 1. `You're booked: Foam Party, Sun 8/23. Load up 4:30 PM, 73013. Details in the portal: https://funkymonkeyadmin.netlify.app/staff-portal.html`
 2. `Hi Dana! Your Foam Party on Sun 8/23 is confirmed. Questions? Call (405) 431-6625. Reply STOP to opt out.`
-3. `Funky Monkey Events. Reply with the letters from a gig offer to register interest, or STOP to opt out. Questions: (405) 431-6625.`
+3. `Funky Monkey Events. Staff: sign up for gigs in the staff portal. Reply STOP to opt out. Questions: (405) 431-6625.`
+
+> The HELP reply changed on 2026-08-20: gig offers used to list lettered roles
+> for staff to reply with, and that reply is no longer parsed. If the campaign
+> was registered with the older wording, this is the one to give a reviewer.
 
 **Use case:** Mixed / Customer Care.
 

@@ -13,6 +13,7 @@ const { esc, logChange, ensureBookingChanges, ensureEmailLog, finaliseLinkFor } 
 const { normaliseAddress } = require('./_address');
 const { sanitiseClientEdit, zipChanged, describeFieldChange } = require('./_finalise');
 const { ensureBookingItems, getItems } = require('./_items');
+const { buildSessionParams } = require('./create-stripe-link');
 const { sendTemplate } = require('./automations');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
@@ -99,6 +100,83 @@ exports.handler = async (event) => {
     catch { return json(400, { error: 'Invalid JSON' }); }
 
     const { reference, email, updates } = body;
+
+    // ── Mint a fresh checkout session, on demand ─────────────────────────────
+    // A Stripe Checkout Session dies 24 hours after it is created, and 24h is
+    // also the longest expiry Stripe will accept — so a link emailed on Tuesday
+    // is a dead page on Thursday. FM-KNNVZY8J hit exactly that on 2026-08-20:
+    // the session behind her "Pay Deposit Now" button had been minted 26 hours
+    // earlier by the first finalisation email, and the button went nowhere. The
+    // manual deposit button worked because it always mints a new one.
+    //
+    // So this page no longer carries a link at all — it asks for one when the
+    // client presses the button, which cannot be stale by construction.
+    //
+    // The amount comes from the row, never from the request: this endpoint is
+    // public (reference + email is the whole key), so a browser must not be
+    // able to name the price of anything.
+    if (body.action === 'pay_link') {
+      return withClient(async (c) => {
+        const booking = await authenticate(c, reference, email);
+        if (!booking) return json(404, { error: 'Booking not found' });
+        if (booking.deposit_paid) {
+          return json(409, { error: 'This deposit is already paid — nothing further to pay here.' });
+        }
+        // The one place the address is MANDATORY rather than advised (Joe,
+        // 2026-08-20). A paid deposit is a gig on the calendar, and a gig whose
+        // address is "Edmond" is a crew with nowhere to drive. The browser asks
+        // first and more kindly; this is the guard that cannot be skipped by
+        // anything that talks to the endpoint directly.
+        //
+        // Emptiness only — the shape check is a warning everywhere, because
+        // refusing a real rural address at the checkout button would cost a
+        // booking to save a typo.
+        if (!String(booking.event_location || '').trim()) {
+          return json(400, {
+            error: 'We need the event address before you can pay — please fill it in above and save.',
+            field: 'event_location',
+          });
+        }
+        const deposit = Number(booking.deposit_amount || 0);
+        // NOT a fallback amount. A $0 deposit is the deliberate school/library
+        // booking, and billing one $100 is a bug this codebase has shipped.
+        if (!(deposit > 0)) {
+          return json(400, { error: 'This booking has no deposit to pay.' });
+        }
+        const stripeKey = process.env.STRIPE_SECRET_KEY;
+        if (!stripeKey) {
+          console.error('finalise: pay_link requested but STRIPE_SECRET_KEY is not set');
+          return json(500, { error: 'Payments are not configured — call us on (405) 431-6625.' });
+        }
+        try {
+          const params = buildSessionParams({
+            kind: 'deposit', amount: deposit, fee: 0,
+            service: booking.service_name, client: booking.client_name,
+            email: booking.client_email, bookingRef: booking.reference,
+            bookingId: booking.reference, dbId: booking.id,
+          });
+          const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${stripeKey}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params.toString(),
+          });
+          const session = await res.json();
+          if (!res.ok || !session.url) {
+            console.error('finalise: Stripe session failed for', booking.reference, '|', JSON.stringify(session.error || {}));
+            return json(502, { error: 'Could not start checkout — call us on (405) 431-6625.' });
+          }
+          // Persisted so the admin's "Last link", the {{payment_link}} token
+          // and my-booking's fallback all point at the newest session rather
+          // than one this client has already replaced.
+          await c.query('UPDATE bookings SET stripe_payment_link=$1, updated_at=NOW() WHERE id=$2',
+            [session.url, booking.id]);
+          return json(200, { url: session.url });
+        } catch (e) {
+          console.error('finalise: pay_link failed for', reference, '|', e.message);
+          return json(502, { error: 'Could not start checkout — call us on (405) 431-6625.' });
+        }
+      });
+    }
 
     return withClient(async (c) => {
       await ensureBookingChanges(c);

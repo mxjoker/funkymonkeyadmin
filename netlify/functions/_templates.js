@@ -254,7 +254,7 @@ const TEMPLATES = [
     template_key: 'staff_gig_available',
     extras: ['staff_name', 'matching_skills', 'portal_link'],
     name: 'Gig available — to matching staff',
-    trigger_event: 'system', recipient: 'staff', sort_order: 30,
+    trigger_event: 'system', recipient: 'staff', sort_order: 30, channel: 'both',
     subject: '🎪 Gig Available — {{service_name}} on {{event_date}}',
     body_html: `<p style="font-size:16px;margin-bottom:16px">Hi <strong>{{staff_name}}</strong>! 👋</p>
       <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">A new gig is available and your skills match what's needed. Log in to the staff portal to express your interest!</p>
@@ -268,16 +268,19 @@ const TEMPLATES = [
         <a href="{{portal_link}}" style="background-color:#7c3aed;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">Open the Staff Portal →</a>
       </div>
       <p style="font-size:12px;color:#A78BCA;text-align:center">Log in with your access code · {{portal_link}}</p>`,
-    body_sms: ''
+    // Two segments is the budget. This used to list lettered roles for the crew
+    // to reply with; the codes were removed 2026-08-20 and the portal is the one
+    // place interest is registered.
+    body_sms: "Gig available: {{service_name}}, {{event_datetime}} - {{event_zip}}. Sign up in the portal: {{portal_link}} Reply STOP to opt out."
   },
   {
     // extra: staff_name, staff_role, schedule_block, portal_link
     // schedule_block is built in staff-assignments.js: it is either the call
     // times or a note that they arrive once the ZIP is confirmed.
     template_key: 'staff_assigned',
-    extras: ['staff_name', 'staff_role', 'schedule_block', 'portal_link'],
+    extras: ['staff_name', 'staff_role', 'schedule_block', 'portal_link', 'load_time'],
     name: "You're booked — to the assigned staff member",
-    trigger_event: 'system', recipient: 'staff', sort_order: 31,
+    trigger_event: 'system', recipient: 'staff', sort_order: 31, channel: 'both',
     subject: "✅ You're booked! {{service_name}} on {{event_date}}",
     body_html: `<p style="font-size:16px;margin-bottom:16px">Hi <strong>{{staff_name}}</strong>! 🎉</p>
       <p style="color:#A78BCA;line-height:1.7;margin-bottom:20px">You've been assigned to a gig! Here are your details and call times.</p>
@@ -292,7 +295,9 @@ const TEMPLATES = [
         <a href="{{portal_link}}" style="background-color:#10B981;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:900;font-size:15px;display:inline-block">View Full Gig Details →</a>
       </div>
       <p style="font-size:12px;color:#A78BCA;text-align:center">Questions? Contact Joe at <a href="tel:4054316625" style="color:#06B6D4">(405) 431-6625</a></p>`,
-    body_sms: ''
+    // {{load_time}} is the shift start, not the event time: the whole point of
+    // the text is the number they set an alarm for.
+    body_sms: "You're booked: {{service_name}}, {{event_date}}. Load up {{load_time}}, {{event_zip}}. Details in the portal: {{portal_link}}"
   },
 
   {

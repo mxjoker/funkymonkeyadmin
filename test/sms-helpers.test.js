@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { normalisePhone, isQuietHours, renderSms, parseLetters } = require('../netlify/functions/_sms.js');
+const { normalisePhone, isQuietHours, renderSms } = require('../netlify/functions/_sms.js');
 
 // ── normalisePhone ──────────────────────────────────────────────────────────
 // These four formats are all present in the live client_phone column today.
@@ -68,39 +68,6 @@ test('renderSms also resolves {{deposit_link}}, not just its own {{payment_link}
   assert.match(out, /my-booking\.html/, '{{finalise_link}} must resolve to the finalisation page');
 });
 
-// ── parseLetters ────────────────────────────────────────────────────────────
-const OFFER = { a: { booking_id: 1, tag_filled: 'Foam Operator' }, b: { booking_id: 1, tag_filled: 'Setup' }, c: { booking_id: 1, tag_filled: 'Driver' } };
-
-test('letter replies parse in every shape people actually type', () => {
-  assert.deepStrictEqual(parseLetters('a', OFFER).picked,     ['a']);
-  assert.deepStrictEqual(parseLetters('ab', OFFER).picked,    ['a', 'b']);
-  assert.deepStrictEqual(parseLetters('AC', OFFER).picked,    ['a', 'c']);
-  assert.deepStrictEqual(parseLetters(' a c ', OFFER).picked, ['a', 'c']);
-  assert.deepStrictEqual(parseLetters('a, b', OFFER).picked,  ['a', 'b']);
-  assert.deepStrictEqual(parseLetters('abc', OFFER).picked,   ['a', 'b', 'c']);
-});
-
-test('a repeated letter registers once', () => {
-  assert.deepStrictEqual(parseLetters('aa', OFFER).picked, ['a']);
-});
-
-test('an unrecognised letter is reported, not silently dropped', () => {
-  const r = parseLetters('ad', OFFER);
-  assert.deepStrictEqual(r.picked, ['a']);
-  assert.deepStrictEqual(r.unknown, ['d']);
-  assert.strictEqual(r.freeform, false);
-});
-
-test('a sentence is freeform, not a pile of unknown letters', () => {
-  const r = parseLetters("sorry can't make it that weekend", OFFER);
-  assert.strictEqual(r.freeform, true, 'must be forwarded to Joe, not letter-parsed');
-  assert.deepStrictEqual(r.picked, []);
-});
-
-test('an empty reply is freeform', () => {
-  assert.strictEqual(parseLetters('', OFFER).freeform, true);
-  assert.strictEqual(parseLetters('   ', OFFER).freeform, true);
-});
 
 // ── The scheduled loops pass link=null ──────────────────────────────────────
 // automations.js:240/265/288 call sendAutomationMessage(..., booking, null),

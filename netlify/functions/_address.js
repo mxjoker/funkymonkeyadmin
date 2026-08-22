@@ -63,4 +63,33 @@ function normaliseAddress(location, zip) {
   return { location: split.address, zip: existing, conflict: `address ends ${split.zip} but event_zip is ${existing}` };
 }
 
-module.exports = { fullAddress, PARTS, splitZip, normaliseAddress };
+// ── Is this a street address, or just a place name? ──────────────────────────
+// "Edmond" is what was in event_location on a real booking (2026-08-20). It is
+// a town, and a crew driving to it has nowhere to go. The old field accepted
+// anything non-empty, which is the same as accepting nothing.
+//
+// The test is deliberately weak: SOME digits, and more than one word. A house
+// number is the one thing every deliverable address has and no city name does,
+// and anything stricter would start rejecting the real ones — rural routes,
+// "The MAC, 2701 W Danforth", a venue with the number in the middle. This
+// exists to catch a town typed into an address box, not to validate postal
+// correctness, and it is a WARNING everywhere except the one place money
+// changes hands.
+//
+// Returns a reason rather than a bare false so each caller can say what is
+// wrong instead of "invalid".
+function addressLooksComplete(location) {
+  const raw = String(location || '').trim();
+  if (!raw) return { ok: false, reason: 'missing', message: 'We need the event address.' };
+  if (!/\d/.test(raw)) {
+    return { ok: false, reason: 'no_number',
+             message: 'That looks like a town or a venue name — we need a street address with a number.' };
+  }
+  if (raw.split(/\s+/).filter(Boolean).length < 2) {
+    return { ok: false, reason: 'too_short',
+             message: 'That address looks incomplete — we need the street name too.' };
+  }
+  return { ok: true, reason: null, message: '' };
+}
+
+module.exports = { fullAddress, PARTS, splitZip, normaliseAddress, addressLooksComplete };

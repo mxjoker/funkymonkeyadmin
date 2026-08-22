@@ -110,7 +110,11 @@ function renderSms(template, booking = {}, link, extra) {
     .replace(/{{notes}}/g,             booking.notes           || '')
     .replace(/{{referral_source}}/g,   booking.referral_source || '')
     .replace(/{{location_label}}/g,    derived.location_label)
-    .replace(/{{event_datetime}}/g,    derived.event_datetime)
+    // The short form, not render()'s "Sunday, 23 August 2026 at 6:00 PM": in a
+    // text every character is budget, and two segments is the budget.
+    .replace(/{{event_datetime}}/g,
+      (fmtEventDate(booking.event_date, { weekday: 'short', month: 'numeric', day: 'numeric' }) || 'TBD')
+      + (booking.event_time ? ' ' + booking.event_time : ''))
     .replace(/{{addon_list}}/g,        stripTags(derived.addon_list))
     .replace(/{{mileage_line}}/g,      stripTags(derived.mileage_line))
     .replace(/{{admin_link}}/g,        'https://funkymonkeyadmin.netlify.app/admin.html')
@@ -161,35 +165,6 @@ function smsSegments(text) {
   return units <= 160 ? 1 : Math.ceil(units / 153);
 }
 
-// ── Letter reply parsing ─────────────────────────────────────────────────────
-// An offer lists roles as lettered options; a reply may combine them ("ac").
-// Resolved against the offer_map stored on THAT outbound message, never against
-// the live open-gig list — otherwise "b" means something different two hours
-// later, because slots change.
-//
-// ponytail: a reply of more than MAX_PICK letters is treated as prose and
-// forwarded to Joe rather than parsed. Offers never carry more than a handful
-// of roles, and "sorry can't make it" must not come back as
-// "Didn't recognise 's','o','r','y'". Raise MAX_PICK if offers ever get longer.
-const MAX_PICK = 6;
-
-function parseLetters(reply, offerMap) {
-  const valid = Object.keys(offerMap || {});
-  const letters = String(reply || '').toLowerCase().replace(/[^a-z]/g, '');
-  const picked = [], unknown = [], seen = new Set();
-
-  if (!letters || letters.length > MAX_PICK) return { picked, unknown, freeform: true };
-
-  for (const ch of letters) {
-    if (seen.has(ch)) continue;
-    seen.add(ch);
-    (valid.includes(ch) ? picked : unknown).push(ch);
-  }
-  // Nothing recognised at all — this is prose, not a mistyped selection.
-  if (!picked.length) return { picked: [], unknown: [], freeform: true };
-  return { picked, unknown, freeform: false };
-}
-
 // ── Tables ───────────────────────────────────────────────────────────────────
 // Both mirror email_log. provider_sid is UNIQUE, which is what makes a replayed
 // webhook idempotent; it is nullable because held / skipped rows never got one,
@@ -211,6 +186,9 @@ async function ensureSmsTables(client) {
           provider_sid VARCHAR(64) UNIQUE,
           status VARCHAR(32) NOT NULL DEFAULT 'queued',
           error_detail TEXT DEFAULT '',
+          -- Reply codes were removed 2026-08-20 and nothing writes this any
+          -- more. The column stays: the rows already in it are the record of
+          -- what was offered to whom, and dropping it buys nothing.
           offer_map JSONB,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -238,13 +216,13 @@ async function isOptedOut(client, e164) {
 async function logSms(client, row) {
   try {
     const { rows } = await client.query(
-      `INSERT INTO sms_log (direction, phone, body, booking_id, staff_id, rule_id, trigger_label, provider_sid, status, error_detail, offer_map)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      `INSERT INTO sms_log (direction, phone, body, booking_id, staff_id, rule_id, trigger_label, provider_sid, status, error_detail)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (provider_sid) DO NOTHING
        RETURNING id`,
       [row.direction || 'out', row.phone, row.body || '', row.booking_id || null, row.staff_id || null,
        row.rule_id || null, row.trigger_label || '', row.provider_sid || null, row.status,
-       row.error_detail || '', row.offer_map ? JSON.stringify(row.offer_map) : null]
+       row.error_detail || '']
     );
     return rows[0] ? rows[0].id : null;
   } catch (e) {
@@ -266,7 +244,7 @@ async function sendSms(client, to, body, meta = {}) {
   const from  = process.env.TWILIO_PHONE_NUMBER;
   const site  = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
   const base  = { direction: 'out', body, booking_id: meta.booking_id, staff_id: meta.staff_id,
-                  rule_id: meta.rule_id, trigger_label: meta.trigger_label, offer_map: meta.offer_map };
+                  rule_id: meta.rule_id, trigger_label: meta.trigger_label };
 
   if (!sid || !token || !from) {
     console.error('sendSms: Twilio credentials are not configured');
@@ -420,4 +398,4 @@ async function flushHeldSms(client, now = new Date()) {
   return { sent, expired, optedOut, blocked: 0 };
 }
 
-module.exports = { normalisePhone, isQuietHours, renderSms, parseLetters, ensureSmsTables, isOptedOut, logSms, sendSms, toGsm7, smsSegments, flushHeldSms };
+module.exports = { normalisePhone, isQuietHours, renderSms, ensureSmsTables, isOptedOut, logSms, sendSms, toGsm7, smsSegments, flushHeldSms };
