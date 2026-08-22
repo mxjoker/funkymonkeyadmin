@@ -5104,7 +5104,10 @@ function renderCatalogue() {
           <th style="width:180px">Short Name<br><span style="font-weight:400;font-size:.7rem;color:#6b7280">calendar &amp; staff only</span></th>
           <th style="width:150px">Category</th>
           <th style="width:80px">Price $</th><th style="width:70px">Mins</th>
-          <th>Guest Note</th>
+          <th style="width:74px">Extra Hr $<br><span style="font-weight:400;font-size:.7rem;color:#6b7280">blank = none</span></th>
+          <th style="width:52px;text-align:center">Quote<br><span style="font-weight:400;font-size:.7rem;color:#6b7280">only</span></th>
+          <th>Guest Note<br><span style="font-weight:400;font-size:.7rem;color:#6b7280">internal</span></th>
+          <th>Description<br><span style="font-weight:400;font-size:.7rem;color:#6b7280">shown on the booking form</span></th>
           <th style="width:160px">Staff Requirements</th>
           <th style="width:180px">Add-ons Available</th>
           <th style="width:160px">Shown For</th>
@@ -5126,7 +5129,14 @@ function renderCatalogue() {
         </select></td>
         <td><input type="number" value="${Number(s.price).toFixed(0)}" data-field="price"/></td>
         <td><input type="number" value="${s.duration_minutes||120}" data-field="duration_minutes"/></td>
+        <td><input type="number" min="0" value="${s.extra_hour_rate == null ? '' : Number(s.extra_hour_rate).toFixed(0)}"
+                   placeholder="—" title="Hourly rate for extra time. Blank means this service has no hours picker."
+                   data-field="extra_hour_rate"/></td>
+        <td style="text-align:center"><input type="checkbox" ${s.is_quote?'checked':''} data-field="is_quote"
+                   title="Show &quot;custom quote required&quot; instead of charging the price"/></td>
         <td><input type="text" value="${esc(s.guest_suggestion||'')}" data-field="guest_suggestion" style="width:100%"/></td>
+        <td><input type="text" value="${esc(s.description||'')}" data-field="description" style="width:100%"
+                   placeholder="What the customer reads on the card"/></td>
         <td>
           <div class="slot-container" data-svc="${s.service_id}">
             ${slotRows || ''}
@@ -5321,7 +5331,10 @@ function addNewService(category) {
     </select></td>
     <td><input type="number" value="0" data-field="price"/></td>
     <td><input type="number" value="60" data-field="duration_minutes"/></td>
+    <td><input type="number" min="0" value="" placeholder="—" data-field="extra_hour_rate"/></td>
+    <td style="text-align:center"><input type="checkbox" data-field="is_quote"/></td>
     <td><input type="text" value="" data-field="guest_suggestion" style="width:100%"/></td>
+    <td><input type="text" value="" data-field="description" style="width:100%" placeholder="What the customer reads on the card"/></td>
     <td><div class="slot-container" data-svc="${serviceId}"></div>
         <button onclick="addSlotRowInline(this)" style="font-size:.7rem;color:#7c3aed;background:none;border:none;cursor:pointer;font-weight:700;padding:2px 0">+ Add Role</button></td>
     <td><div class="svc-addon-container" data-svc="${serviceId}" style="display:flex;flex-wrap:wrap;gap:3px;min-height:20px"></div>
@@ -5543,6 +5556,10 @@ async function saveCatalogue() {
         const field = f.dataset.field;
         if (f.type === 'checkbox') payload[field] = f.checked;
         else if (field === 'price' || field === 'duration_minutes') payload[field] = Number(f.value);
+        // A blank extra-hour box means "no hours picker on this service", which
+        // is null. Number('') is 0, and 0 renders a picker offering four hours
+        // for free — so this one cannot go through the Number() branch.
+        else if (field === 'extra_hour_rate') payload[field] = f.value.trim() === '' ? null : Number(f.value);
         else payload[field] = f.value;
       });
       await apiFetch('/api/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });

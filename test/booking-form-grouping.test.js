@@ -21,13 +21,15 @@ function loadHelpers() {
     // through getters — a plain snapshot would freeze the fallback values and
     // hide whatever setCategories actually did.
     '\nout = { groupByCategory, shouldSection, CATEGORY_ORDER, resolveAddon, step2Subtotal, sectionKeyToOpen,' +
-    '\n        setCategories, get order() { return CATEGORY_ORDER }, get meta() { return CATEGORY_META } };',
+    '\n        setCategories, buildServices, durationLabel, esc,' +
+    '\n        get order() { return CATEGORY_ORDER }, get meta() { return CATEGORY_META } };',
     ctx
   );
   return ctx.out;
 }
 
-const { groupByCategory, shouldSection, CATEGORY_ORDER, resolveAddon, step2Subtotal, sectionKeyToOpen } = loadHelpers();
+const { groupByCategory, shouldSection, CATEGORY_ORDER, resolveAddon, step2Subtotal, sectionKeyToOpen,
+        buildServices, durationLabel, esc } = loadHelpers();
 
 // Values built inside a vm context carry THAT realm's prototypes, so
 // assert.deepStrictEqual rejects them even when the structure is identical
@@ -297,4 +299,107 @@ test('a category with no label falls back to its id rather than an empty heading
   h.setCategories([{ category_id: 'magic', label: '', icon: '', active: true }]);
   assert.strictEqual(h.meta.magic.label, 'magic');
   assert.strictEqual(h.meta.magic.icon, '✨');
+});
+
+// ══ buildServices — the catalogue is the only price list ══
+//
+// These exist because the form used to carry its own copy of the catalogue.
+// It drifted: DJ Piñata quoted $385 against a real $3,500, Foam Party — Double
+// Cannon $730 against $535, and services added in admin never appeared at all.
+// Nothing here may read a price, a name, a blurb or a service list from
+// anywhere but the rows passed in.
+
+const ROW = (over) => ({
+  service_id:'foam_double', category:'foam_parties', name:'Foam Party — Double Cannon',
+  price:'535.00', icon:'💨', duration_minutes:45, guest_suggestion:'30-60 guests',
+  description:'Maximum foam with two cannons.', extra_hour_rate:null, is_quote:false, ...over,
+});
+
+test('price comes from the catalogue row', () => {
+  const s = buildServices([ROW()]);
+  assert.strictEqual(s.foam_double.price, 535);
+  assert.strictEqual(typeof s.foam_double.price, 'number');  // NUMERIC arrives as a string
+});
+
+test('name, icon, duration and blurb come from the catalogue row', () => {
+  const s = buildServices([ROW({ name:'Foam Party — Mega Cannon', icon:'🎉', duration_minutes:120,
+                                description:'All the foam there is.' })]);
+  const f = s.foam_double;
+  assert.strictEqual(f.name, 'Foam Party — Mega Cannon');
+  assert.strictEqual(f.icon, '🎉');
+  assert.strictEqual(f.duration, '2 hrs');
+  assert.strictEqual(f.desc, 'All the foam there is.');
+});
+
+test('a service added in admin renders with no local entry of any kind', () => {
+  const s = buildServices([ROW({ service_id:'foam_quadruple', name:'Foam Party — Quadruple Cannon',
+                                 price:'835.00', description:'' })]);
+  assert.ok(s.foam_quadruple, 'new catalogue service must appear');
+  assert.strictEqual(s.foam_quadruple.price, 835);
+  assert.strictEqual(s.foam_quadruple.desc, '30-60 guests');  // guest note stands in
+  assert.deepStrictEqual(plain(s.foam_quadruple.addons), []);
+});
+
+test('is_quote drives custom-quote pricing, and is editable per service', () => {
+  const q = buildServices([ROW({ is_quote:true })]).foam_double;
+  assert.strictEqual(q.isQuote, true);
+  assert.strictEqual(buildServices([ROW()]).foam_double.isQuote, false);
+  // A truthy-looking string must not switch a service to quote-only — that
+  // would silently stop charging for it.
+  assert.strictEqual(buildServices([ROW({ is_quote:'false' })]).foam_double.isQuote, false);
+});
+
+test('extra_hour_rate drives the hours picker; NULL and 0 mean no picker', () => {
+  assert.strictEqual(buildServices([ROW({ extra_hour_rate:'150.00' })]).foam_double.extraHourRate, 150);
+  // A picker offering four hours at $0 would give the time away for free.
+  assert.ok(!('extraHourRate' in buildServices([ROW({ extra_hour_rate:null })]).foam_double));
+  assert.ok(!('extraHourRate' in buildServices([ROW({ extra_hour_rate:'0.00' })]).foam_double));
+});
+
+test('a quote-only service still carries its "starting at" price', () => {
+  const s = buildServices([ROW({ service_id:'game_show', name:'Game Show Champions',
+                                 price:'3500.00', is_quote:true })]);
+  assert.strictEqual(s.game_show.price, 3500);
+  assert.strictEqual(s.game_show.isQuote, true);
+});
+
+test('a service switched off in Catalogue is never bookable', () => {
+  const s = buildServices([ROW({ service_id:'foam_single', active:true }), ROW({ active:false })]);
+  assert.deepStrictEqual(Object.keys(s), ['foam_single']);
+});
+
+test('catalogue order is preserved, so cards list in admin sort order', () => {
+  const s = buildServices([ROW({ service_id:'foam_single' }), ROW({ service_id:'foam_double' })]);
+  assert.deepStrictEqual(Object.keys(s), ['foam_single', 'foam_double']);
+});
+
+test('junk rows are skipped rather than becoming undefined cards', () => {
+  const s = buildServices([null, {}, { name:'no id' }, ROW()]);
+  assert.deepStrictEqual(Object.keys(s), ['foam_double']);
+});
+
+test('an empty catalogue builds nothing — the caller shows the error page', () => {
+  assert.deepStrictEqual(plain(buildServices([])), {});
+  assert.deepStrictEqual(plain(buildServices(undefined)), {});
+});
+
+test('durationLabel matches the strings these cards have always shown', () => {
+  assert.strictEqual(durationLabel(30), '30 min');
+  assert.strictEqual(durationLabel(45), '45 min');
+  assert.strictEqual(durationLabel(60), '1 hr');
+  assert.strictEqual(durationLabel(90), '90 min');
+  assert.strictEqual(durationLabel(120), '2 hrs');
+  assert.strictEqual(durationLabel(0), '');
+  assert.strictEqual(durationLabel(null), '');
+});
+
+test('catalogue text is escaped before it reaches the public page', () => {
+  // Names and descriptions are typed into Catalogue now, not written in the
+  // page source, so they cross an admin -> public boundary as HTML.
+  assert.strictEqual(esc('<script>alert(1)</script>'),
+    '&lt;script&gt;alert(1)&lt;/script&gt;');
+  assert.strictEqual(esc('Tom & Jerry\'s "Show"'), 'Tom &amp; Jerry&#39;s &quot;Show&quot;');
+  assert.strictEqual(esc('Foam Party — Double Cannon'), 'Foam Party — Double Cannon');
+  assert.strictEqual(esc(null), '');
+  assert.strictEqual(esc(undefined), '');
 });

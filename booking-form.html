@@ -355,180 +355,11 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#7c3aed}
 // CATALOGUE DATA
 // ══════════════════════════════════════════════════
 
-const PHOTO_BOOTH_ADDONS = [
-  { id:'pb_kiosk',  name:'Digital Kiosk Photo Booth', price:150, note:'Standalone: $385' },
-  { id:'pb_360',   name:'360 Video Booth',            price:150, note:'Standalone: $385' },
-];
-
-const SERVICES = {
-  deluxe_magic: {
-    id:'deluxe_magic', icon:'🎩', name:'Deluxe Birthday Magic Show', price:385, duration:'45 min',
-    desc:'Award-winning interactive magic with audience participation, monkey puppet, and a special magical gift for the birthday child.',
-    addons:[
-      { id:'carnival_games', name:'Carnival Games', price:75 },
-      { id:'cotton_candy',   name:'Cotton Candy',   price:75 },
-      { id:'face_paint_ao',  name:'Face Painting',  price:150 },
-      { id:'mini_donuts',    name:'Hot & Fresh Mini Donuts', price:'per_child', rate:5, note:'$5 per guest' },
-      { id:'goodie_bag',     name:'Magic Goodie-Bag',        price:'per_child', rate:10, note:'$10 per guest' },
-      { id:'balloon_twist',  name:'Balloon Twisting', price:75 },
-    ]
-  },
-  basic_magic: {
-    id:'basic_magic', icon:'🎩', name:'Basic Birthday Magic Show', price:345, duration:'30 min',
-    desc:'Fun, interactive magic show packed with laughs and surprises. Perfect for shorter party slots.',
-    addons:[
-      { id:'carnival_games', name:'Carnival Games', price:75 },
-      { id:'cotton_candy',   name:'Cotton Candy',   price:75 },
-      { id:'face_paint_ao',  name:'Face Painting',  price:150 },
-      { id:'mini_donuts',    name:'Hot & Fresh Mini Donuts', price:'per_child', rate:5, note:'$5 per guest' },
-      { id:'goodie_bag',     name:'Magic Goodie-Bag',        price:'per_child', rate:10, note:'$10 per guest' },
-      { id:'balloon_twist',  name:'Balloon Twisting', price:75 },
-    ]
-  },
-  foam_single: {
-    id:'foam_single', icon:'🫧', name:'Foam Party — Single Cannon', price:385, duration:'45 min',
-    desc:'High-energy foam party with one cannon. Recommended for up to 30 kids.',
-    addons:[
-      { id:'glow_foam',    name:'Glow Foam',               price:150 },
-      { id:'cotton_candy_f', name:'Fresh Spun Cotton Candy', price:100 },
-      { id:'bubble_sta',   name:'Bubble Stations',         price:75 },
-      { id:'stilt_walker', name:'Stilt Walker',            price:400 },
-      { id:'bubble_mach',  name:'Bubble Machine',          price:75 },
-    ]
-  },
-  foam_double: {
-    id:'foam_double', icon:'🫧🫧', name:'Foam Party — Double Cannon', price:730, duration:'45 min',
-    desc:'Maximum foam with two cannons. Recommended for 30+ kids for the full foam experience.',
-    addons:[
-      { id:'glow_foam',    name:'Glow Foam',               price:150 },
-      { id:'cotton_candy_f', name:'Fresh Spun Cotton Candy', price:100 },
-      { id:'bubble_sta',   name:'Bubble Stations',         price:75 },
-      { id:'stilt_walker', name:'Stilt Walker',            price:400 },
-      { id:'bubble_mach',  name:'Bubble Machine',          price:75 },
-    ]
-  },
-  snow_45: {
-    id:'snow_45', icon:'❄️', name:'Snow Party — 45 Minutes', price:385, duration:'45 min',
-    desc:'Real snow machine fun — not cold at all! Perfect for winter-themed or frozen parties any time of year.',
-    extraHourRate: 140,
-    addons:[
-      { id:'ice_princess',  name:'Ice Princess Character', price:150 },
-      { id:'santa_visit',   name:'Visit from Santa',       price:250 },
-      { id:'magic_elf',     name:'Magic Elf Show (20 min)',price:150 },
-      { id:'reindeer_games',name:'Reindeer Games',         price:75  },
-      { id:'sensory_snow',  name:'Sensory Snow Table',     price:75  },
-    ]
-  },
-  snow_90: {
-    id:'snow_90', icon:'❄️', name:'Snow Party — 90 Minutes', price:525, duration:'90 min',
-    desc:'Extended snow party experience with more time for games, photos, and memories.',
-    extraHourRate: 140,
-    addons:[
-      { id:'ice_princess',  name:'Ice Princess Character', price:150 },
-      { id:'santa_visit',   name:'Visit from Santa',       price:250 },
-      { id:'magic_elf',     name:'Magic Elf Show (20 min)',price:150 },
-      { id:'reindeer_games',name:'Reindeer Games',         price:75  },
-      { id:'sensory_snow',  name:'Sensory Snow Table',     price:75  },
-    ]
-  },
-  cotton_candy: {
-    id:'cotton_candy', icon:'🍭', name:'Live Spun Cotton Candy', price:385, duration:'2 hrs',
-    desc:'Fresh-spun cotton candy made live at your event. A guaranteed crowd pleaser.',
-    addons:[
-      { id:'mini_donuts_ss', name:'Hot & Fresh Mini Donuts', price:100 },
-      { id:'hot_cider',      name:'Hot Apple Cider',         price:75  },
-      { id:'hot_choc',       name:'Hot Chocolate',           price:75  },
-      { id:'party_punch',    name:'Party Punch',             price:75  },
-    ]
-  },
-  mini_donuts: {
-    id:'mini_donuts', icon:'🍩', name:'Hot & Fresh Mini Donuts', price:385, duration:'2 hrs',
-    desc:'Freshly made mini donuts served hot at your event. Everyone loves them!',
-    addons:[
-      { id:'cotton_candy_ss', name:'Live Spun Cotton Candy', price:100 },
-      { id:'hot_cider',       name:'Hot Apple Cider',        price:75  },
-      { id:'hot_choc',        name:'Hot Chocolate',          price:75  },
-      { id:'party_punch',     name:'Party Punch',            price:75  },
-    ]
-  },
-  balloon_40: {
-    id:'balloon_40', icon:'🎈', name:'Balloon Workshop — Up to 40 Kids', price:345, duration:'30 min',
-    desc:'Every child learns to make and keep three classic balloon sculptures. We bring everything needed.',
-    addons:[]
-  },
-  balloon_60: {
-    id:'balloon_60', icon:'🎈', name:'Balloon Workshop — 40–60 Kids', price:385, duration:'30 min',
-    desc:'Larger group balloon workshop — same fun, bigger crowd handled with ease.',
-    addons:[]
-  },
-  face_paint: {
-    id:'face_paint', icon:'🎨', name:'Face Painting', price:200, duration:'1 hr',
-    desc:'Professional face painting for all ages. Approx. 30 guests per hour.',
-    extraHourRate:150, addons:[]
-  },
-  airbrush: {
-    id:'airbrush', icon:'💨', name:'Airbrush Tattoos', price:200, duration:'1 hr',
-    desc:'Custom airbrush tattoo designs. Approx. 30 tattoos per hour.',
-    extraHourRate:150, addons:[]
-  },
-  glitter: {
-    id:'glitter', icon:'💫', name:'Glitter Tattoos', price:200, duration:'1 hr',
-    desc:'Long-lasting glitter tattoos loved by kids and adults. Approx. 20–25 per hour.',
-    extraHourRate:150, addons:[]
-  },
-  bubble_show: {
-    id:'bubble_show', icon:'🫧', name:"Prof. Bucket's Bubble Show", price:385, duration:'45 min',
-    desc:'Giant bubbles, bubble science, and bubbly fun for all ages.',
-    addons:[
-      { id:'bubble_goodie', name:'Bubble Goodie Bag', price:'per_child', rate:10, note:'$10 per guest' },
-      { id:'atmos_bubble',  name:'Atmospheric Bubble Machine', price:50  },
-      { id:'giant_bubbles', name:'Outdoor Giant Bubble Stations', price:75 },
-      { id:'invis_bubble',  name:'Indoor/Outdoor Invisible Water Bubble Station', price:75 },
-      { id:'face_paint_b',  name:'1 Hour of Face Painting', price:250 },
-    ]
-  },
-  corporate_magic: {
-    id:'corporate_magic', icon:'✨', name:'Corporate Magic Show', price:875, priceNote:'Starting at',
-    duration:'45 min', isQuote:true,
-    desc:'Close-up and stage magic tailored for professional events and corporate audiences.',
-    addons:[]
-  },
-  game_show: {
-    id:'game_show', icon:'🏆', name:'Game Show Champions', price:3500, priceNote:'Starting at',
-    duration:'90 min', isQuote:true,
-    desc:'Live interactive game show with prizes and high-energy audience participation.',
-    addons:[]
-  },
-  school_asm: {
-    id:'school_asm', icon:'🏫', name:'Magic School Assembly', price:385, duration:'45 min',
-    desc:'High-energy assembly for your entire school. Engages up to 500 students.',
-    addons:[]
-  },
-  dj_pinata: {
-    id:'dj_pinata', icon:'🎵', name:'DJ Piñata', price:385, duration:'2 hrs',
-    desc:'The ultimate school fundraiser experience — interactive DJ meets piñata party.',
-    addons:[]
-  },
-  wedding_magic: {
-    id:'wedding_magic', icon:'🪄', name:'Walk-Around Cocktail Hour Magic', price:900, priceNote:'Starting at',
-    duration:'90 min', isQuote:true,
-    desc:'Elegant close-up sleight of hand performed table-to-table during cocktail hour.',
-    addons:[
-      { id:'kids_show_dinner', name:"Children's Show During Dinner", price:385 },
-      { id:'kids_fun_night',   name:'Kids Fun Night (babysitting + games)', price:585, priceNote:'Starting at', isQuote:true },
-    ]
-  },
-  // Library shows
-  lib_magic:   { id:'lib_magic',   icon:'🎩', name:'Magic Show',              price:345, duration:'45 min', desc:'Engaging magic show tailored for library audiences and summer reading programs.', addons:[{ id:'extra_show', name:'Additional Show Same Day', price:345, note:'Per show' }] },
-  lib_balloon: { id:'lib_balloon', icon:'🎈', name:'Balloon Workshop',        price:345, duration:'30 min', desc:'Hands-on balloon sculpting workshop. Every child makes and keeps their creations.', addons:[{ id:'extra_show', name:'Additional Show Same Day', price:345, note:'Per show' }] },
-  lib_bubble:  { id:'lib_bubble',  icon:'🫧', name:"Prof. Bucket's Bubble Show", price:345, duration:'45 min', desc:'The science and wonder of bubbles — a perfect library STEM program.', addons:[{ id:'extra_show', name:'Additional Show Same Day', price:345, note:'Per show' }] },
-  lib_doodles: { id:'lib_doodles', icon:'✏️', name:'Story-Doodles',           price:345, duration:'45 min', desc:'Interactive storytelling with live drawing and imagination. Kids love participating.', addons:[{ id:'extra_show', name:'Additional Show Same Day', price:345, note:'Per show' }] },
-  lib_foam:    { id:'lib_foam',    icon:'🫧', name:'Foam Party',              price:385, duration:'45 min', desc:'45 minutes of foam and fun — a summer reading favorite!', addons:[{ id:'extra_show', name:'Additional Show Same Day', price:345, note:'Per show' }] },
-  lib_workshop:{ id:'lib_workshop',icon:'🪄', name:'Magic Workshop',          price:345, duration:'45 min', desc:'Interactive magic workshop where kids learn real magic tricks to take home.', addons:[{ id:'extra_show', name:'Additional Show Same Day', price:345, note:'Per show' }] },
-  // Standalone Photo Booths
-  pb_kiosk_svc: { id:'pb_kiosk_svc', icon:'📸', name:'Digital Kiosk Photo Booth', price:385, duration:'2 hrs', desc:'Automated digital photo kiosk with instant prints and digital sharing.', addons:[{ id:'pb_360_ao', name:'Add 360 Video Booth', price:385 }] },
-  pb_360_svc:   { id:'pb_360_svc',   icon:'🎥', name:'360 Video Booth',           price:385, duration:'2 hrs', desc:'Immersive 360-degree slow-motion video booth — the ultimate party wow moment.', addons:[{ id:'pb_kiosk_ao', name:'Add Digital Kiosk Photo Booth', price:385 }] },
-};
+// service_id -> card data, built from /api/services alone. There is no
+// hardcoded catalogue behind this any more and deliberately no fallback one:
+// a form that renders last year's prices is worse than one that says it is
+// down, because its number becomes the customer's invoice.
+const SERVICES = {};
 
 // Event type → service IDs + photo booth always available as add-on
 const EVENT_TYPES = [
@@ -550,7 +381,9 @@ const EVENT_TYPES = [
     svcs:['lib_magic','lib_balloon','lib_bubble','lib_doodles','lib_foam','lib_workshop'] },
 ];
 
-const ALL_SVC_IDS = Object.keys(SERVICES);
+// Every catalogue id, in admin sort order. Rebuilt by loadCatalogue() — not
+// Object.keys() at parse time, because SERVICES is empty until the fetch lands.
+let ALL_SVC_IDS = [];
 
 // ══ PURE HELPERS — extracted verbatim by test/booking-form-grouping.test.js ══
 // Nothing in this block may touch the DOM, network, or page state. It is
@@ -614,12 +447,10 @@ function shouldSection(ids, catOf) {
 }
 
 // Resolve an add-on id: service list, then photo-booth list, then the DB
-// catalogue. Used only by the sticky bar (renderStickyBar) — buildQuote and
-// submitBooking carry their own inline resolvers and, for pb_kiosk/pb_360,
-// check the static PHOTO_BOOTH_ADDONS list BEFORE the DB, the opposite order
-// used here. That divergence is currently latent because neither photo-booth
-// id exists in the addons table, but it means this resolver does not
-// guarantee the sticky-bar subtotal matches what gets submitted.
+// catalogue. The sticky bar, the quote and the submitted payload all route
+// through this now. They used to carry three inline copies that disagreed on
+// whether the hardcoded photo-booth list beat the DB, so the sticky-bar
+// subtotal was not guaranteed to match what got charged.
 function resolveAddon(svc, aid, pbAddons, dbAddonList) {
   let a = ((svc && svc.addons) || []).find(x => x.id === aid)
        || (pbAddons || []).find(x => x.id === aid);
@@ -658,6 +489,59 @@ function sectionKeyToOpen(sections, svcId) {
   }
   return sections.length ? sections[0].key : null;
 }
+// Catalogue text reaches this page as HTML, and since the catalogue became
+// editable that text is typed by an admin rather than written in this file.
+// Admin is trusted, but "trusted" is not "guaranteed to have typed no angle
+// brackets", and the booking form is the public side of that boundary.
+function esc(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Catalogue `duration_minutes` -> the label on the card. Whole hours read as
+// hours, everything else as minutes, so 45 stays "45 min" and 120 becomes
+// "2 hrs" — the strings these cards have always shown.
+function durationLabel(mins) {
+  const n = Number(mins) || 0;
+  if (!n) return '';
+  if (n % 60 === 0) { const h = n / 60; return `${h} hr${h > 1 ? 's' : ''}`; }
+  return `${n} min`;
+}
+
+// /api/services rows -> the shape renderSvcCard/buildQuote/submitBooking read.
+// Every field is the row's — the page holds no catalogue of its own, which is
+// the point: its own copy of these numbers is what quoted DJ Piñata at $385
+// against a real $3,500, and the form's price becomes the booking's total.
+// Rows without a service_id are skipped rather than becoming `undefined` cards.
+function buildServices(rows) {
+  const out = {};
+  for (const r of (rows || [])) {
+    if (!r || !r.service_id) continue;
+    // The public endpoint already withholds inactive rows, but it hands them to
+    // an authenticated admin. Belt and braces: a service switched off in
+    // Catalogue must never be bookable, whoever is looking.
+    if (r.active === false) continue;
+    // NULL extra_hour_rate means this service has no hours picker. $0 would
+    // render one offering four hours free, so only a real rate counts.
+    const rate = Number(r.extra_hour_rate);
+    out[r.service_id] = {
+      id:       r.service_id,
+      icon:     r.icon || '🎪',
+      name:     r.name || r.service_id,
+      price:    Number(r.price) || 0,   // NUMERIC(10,2) arrives as a string
+      duration: durationLabel(r.duration_minutes),
+      // The guest note stands in until someone writes a description in
+      // Catalogue, so a newly added service is never a blank card.
+      desc:     r.description || r.guest_suggestion || '',
+      isQuote:  r.is_quote === true,
+      addons:   [],
+      ...(rate > 0 ? { extraHourRate: rate } : {}),
+    };
+  }
+  return out;
+}
+
 // ══ END PURE HELPERS ══
 
 // ══════════════════════════════════════════════════
@@ -683,60 +567,101 @@ let dbAddons = [];        // all addons from DB: [{ addon_id, name, price, ... }
 let dbServiceAddons = {}; // { service_id: [addon_id, ...] }
 let dbServiceCategories = {}; // { service_id: category } from /api/services
 
-async function loadAddonsFromDB() {
+// The two upsells offered on every non-photo-booth service. Both are ordinary
+// rows in the addons table, so their prices are edited in Catalogue like any
+// other; the page carries no copy of them. Empty list => no section rendered,
+// which is the honest outcome if someone deletes the rows.
+function photoBoothAddons() {
+  return ['pb_kiosk', 'pb_360']
+    .map(id => dbAddons.find(x => x.addon_id === id))
+    .filter(Boolean)
+    .map(db => {
+      // "Standalone: $385" was hardcoded and would have drifted from the
+      // booth's own catalogue price the moment either changed. Read it.
+      const alone = SERVICES[db.addon_id === 'pb_kiosk' ? 'pb_kiosk_svc' : 'pb_360_svc'];
+      return {
+        id: db.addon_id,
+        name: db.name,
+        price: Number(db.price),
+        note: alone ? `Standalone: $${alone.price.toLocaleString()}` : '',
+      };
+    });
+}
+
+// Loads the whole catalogue. Returns false when the form must not be shown:
+// no catalogue means no prices, and a booking priced from a stale copy of the
+// price list is a real invoice for the wrong amount.
+async function loadCatalogue() {
+  let data;
   try {
     const res = await fetch('/api/services');
-    const data = await res.json();
-    dbAddons = data.addons || [];
-    dbServiceAddons = data.service_addons || {};
-    setCategories(data.categories);
-    // The catalogue already carries the grouping the form needs; it was being
-    // discarded. Read it rather than duplicating 27 rows into SERVICES.
-    for (const s of (data.services || [])) {
-      if (s.service_id && s.category) dbServiceCategories[s.service_id] = s.category;
-    }
-    const dbServiceEventTypes = data.service_event_types || {};
-
-    // Patch each SERVICES entry's .addons with DB data
-    for (const [svcId, addonIds] of Object.entries(dbServiceAddons)) {
-      if (SERVICES[svcId]) {
-        SERVICES[svcId].addons = addonIds
-          .map(aid => {
-            const a = dbAddons.find(x => x.addon_id === aid);
-            if (!a) return null;
-            return { id: a.addon_id, name: a.name, price: Number(a.price) };
-          })
-          .filter(Boolean);
-      }
-    }
-    // For services not in dbServiceAddons, clear addons (DB is now source of truth)
-    for (const svcId of Object.keys(SERVICES)) {
-      if (!dbServiceAddons[svcId]) SERVICES[svcId].addons = [];
-    }
-
-    // Patch EVENT_TYPES[x].svcs from DB if any service_event_types data exists
-    if (Object.keys(dbServiceEventTypes).length > 0) {
-      // Build inverse map: event_type_id -> [service_ids]
-      const etToSvcs = {};
-      for (const [svcId, etIds] of Object.entries(dbServiceEventTypes)) {
-        for (const etId of etIds) {
-          if (!etToSvcs[etId]) etToSvcs[etId] = [];
-          etToSvcs[etId].push(svcId);
-        }
-      }
-      // Patch each EVENT_TYPES entry
-      EVENT_TYPES.forEach(et => {
-        if (etToSvcs[et.id]) et.svcs = etToSvcs[et.id];
-      });
-    }
-
-  } catch(e) {
-    console.warn('Could not load add-ons from DB, using defaults:', e.message);
+    if (!res.ok) throw new Error(`/api/services ${res.status}`);
+    data = await res.json();
+  } catch (e) {
+    console.error('Could not load the catalogue:', e.message);
+    return false;
   }
+
+  const rows = data.services || [];
+  if (!rows.length) {
+    console.error('Catalogue returned no active services.');
+    return false;
+  }
+
+  dbAddons = data.addons || [];
+  dbServiceAddons = data.service_addons || {};
+  setCategories(data.categories);
+
+  // Names, prices, icons, durations and the service list itself: all from the
+  // DB, all editable in Catalogue. The rows arrive ordered by sort_order, and
+  // insertion order is what ALL_SVC_IDS and the sections below inherit.
+  Object.assign(SERVICES, buildServices(rows));
+  ALL_SVC_IDS = Object.keys(SERVICES);
+  const rank = new Map(ALL_SVC_IDS.map((id, n) => [id, n]));
+
+  for (const r of rows) {
+    if (r.category) dbServiceCategories[r.service_id] = r.category;
+  }
+
+  // Add-ons: the DB is authoritative, so a service with no service_addons rows
+  // correctly shows none.
+  for (const svcId of ALL_SVC_IDS) {
+    SERVICES[svcId].addons = (dbServiceAddons[svcId] || [])
+      .map(aid => {
+        const a = dbAddons.find(x => x.addon_id === aid);
+        return a ? { id: a.addon_id, name: a.name, price: Number(a.price) } : null;
+      })
+      .filter(Boolean);
+  }
+
+  // "Shown for" in Catalogue drives which services each event type offers.
+  const dbServiceEventTypes = data.service_event_types || {};
+  if (Object.keys(dbServiceEventTypes).length > 0) {
+    const etToSvcs = {};
+    for (const [svcId, etIds] of Object.entries(dbServiceEventTypes)) {
+      if (!SERVICES[svcId]) continue;  // inactive or deleted since
+      for (const etId of etIds) (etToSvcs[etId] ||= []).push(svcId);
+    }
+    // service_event_types comes back ordered by service_id, which would list
+    // Double Cannon above Single. Re-sort to the catalogue's own order.
+    for (const ids of Object.values(etToSvcs)) ids.sort((a, b) => rank.get(a) - rank.get(b));
+    EVENT_TYPES.forEach(et => { if (etToSvcs[et.id]) et.svcs = etToSvcs[et.id]; });
+  }
+
+  return true;
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
-  await loadAddonsFromDB();
+  if (!await loadCatalogue()) {
+    document.querySelector('.body').innerHTML =
+      `<div class="step active" style="text-align:center;padding:30px 0">
+         <h2>We couldn't load our services</h2>
+         <p class="step-sub">Something went wrong on our end. Please refresh the page —
+         if it keeps happening, call us at (405) 431-6625 and we'll book you over the phone.</p>
+       </div>`;
+    document.getElementById('progress-bar').style.display = 'none';
+    return;
+  }
   renderEtGrid();
   populateTimes();
   setMinDate();
@@ -798,8 +723,8 @@ function buildStep2() {
       head.className = 'svc-section-head';
       head.setAttribute('aria-expanded', String(sec.key === openKey));
       head.innerHTML =
-        `<span class="svc-section-icon">${sec.icon}</span>` +
-        `<span class="svc-section-label">${sec.label}</span>` +
+        `<span class="svc-section-icon">${esc(sec.icon)}</span>` +
+        `<span class="svc-section-label">${esc(sec.label)}</span>` +
         `<span class="svc-section-count">${sec.ids.length}</span>` +
         `<span class="svc-section-chev">▼</span>`;
       head.onclick = () => toggleSection(sec.key);
@@ -823,18 +748,18 @@ function renderSvcCard(id) {
   card.className = 'svc-card' + (S.svcId === id ? ' selected' : '');
   card.id = 'svc-card-' + id;
 
-  const priceStr = svc.priceNote
-    ? `<span class="price-note">${svc.priceNote} </span>$${svc.price.toLocaleString()}`
+  const priceStr = svc.isQuote
+    ? `<span class="price-note">Starting at </span>$${svc.price.toLocaleString()}`
     : `$${svc.price.toLocaleString()}`;
 
   card.innerHTML = `
     <div class="svc-card-header" onclick="selectService('${id}')">
-      <div class="svc-icon">${svc.icon}</div>
+      <div class="svc-icon">${esc(svc.icon)}</div>
       <div class="svc-info">
-        <div class="svc-name">${svc.name}</div>
+        <div class="svc-name">${esc(svc.name)}</div>
         <div class="svc-price">${priceStr}</div>
-        ${svc.desc ? `<div class="svc-desc">${svc.desc}</div>` : ''}
-        ${svc.duration ? `<div class="svc-duration">⏱ ${svc.duration}</div>` : ''}
+        ${svc.desc ? `<div class="svc-desc">${esc(svc.desc)}</div>` : ''}
+        ${svc.duration ? `<div class="svc-duration">⏱ ${esc(svc.duration)}</div>` : ''}
       </div>
       <div class="svc-select-indicator"></div>
     </div>
@@ -886,25 +811,19 @@ function buildAccordion(svc) {
       const priceLabel = a.price === 'per_child'
         ? a.note
         : (a.priceNote ? `${a.priceNote} +$${a.price}` : `+$${a.price}`);
-      const noteStr = a.note && a.price !== 'per_child' ? `<span class="addon-note">${a.note}</span>` : '';
+      const noteStr = a.note && a.price !== 'per_child' ? `<span class="addon-note">${esc(a.note)}</span>` : '';
       html += `<div class="addon-item${isSelected?' selected':''}" id="addon-${a.id}" onclick="toggleAddon('${svc.id}','${a.id}')">
         <div class="addon-check"></div>
-        <div class="addon-name">${a.name}${noteStr}</div>
+        <div class="addon-name">${esc(a.name)}${noteStr}</div>
         <div class="addon-price-tag">${priceLabel}</div>
       </div>`;
     });
     html += `</div>`;
   }
 
-  // Photo booth add-ons for non-photo-booth services
-  // Source from DB if available, else fall back to hardcoded
-  const pbAddons = ['pb_kiosk', 'pb_360'].map(id => {
-    const db = dbAddons.find(x => x.addon_id === id);
-    return db ? { id: db.addon_id, name: db.name, price: Number(db.price), note: 'Standalone: $385' } : null;
-  }).filter(Boolean);
-  const pbList = pbAddons.length ? pbAddons : PHOTO_BOOTH_ADDONS;
-
-  if (!svc.id.startsWith('pb_')) {
+  // Photo booth upsell, on everything except the booths themselves.
+  const pbList = photoBoothAddons();
+  if (pbList.length && !svc.id.startsWith('pb_')) {
     html += `<div class="photo-booth-section">
       <div class="addon-section-label">📸 Photo Booth Add-Ons</div>
       <div class="addon-list">`;
@@ -912,7 +831,7 @@ function buildAccordion(svc) {
       const isSelected = S.addons.includes(a.id);
       html += `<div class="addon-item${isSelected?' selected':''}" id="addon-${a.id}" onclick="toggleAddon('${svc.id}','${a.id}')">
         <div class="addon-check"></div>
-        <div class="addon-name">${a.name}<span class="addon-note">${a.note||''}</span></div>
+        <div class="addon-name">${esc(a.name)}<span class="addon-note">${esc(a.note || '')}</span></div>
         <div class="addon-price-tag">+$${a.price}</div>
       </div>`;
     });
@@ -994,12 +913,7 @@ function renderStickyBar() {
     return;
   }
 
-  const pbList = ['pb_kiosk', 'pb_360']
-    .map(id => dbAddons.find(x => x.addon_id === id))
-    .filter(Boolean)
-    .map(db => ({ id: db.addon_id, name: db.name, price: Number(db.price) }));
-  const resolve = (aid) => resolveAddon(svc, aid,
-    pbList.length ? pbList : PHOTO_BOOTH_ADDONS, dbAddons);
+  const resolve = (aid) => resolveAddon(svc, aid, photoBoothAddons(), dbAddons);
 
   const r = step2Subtotal(svc, getExtraHours(S.svcId), S.addons, resolve);
 
@@ -1152,16 +1066,11 @@ async function buildQuote() {
     total += extraCost;
   }
 
-  // Addons — source from service addons + photo booth fallback, all from DB
-  const pbFallback = PHOTO_BOOTH_ADDONS; // kept as static fallback if DB unavailable
-  const allAddons = [...(svc.addons||[]), ...pbFallback.map(a=>({...a, fromPB:true}))];
+  // Add-ons — same resolver the sticky bar and the submitted payload use, so
+  // the three cannot price the same selection differently.
+  const pbList = photoBoothAddons();
   S.addons.forEach(aid => {
-    let addon = (svc.addons||[]).find(a=>a.id===aid);
-    if (!addon) addon = pbFallback.find(a=>a.id===aid);
-    if (!addon) { // try DB directly
-      const db = dbAddons.find(x => x.addon_id === aid);
-      if (db) addon = { id: db.addon_id, name: db.name, price: Number(db.price) };
-    }
+    const addon = resolveAddon(svc, aid, pbList, dbAddons);
     if (!addon) return;
 
     if (addon.isQuote) {
@@ -1245,9 +1154,9 @@ async function submitBooking() {
   const svcPrice = svc.isQuote ? 0 : svc.price;
   const extraCost = (svc.extraHourRate && extraH > 0) ? svc.extraHourRate * extraH : 0;
 
+  const pbList = photoBoothAddons();
   const addonDetails = S.addons.map(aid => {
-    let a = (svc.addons||[]).find(x=>x.id===aid) || PHOTO_BOOTH_ADDONS.find(x=>x.id===aid);
-    if (!a) { const db = dbAddons.find(x=>x.addon_id===aid); if (db) a = {id:db.addon_id,name:db.name,price:Number(db.price)}; }
+    const a = resolveAddon(svc, aid, pbList, dbAddons);
     if (!a) return null;
     const price = a.price === 'per_child' ? a.rate * guests : (a.isQuote ? 0 : Number(a.price));
     return { id: aid, name: a.name, price };
