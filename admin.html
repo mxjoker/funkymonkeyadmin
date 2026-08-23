@@ -2,7 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<!-- Installable to a phone home screen. apple-* tags are the iOS half: Safari
+     ignores the manifest for standalone mode and the icon, so both are stated
+     twice on purpose. Do NOT add a service worker — everything here is live DB
+     data, and deploys are manual, so a cache would serve staff stale code. -->
+<link rel="manifest" href="/manifest-admin.json"/>
+<meta name="theme-color" content="#1e1b4b"/>
+<link rel="apple-touch-icon" href="/icons/admin-180.png"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black"/>
+<meta name="apple-mobile-web-app-title" content="FM Admin"/>
 <title>Funky Monkey Admin</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -250,6 +261,24 @@ input,select,textarea{font-family:inherit}
   .bk-table td:nth-child(2) .text-muted{display:none} /* email line — widest, least useful on phone */
   .bk-table td,.bk-table th{padding:10px 8px}
 }
+
+/* ── Phone / home-screen app ────────────────────────────────────────────── */
+/* Placed after the layout media queries above so it wins at equal specificity. */
+@media(max-width:768px){
+  .mobile-topbar{padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
+  .sidebar{padding-bottom:env(safe-area-inset-bottom)}
+  .main{padding-bottom:calc(24px + env(safe-area-inset-bottom));
+        padding-left:max(16px,env(safe-area-inset-left));
+        padding-right:max(16px,env(safe-area-inset-right))}
+}
+/* iOS Safari force-zooms into any input under 16px on focus and leaves the page
+   scrolled sideways, which is what made editing a payment on a phone feel
+   broken. Desktop keeps its dense sizing; only phones get bumped. !important
+   because the rules being beaten (.pay-field input, .cat-table input, …) are
+   more specific than any bare element selector. */
+@media(max-width:768px){
+  input,select,textarea{font-size:16px!important}
+}
 </style>
 </head>
 <body>
@@ -301,7 +330,7 @@ input,select,textarea{font-family:inherit}
       Funky Monkey Events · OKC<br>
       (405) 431-6625
       <div style="margin-top:12px">
-        <button class="btn btn-outline btn-sm" onclick="(async()=>{try{await apiFetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'logout'})})}catch(e){}sessionStorage.clear();location.reload()})()" style="width:100%;font-size:0.875rem">
+        <button class="btn btn-outline btn-sm" onclick="(async()=>{try{await apiFetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'logout'})})}catch(e){}authStore.removeItem('fm_auth');location.reload()})()" style="width:100%;font-size:0.875rem">
           🚪 Sign Out
         </button>
         <button class="btn btn-ghost btn-sm" onclick="changeAdminPassword()" style="width:100%;font-size:0.8rem;margin-top:6px;color:rgba(255,255,255,.4)">
@@ -521,7 +550,7 @@ input,select,textarea{font-family:inherit}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" onclick="openStaffPreferences()">⚙️ My Preferences</button>
-          <button class="btn btn-outline btn-sm" onclick="sessionStorage.clear();location.reload()">Sign Out</button>
+          <button class="btn btn-outline btn-sm" onclick="authStore.removeItem('fm_auth');location.reload()">Sign Out</button>
         </div>
       </div>
       <!-- MY EARNINGS -->
@@ -965,14 +994,23 @@ document.getElementById('filter-status').insertAdjacentHTML('beforeend',
 // AUTH
 // ══════════════════════════════════════════════════
 
+// ponytail: one alias, so every read/write below persists instead of dying with
+// the tab. This is what makes the home-screen app usable — a per-tab token meant
+// staff re-logged in on every single launch. The server still owns expiry (the
+// `check` call below, and the 401 branch in apiFetch), so a stale token here is
+// rejected, not trusted. iOS may evict this after ~7 idle days; that is a
+// re-login, not a bug.
+const authStore = localStorage;
+
+
 // Shared authenticated fetch helper — injects Bearer token and handles 401
 async function apiFetch(url, opts = {}) {
-  const session = (() => { try { return JSON.parse(sessionStorage.getItem('fm_auth') || 'null'); } catch { return null; } })();
+  const session = (() => { try { return JSON.parse(authStore.getItem('fm_auth') || 'null'); } catch { return null; } })();
   const headers = Object.assign({}, opts.headers || {});
   if (session?.token) headers['Authorization'] = 'Bearer ' + session.token;
   const res = await fetch(url, Object.assign({}, opts, { headers }));
   if (res.status === 401) {
-    sessionStorage.removeItem('fm_auth');
+    authStore.removeItem('fm_auth');
     location.reload();
     return res; // unreachable after reload but satisfies callers
   }
@@ -990,7 +1028,7 @@ async function doLogin() {
     const data = await res.json();
     if (data.success) {
       currentUser = { role: data.role, staffId: data.staffId || null, staffName: data.staffName || 'Admin', staffColor: data.staffColor || '#7c3aed', token: data.token || null, expiresAt: data.expiresAt || null };
-      sessionStorage.setItem('fm_auth', JSON.stringify(currentUser));
+      authStore.setItem('fm_auth', JSON.stringify(currentUser));
       document.getElementById('auth-screen').style.display = 'none';
       document.getElementById('app').style.display = 'block';
       init();
@@ -1005,7 +1043,7 @@ async function doLogin() {
 window.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('dash-date').textContent =
     new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
-  const saved = sessionStorage.getItem('fm_auth');
+  const saved = authStore.getItem('fm_auth');
   if (saved) {
     let session;
     try { session = JSON.parse(saved); } catch { session = null; }
@@ -1018,11 +1056,11 @@ window.addEventListener('DOMContentLoaded', async () => {
           body: JSON.stringify({ action: 'check' })
         });
         if (!checkRes.ok) {
-          sessionStorage.removeItem('fm_auth');
+          authStore.removeItem('fm_auth');
           return; // show login screen
         }
       } catch {
-        sessionStorage.removeItem('fm_auth');
+        authStore.removeItem('fm_auth');
         return;
       }
       currentUser = session;
@@ -5113,7 +5151,7 @@ async function saveStaffPreferences() {
   try {
     const updated = await patchStaff(currentUser.staffId, payload);
     currentUser.staffName = updated.preferred_name || updated.name;
-    sessionStorage.setItem('fm_auth', JSON.stringify(currentUser));
+    authStore.setItem('fm_auth', JSON.stringify(currentUser));
     const el = document.getElementById('portal-greeting');
     if (el) el.textContent = 'Hey, ' + currentUser.staffName + '! 👋';
     closeModal();

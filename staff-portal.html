@@ -2,7 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<!-- Installable to a phone home screen. apple-* tags are the iOS half: Safari
+     ignores the manifest for standalone mode and the icon, so both are stated
+     twice on purpose. Do NOT add a service worker — everything here is live DB
+     data, and deploys are manual, so a cache would serve staff stale code. -->
+<link rel="manifest" href="/manifest-staff.json"/>
+<meta name="theme-color" content="#0F0A1E"/>
+<link rel="apple-touch-icon" href="/icons/staff-180.png"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black"/>
+<meta name="apple-mobile-web-app-title" content="FM Staff"/>
 <title>Funky Monkey — Staff Portal</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -42,6 +53,12 @@ body{font-family:'Segoe UI',sans-serif;background:#0F0A1E;min-height:100vh;color
 .btn-danger{background:#dc2626;color:#fff}
 .btn-sm{padding:5px 10px;font-size:.78rem}
 .btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* Home-screen app: keep content clear of the iPhone home indicator, and of the
+   notch in landscape. viewport-fit=cover in the head is what makes env() here
+   report anything but 0. */
+body{padding-bottom:env(safe-area-inset-bottom)}
+.topbar{padding-left:max(20px,env(safe-area-inset-left));padding-right:max(20px,env(safe-area-inset-right))}
 </style>
 </head>
 <body>
@@ -219,16 +236,25 @@ function fmtDuration(mins) {
 // AUTH
 // ═══════════════════════════════════════
 
+// ponytail: one alias, so every read/write below persists instead of dying with
+// the tab. This is what makes the home-screen app usable — a per-tab token meant
+// staff re-logged in on every single launch. The server still owns expiry (the
+// `check` call below, and the 401 branch in apiFetch), so a stale token here is
+// rejected, not trusted. iOS may evict this after ~7 idle days; that is a
+// re-login, not a bug.
+const authStore = localStorage;
+
+
 // apiFetch: injects Bearer token; on 401 clears session and reloads (login reappears)
 async function apiFetch(url, opts = {}) {
-  const saved = sessionStorage.getItem('fm_staff_auth');
+  const saved = authStore.getItem('fm_staff_auth');
   let token = null;
   try { token = saved ? JSON.parse(saved).token : null; } catch {}
   const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
   if (token) headers['Authorization'] = 'Bearer ' + token;
   const res = await fetch(url, Object.assign({}, opts, { headers }));
   if (res.status === 401) {
-    sessionStorage.removeItem('fm_staff_auth');
+    authStore.removeItem('fm_staff_auth');
     location.reload();
     return res; // unreachable after reload, but keeps return type consistent
   }
@@ -236,7 +262,7 @@ async function apiFetch(url, opts = {}) {
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
-  const saved = sessionStorage.getItem('fm_staff_auth');
+  const saved = authStore.getItem('fm_staff_auth');
   if (saved) {
     try {
       currentUser = JSON.parse(saved);
@@ -251,7 +277,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       });
       const data = await res.json();
       if (!data.success) {
-        sessionStorage.removeItem('fm_staff_auth');
+        authStore.removeItem('fm_staff_auth');
         currentUser = null;
         return; // login screen stays visible
       }
@@ -260,11 +286,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         currentUser.staffId = data.staffId;
         currentUser.staffName = data.staffName || currentUser.staffName;
         currentUser.staffColor = data.staffColor || currentUser.staffColor;
-        sessionStorage.setItem('fm_staff_auth', JSON.stringify(currentUser));
+        authStore.setItem('fm_staff_auth', JSON.stringify(currentUser));
       }
       showApp();
     } catch {
-      sessionStorage.removeItem('fm_staff_auth');
+      authStore.removeItem('fm_staff_auth');
     }
   }
 });
@@ -302,7 +328,7 @@ async function doLogin(event) {
         token: data.token,
         expiresAt: data.expiresAt
       };
-      sessionStorage.setItem('fm_staff_auth', JSON.stringify(currentUser));
+      authStore.setItem('fm_staff_auth', JSON.stringify(currentUser));
       showApp();
     } else if (data.success && data.role === 'admin') {
       // Admin password entered — redirect to admin dashboard
@@ -324,7 +350,7 @@ async function doSignOut() {
       body: JSON.stringify({ action: 'logout' })
     });
   } catch {}
-  sessionStorage.removeItem('fm_staff_auth');
+  authStore.removeItem('fm_staff_auth');
   location.reload();
 }
 
@@ -835,7 +861,7 @@ async function savePreferences() {
     if (!res.ok) { const e = await res.json(); throw new Error(e.error||'Save failed'); }
     const updated = await res.json();
     currentUser.staffName = updated.preferred_name || updated.name;
-    sessionStorage.setItem('fm_staff_auth', JSON.stringify(currentUser));
+    authStore.setItem('fm_staff_auth', JSON.stringify(currentUser));
     const greet = document.getElementById('portal-greeting');
     if (greet) greet.textContent = 'Hey, ' + currentUser.staffName + '! 👋';
     closeModal();
