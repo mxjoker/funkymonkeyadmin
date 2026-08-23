@@ -18,6 +18,7 @@ body{font-family:'Segoe UI',sans-serif;background:#0F0A1E;min-height:100vh;color
 #login-pin:focus{outline:none;border-color:#a855f7}
 #login-btn{width:100%;background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;border:none;border-radius:10px;padding:14px;font-size:1rem;font-weight:800;cursor:pointer;transition:opacity .2s}
 #login-btn:hover{opacity:.9}
+#login-show{background:none;border:none;color:#a78bca;font-size:.78rem;cursor:pointer;padding:0 0 12px;text-decoration:underline}
 #login-err{color:#f87171;font-size:.82rem;margin-top:10px;display:none}
 .login-hint{font-size:.75rem;color:rgba(167,139,202,.5);margin-top:18px}
 
@@ -51,10 +52,14 @@ body{font-family:'Segoe UI',sans-serif;background:#0F0A1E;min-height:100vh;color
     <div class="login-logo">🐒</div>
     <div class="login-title">Staff Portal</div>
     <div class="login-sub">Funky Monkey Events</div>
-    <input id="login-pin" type="text" autocomplete="current-password"
-      placeholder="maple-rocket-fern-42"
-      onkeydown="if(event.key==='Enter')doLogin()"/>
-    <button id="login-btn" onclick="doLogin()">Log In</button>
+    <!-- Real <form> + type=password: both are required before any browser
+         or password manager will offer to save the access code. -->
+    <form id="login-form" onsubmit="doLogin(event)">
+      <input id="login-pin" type="password" name="password" autocomplete="current-password"
+        placeholder="maple-rocket-fern-42"/>
+      <button type="button" id="login-show" onclick="togglePin()">Show code</button>
+      <button type="submit" id="login-btn">Log In</button>
+    </form>
     <div id="login-err">Incorrect access code. Try again.</div>
     <div class="login-hint">Enter your staff access code</div>
   </div>
@@ -264,7 +269,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-async function doLogin() {
+function togglePin() {
+  const el = document.getElementById('login-pin');
+  const on = el.type === 'password';
+  el.type = on ? 'text' : 'password';
+  document.getElementById('login-show').textContent = on ? 'Hide code' : 'Show code';
+}
+
+async function doLogin(event) {
+  if (event) event.preventDefault();
   const pin = document.getElementById('login-pin').value.trim();
   const err = document.getElementById('login-err');
   err.style.display = 'none';
