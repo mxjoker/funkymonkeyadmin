@@ -209,8 +209,11 @@ test('admin.html has one checklist array/label map, matching the server exactly'
 // array literal out of the file text directly and compare it the same way.
 test('staff-portal.html checklist array matches the server exactly', () => {
   const portalHtml = fs.readFileSync(path.join(__dirname, '../staff-portal.html'), 'utf8');
-  const m = /const checklistStatuses\s*=\s*(\[[^\]]*\])/.exec(portalHtml);
-  assert.ok(m, 'could not find checklistStatuses array in staff-portal.html');
+  // The literal moved into the pure-helper block as CHECKLIST_ORDER so that
+  // groupGigsByBooking can rank stages too; gigCard now aliases it. This pin
+  // follows the array, it does not care which name reads it.
+  const m = /const CHECKLIST_ORDER\s*=\s*(\[[^\]]*\])/.exec(portalHtml);
+  assert.ok(m, 'could not find CHECKLIST_ORDER array in staff-portal.html');
   const stages = JSON.parse(m[1].replace(/'/g, '"'));
   assert.deepStrictEqual(stages, SERVER_CHECKLIST_STATUSES,
     'staff-portal.html checklistStatuses has drifted from staff-assignments.js CHECKLIST_STATUSES');

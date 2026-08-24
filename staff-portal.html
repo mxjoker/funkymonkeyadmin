@@ -230,6 +230,60 @@ function fmtDuration(mins) {
   return h ? (m ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
 }
 
+
+// staff_assignments is UNIQUE(booking_id, staff_id, tag_filled), so one person
+// holding two roles on one booking — Driver AND Performer — is two legitimate
+// rows, not a join fanout. The portal rendered a card per row, which read as the
+// same gig listed twice.
+//
+// Collapse to one card per booking, but carry EVERY assignment id on it. Pay is
+// computed per assignment from that assignment's own gig_logs row, so a card
+// that clocked only the first role would leave the second with no measured span
+// and drop it onto the estimate path without ever saying so.
+//
+// openGigs is deliberately NOT grouped: it is one row per (booking, role) on
+// purpose, so taking one role still leaves the other offerable.
+const CHECKLIST_ORDER = ['upcoming','clocked_in','on_my_way','arrived','completed','clocked_out'];
+
+function checklistIdx(status) {
+  const i = CHECKLIST_ORDER.indexOf(status || 'upcoming');
+  return i === -1 ? 0 : i;
+}
+
+function groupGigsByBooking(gigs) {
+  const byBooking = new Map();
+  for (const g of gigs || []) {
+    const seen = byBooking.get(g.booking_id);
+    if (!seen) {
+      byBooking.set(g.booking_id, Object.assign({}, g, {
+        tags: [g.tag_filled],
+        assignment_ids: [g.id],
+        // Index-aligned with assignment_ids, '' where no log exists yet. They
+        // must stay parallel: pairing a log id with the wrong assignment would
+        // stamp a different row than the one the button names.
+        log_ids: [g.log_id || ''],
+      }));
+      continue;
+    }
+    seen.tags.push(g.tag_filled);
+    seen.assignment_ids.push(g.id);
+    seen.log_ids.push(g.log_id || '');
+    // Least-advanced step wins. Claiming the further-along one would tell
+    // someone they had finished work they had not started.
+    if (checklistIdx(g.checklist_status) < checklistIdx(seen.checklist_status)) {
+      seen.checklist_status = g.checklist_status;
+    }
+    // The report is filed per role, so the button stays up until all have.
+    if (!g.survey_submitted_at) seen.survey_submitted_at = null;
+    // The worked-hours line needs a row carrying both stamps.
+    if (!seen.clocked_out_at && g.clocked_out_at) {
+      seen.clocked_in_at  = g.clocked_in_at;
+      seen.clocked_out_at = g.clocked_out_at;
+    }
+  }
+  return [...byBooking.values()];
+}
+
 // ══ END PURE TIME HELPERS ══
 
 // ═══════════════════════════════════════
@@ -483,8 +537,11 @@ function renderEarnings(currentWeekTotal, lastPaymentAmount, lastPaymentDate, pa
 // ═══════════════════════════════════════
 function renderGigs(myGigs, openGigs) {
   const el = document.getElementById('portal-content');
-  const assigned   = myGigs.filter(g => g.status === 'assigned');
-  const interested = myGigs.filter(g => g.status === 'interested' || g.status === 'backup');
+  // Grouped per bucket, not across them: being confirmed as Driver while only
+  // interested in Performer is two genuinely different states, and merging them
+  // into one card would have to lie about one of them.
+  const assigned   = groupGigsByBooking(myGigs.filter(g => g.status === 'assigned'));
+  const interested = groupGigsByBooking(myGigs.filter(g => g.status === 'interested' || g.status === 'backup'));
   let html = '';
 
   if (assigned.length) {
@@ -520,7 +577,7 @@ function gigCard(g, isAssigned) {
   // Must match CHECKLIST_STATUSES in staff-assignments.js — the server rejects
   // any status not in its own list, and these stamps are what pay is computed
   // from. Change one, change both in the same commit.
-  const checklistStatuses = ['upcoming','clocked_in','on_my_way','arrived','completed','clocked_out'];
+  const checklistStatuses = CHECKLIST_ORDER;
   const checklistLabels   = { upcoming:'📅 Upcoming', clocked_in:'🕐 Clocked In', on_my_way:'🚗 On My Way',
                               arrived:'📍 Arrived', completed:'✅ Done', clocked_out:'🏠 Clocked Out' };
   const curStatus = g.checklist_status || 'upcoming';
@@ -543,8 +600,8 @@ function gigCard(g, isAssigned) {
           const bg = isActive ? '#7c3aed' : isPast ? '#059669' : 'transparent';
           const border = isActive || isPast ? 'none' : '1.5px solid rgba(168,85,247,.3)';
           const color  = isActive || isPast ? '#fff' : '#c084fc';
-          const logId  = g.log_id || '';
-          const assignId = g.id;
+          const logId  = (g.log_ids || [g.log_id || '']).join(',');
+          const assignId = (g.assignment_ids || [g.id]).join(',');
           const bookId   = g.booking_id;
           const staffId  = currentUser.staffId;
           const title = isActive ? 'Current step' : isPast ? `Go back to ${checklistLabels[s]}` : `Mark ${checklistLabels[s]}`;
@@ -558,7 +615,7 @@ function gigCard(g, isAssigned) {
         ⏱ Worked <strong style="color:#c084fc">${clockedHoursLabel(g)}</strong>
       </div>` : ''}
       ${reportButtonVisible(g)
-        ? `<button class="btn btn-outline btn-sm" style="margin-top:10px;border-color:#a855f7;color:#c084fc" onclick="openSurvey('${g.log_id}','${g.booking_id}')">📋 Submit Post-Gig Report</button>`
+        ? `<button class="btn btn-outline btn-sm" style="margin-top:10px;border-color:#a855f7;color:#c084fc" onclick="openSurvey('${(g.log_ids || [g.log_id]).filter(Boolean).join(',')}')">📋 Submit Post-Gig Report</button>`
         : ''}
     </div>` : '';
 
@@ -580,7 +637,7 @@ function gigCard(g, isAssigned) {
       <div>
         <div style="font-weight:800;color:#fff;font-size:.95rem">${esc(g.service_name)}</div>
         <div style="font-size:.75rem;color:#a78bca;margin-top:3px">
-          <span style="background:rgba(168,85,247,.15);color:#c084fc;border-radius:4px;padding:1px 6px;font-weight:700">${esc(g.tag_filled)}</span>
+          ${(g.tags || [g.tag_filled]).map(t => `<span style="background:rgba(168,85,247,.15);color:#c084fc;border-radius:4px;padding:1px 6px;font-weight:700;margin-right:4px">${esc(t)}</span>`).join('')}
         </div>
       </div>
       <div style="text-align:right;flex-shrink:0">
@@ -684,16 +741,26 @@ async function expressInterest(bookingId, tagFilled, status) {
   } catch(e) { alert('Failed: ' + e.message); }
 }
 
-async function updateChecklist(logId, assignmentId, bookingId, staffId, status) {
+// One card can now cover several assignments (Driver + Performer on the same
+// booking). Each has its own gig_logs row and its own pay line, so every one of
+// them gets stamped — clocking in on only the first would quietly leave the
+// second on the estimate path. Sequential, and it stops on the first failure
+// rather than leaving the roles sitting on different steps.
+async function updateChecklist(logIds, assignmentIds, bookingId, staffId, status) {
+  const assigns = String(assignmentIds).split(',').filter(Boolean);
+  const logs    = String(logIds).split(',');   // index-aligned with assigns
   try {
-    const res = await apiFetch('/api/staff-assignments', {
-      method: 'POST',
-      body: JSON.stringify({ action:'update_checklist', log_id:logId||undefined, assignment_id:assignmentId, booking_id:bookingId, staff_id:staffId, status })
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(()=>({}));
-      alert('Checklist update failed: ' + (err.error || res.status));
-      return;
+    for (let i = 0; i < assigns.length; i++) {
+      const res = await apiFetch('/api/staff-assignments', {
+        method: 'POST',
+        body: JSON.stringify({ action:'update_checklist', log_id:logs[i]||undefined, assignment_id:assigns[i], booking_id:bookingId, staff_id:staffId, status })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(()=>({}));
+        alert('Checklist update failed: ' + (err.error || res.status));
+        await loadPortal();
+        return;
+      }
     }
     await loadPortal();
   } catch(e) { alert('Update failed: ' + e.message); }
@@ -702,7 +769,7 @@ async function updateChecklist(logId, assignmentId, bookingId, staffId, status) 
 // ═══════════════════════════════════════
 // SURVEY MODAL
 // ═══════════════════════════════════════
-function openSurvey(logId) {
+function openSurvey(logIds) {
   document.getElementById('modal-title').textContent = '📋 Post-Gig Report';
   document.getElementById('modal-body').innerHTML = `
     <p style="color:#a78bca;font-size:.85rem;margin-bottom:18px">Joe reviews all reports. Fill in what's relevant.</p>
@@ -718,7 +785,7 @@ function openSurvey(logId) {
     ${textarea('Notes / Highlights','sv-notes','How\'d it go? Anything worth sharing…')}
     ${textarea('Issues / Problems','sv-issues','Anything to flag or fix next time…')}
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
-      <button class="btn btn-primary" onclick="submitSurvey('${logId}')">Submit Report</button>
+      <button class="btn btn-primary" onclick="submitSurvey('${logIds}')">Submit Report</button>
       <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
     </div>`;
   openModal();
@@ -738,10 +805,14 @@ function textarea(label, id, placeholder) {
   </div>`;
 }
 
-async function submitSurvey(logId) {
+// Filed once, recorded against every role held on that booking, so the button
+// actually goes away. submit_survey only ever UPDATEs that log's own columns —
+// nothing sums these across logs, so writing the same answers twice records the
+// report twice rather than double-counting anything.
+async function submitSurvey(logIds) {
   const boolVal = id => { const v = document.getElementById(id).value; return v===''?undefined:v==='true'; };
   const payload = {
-    action:'submit_survey', log_id:logId,
+    action:'submit_survey',
     guest_count_actual: document.getElementById('sv-guests').value    || undefined,
     event_rating:       document.getElementById('sv-rating').value    || undefined,
     balance_collected:  boolVal('sv-balcollect'),
@@ -754,7 +825,9 @@ async function submitSurvey(logId) {
   };
   Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
   try {
-    await apiFetch('/api/staff-assignments', { method:'POST', body:JSON.stringify(payload) });
+    for (const id of String(logIds).split(',').filter(Boolean)) {
+      await apiFetch('/api/staff-assignments', { method:'POST', body:JSON.stringify(Object.assign({}, payload, { log_id:id })) });
+    }
     closeModal();
     alert('Report submitted! Thanks 🎉');
     loadPortal();
