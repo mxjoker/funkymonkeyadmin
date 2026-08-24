@@ -236,10 +236,15 @@ function fmtDuration(mins) {
 // rows, not a join fanout. The portal rendered a card per row, which read as the
 // same gig listed twice.
 //
-// Collapse to one card per booking, but carry EVERY assignment id on it. Pay is
-// computed per assignment from that assignment's own gig_logs row, so a card
-// that clocked only the first role would leave the second with no measured span
-// and drop it onto the estimate path without ever saying so.
+// Collapse to one card per booking, but carry EVERY assignment id on it, so the
+// checklist stamps each role's gig_logs row rather than an arbitrary one.
+//
+// This is NOT load-bearing for pay: payroll.js already groups by
+// staff_id:booking_id (one payment per booking however many roles) and
+// mergeClockSpan takes earliest clock-in to latest clock-out across the group,
+// so one clocked role is enough for a measured span. It is load-bearing for
+// honesty — admin renders gig_logs per assignment, and a half-stamped booking
+// shows one role Clocked Out and the other still Upcoming for the same shift.
 //
 // openGigs is deliberately NOT grouped: it is one row per (booking, role) on
 // purpose, so taking one role still leaves the other offerable.
@@ -742,10 +747,9 @@ async function expressInterest(bookingId, tagFilled, status) {
 }
 
 // One card can now cover several assignments (Driver + Performer on the same
-// booking). Each has its own gig_logs row and its own pay line, so every one of
-// them gets stamped — clocking in on only the first would quietly leave the
-// second on the estimate path. Sequential, and it stops on the first failure
-// rather than leaving the roles sitting on different steps.
+// booking). Each has its own gig_logs row, so every one of them gets stamped and
+// the two roles cannot drift onto different steps. Sequential, and it stops on
+// the first failure rather than leaving them half-applied.
 async function updateChecklist(logIds, assignmentIds, bookingId, staffId, status) {
   const assigns = String(assignmentIds).split(',').filter(Boolean);
   const logs    = String(logIds).split(',');   // index-aligned with assigns

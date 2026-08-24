@@ -44,8 +44,9 @@ test('two roles on one booking collapse to a single card', () => {
 
 test('the merged card can still act on every assignment', () => {
   const [merged] = groupGigsByBooking([driver, performer]);
-  // Pay is computed per assignment from its own gig_logs row. If the card only
-  // clocked one of them, the other silently falls back to the estimate.
+  // Each assignment has its own gig_logs row and admin renders them per
+  // assignment, so the card must stamp all of them or one role reads Clocked Out
+  // while the other still reads Upcoming for the same shift.
   assert.deepEqual(merged.assignment_ids, [11, 12]);
   assert.deepEqual(merged.log_ids, [501, 502]);
 });
@@ -77,7 +78,7 @@ test('the post-gig report stays open until every role has filed', () => {
 test('log_ids stay column-aligned with assignment_ids', () => {
   // A role with no gig_logs row yet must hold its place with '' — updateChecklist
   // pairs the two lists by index, so a collapsed list would stamp log 501 against
-  // the Performer assignment: someone else's row, and the wrong pay stamps.
+  // the Performer assignment: the wrong row entirely.
   const noLogYet = { ...performer, log_id: null };
   const [merged] = groupGigsByBooking([driver, noLogYet]);
   assert.deepEqual(merged.assignment_ids, [11, 12]);
