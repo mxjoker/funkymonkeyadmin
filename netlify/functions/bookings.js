@@ -493,7 +493,7 @@ exports.handler = async (event) => {
       // cold ensureSmsTables can, and nothing here may cost the customer their
       // booking.
       if (smsConsent && booking.client_phone) {
-        sendSms(c, booking.client_phone, SMS_OPT_IN_MESSAGE, {
+        sendSms(client, booking.client_phone, SMS_OPT_IN_MESSAGE, {
           booking_id: booking.id, trigger_label: 'Opt-in confirmation'
         }).catch(e => console.error('opt-in confirmation SMS failed:', e.message));
       }
