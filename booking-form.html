@@ -542,6 +542,19 @@ function buildServices(rows) {
   return out;
 }
 
+// The wire shape of a quote. `total_price` EXCLUDES travel: rollupItems() in
+// netlify/functions/_items.js is the single definition, and every balance
+// formula is `total_price + mileage_cost - deposit_amount`. Folding travel into
+// total_price here billed it twice — once inside the total, once when the
+// server added mileage_cost back on — so a booking with a travel fee stored a
+// balance higher than the one the client was shown on the review screen.
+// `allIn` is the customer-facing number and stays travel-inclusive.
+function quoteTotals(svcPrice, extraCost, addonTotal, mileageCost, deposit) {
+  const totalPrice = svcPrice + extraCost + addonTotal;
+  const allIn = totalPrice + mileageCost;
+  return { totalPrice, allIn, balanceDue: Math.max(0, allIn - deposit) };
+}
+
 // ══ END PURE HELPERS ══
 
 // ══════════════════════════════════════════════════
@@ -1163,8 +1176,8 @@ async function submitBooking() {
   }).filter(Boolean);
 
   const addonTotal = addonDetails.reduce((s,a) => s + a.price, 0);
-  const total = svcPrice + extraCost + addonTotal + S.mileageCost;
   const deposit = 100;
+  const { totalPrice, balanceDue } = quoteTotals(svcPrice, extraCost, addonTotal, S.mileageCost, deposit);
 
   const payload = {
     service_id: svc.id,
@@ -1177,9 +1190,9 @@ async function submitBooking() {
     addon_total: addonTotal,
     mileage_cost: S.mileageCost,
     mileage_miles: S.mileageMiles || 0,
-    total_price: total,
+    total_price: totalPrice,
     deposit_amount: deposit,
-    balance_due: total - deposit,
+    balance_due: balanceDue,
     event_type: S.eventType ? S.eventType.label : '',
     event_type_id: S.eventType ? S.eventType.id : '',
     event_date: document.getElementById('ev-date').value,
