@@ -45,7 +45,7 @@ test('every column the header renders is actually sortable', () => {
   }
   assert.deepStrictEqual(
     plain(BOOKING_COLUMNS.map(c => c.key)),
-    ['reference', 'client', 'service', 'event', 'total', 'status']
+    ['reference', 'client', 'service', 'event', 'created', 'total', 'status']
   );
 });
 
@@ -80,8 +80,13 @@ test('blank values sort last whichever way the arrow points', () => {
   assert.strictEqual(order(rows, { key: 'event', dir: 'desc' }).at(-1), 'blank');
 });
 
-test('unknown sort key falls back to created_at rather than throwing', () => {
+test('inquiry date sorts by created_at in both directions', () => {
   assert.deepStrictEqual(order(ROWS, { key: 'created', dir: 'desc' }), ['A', 'C', 'B']);
+  assert.deepStrictEqual(order(ROWS, { key: 'created', dir: 'asc'  }), ['B', 'C', 'A']);
+});
+
+test('unknown sort key falls back to created_at rather than throwing', () => {
+  // CREATED_COL is now the Inquiry column itself, so this is the same order.
   assert.deepStrictEqual(order(ROWS, { key: 'nonsense', dir: 'desc' }), ['A', 'C', 'B']);
 });
 
@@ -91,8 +96,10 @@ test('clicking the active column flips it; a new column does not', () => {
   assert.deepStrictEqual(plain(nextSort({ key: 'event', dir: 'desc' }, 'client')), { key: 'client', dir: 'asc'  });
 });
 
-test('total opens biggest-first, every other column opens ascending', () => {
+test('total and inquiry open newest/biggest-first, every other column ascending', () => {
   assert.strictEqual(nextSort({ key: 'client', dir: 'asc' }, 'total').dir, 'desc');
+  // Oldest lead first is never the useful first look at an inquiry date.
+  assert.strictEqual(nextSort({ key: 'client', dir: 'asc' }, 'created').dir, 'desc');
   for (const key of ['reference', 'client', 'service', 'event', 'status']) {
     assert.strictEqual(nextSort({ key: 'total', dir: 'desc' }, key).dir, 'asc', `${key} should open ascending`);
   }

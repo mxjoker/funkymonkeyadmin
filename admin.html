@@ -403,7 +403,7 @@ input,select,textarea{font-family:inherit}
           <button class="btn btn-primary btn-sm" onclick="showPage('bookings')">View All</button>
         </div>
         <table class="bk-table">
-          <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Total</th><th>Status</th></tr></thead>
+          <thead><tr><th>Ref</th><th>Client</th><th>Service</th><th>Event Date</th><th>Inquiry</th><th>Total</th><th>Status</th></tr></thead>
           <tbody id="dash-tbody"></tbody>
         </table>
       </div>
@@ -1466,7 +1466,7 @@ function renderDashboard() {
     .slice(0, 8);
   document.getElementById('dash-tbody').innerHTML = recent.length
     ? recent.map(b => bookingRow(b)).join('')
-    : `<tr><td colspan="6" class="table-empty">No pending inquiries</td></tr>`;
+    : `<tr><td colspan="7" class="table-empty">No pending inquiries</td></tr>`;
 
   const today = new Date(); today.setHours(0,0,0,0);
   const upcoming = [...allBookings]
@@ -1547,19 +1547,21 @@ const BOOKING_COLUMNS = [
   { key: 'client',    label: 'Client',     get: b => (b.client_name  || '').toLowerCase() },
   { key: 'service',   label: 'Service',    get: b => (b.service_name || '').toLowerCase() },
   { key: 'event',     label: 'Event Date', get: b => b.event_date || '' },
+  { key: 'created',   label: 'Inquiry',    get: b => b.created_at || '' },
   { key: 'total',     label: 'Total',      get: b => Number(b.total_price) || 0 },
   { key: 'status',    label: 'Status',     get: b => b.status || '' },
 ];
 
-// created_at has no column of its own — it is the default order only.
-const CREATED_COL = { key: 'created', get: b => b.created_at || '' };
+// Where an unknown sort key lands. Also the table's opening order, which is
+// why it points at the Inquiry column rather than repeating its accessor.
+const CREATED_COL = BOOKING_COLUMNS.find(c => c.key === 'created');
 
 // Clicking the active column flips direction. A fresh column starts ascending
-// — soonest event, A-Z client — except Total, where the useful first look is
-// the biggest number.
+// — soonest event, A-Z client — except Total and Inquiry, where the useful
+// first look is the biggest number and the newest lead.
 function nextSort(current, key) {
   if (current.key === key) return { key, dir: current.dir === 'asc' ? 'desc' : 'asc' };
-  return { key, dir: key === 'total' ? 'desc' : 'asc' };
+  return { key, dir: (key === 'total' || key === 'created') ? 'desc' : 'asc' };
 }
 
 // What a booking is missing before it can actually be worked. Empty array
@@ -1861,7 +1863,7 @@ function renderBookingsTable() {
   renderBookingsHead();
   document.getElementById('bookings-tbody').innerHTML = list.length
     ? list.map(b => bookingRow(b, true)).join('')
-    : `<tr><td colspan="7" class="table-empty">No bookings match your filters</td></tr>`;
+    : `<tr><td colspan="8" class="table-empty">No bookings match your filters</td></tr>`;
 }
 
 function bookingRow(b, showViewBtn = false) {
@@ -1870,6 +1872,7 @@ function bookingRow(b, showViewBtn = false) {
     <td><div style="font-weight:600">${esc(b.client_name||'')}</div><div class="text-muted">${esc(b.client_email||'')}</div></td>
     <td>${esc(b.service_name||'—')}${b.is_custom_quote?'<span class="badge badge-custom" style="margin-left:5px">Quote</span>':''}</td>
     <td>${fmtDate(b.event_date)}</td>
+    <td class="text-muted">${fmtDate(b.created_at)}</td>
     <td>${Number(b.total_price||0)>0?'$'+Number(b.total_price).toFixed(0):'<span class="text-muted">TBD</span>'}</td>
     <td><span class="badge badge-${b.status||'review'}">${b.status||'review'}</span></td>
     ${showViewBtn?`<td><button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openBooking('${b.id}')">View</button></td>`:''}
