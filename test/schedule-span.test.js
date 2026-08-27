@@ -4,25 +4,25 @@ const assert = require('node:assert');
 // A pinning test. It asserts what the code does TODAY, not what it should do,
 // so that Task 3 can move this arithmetic into _schedule.js and prove nothing
 // changed. total_minutes feeds payroll; "probably the same" is not good enough.
-const { getDriveMins, autoCalcTimes } = require('../netlify/functions/staff-assignments.js');
+const { getDriveMins, spanFor } = require('../netlify/functions/_schedule.js');
+const { autoCalcTimes } = require('../netlify/functions/staff-assignments.js');
 
 test('getDriveMins: a known ZIP gives a haversine estimate at 35mph plus a 15 min stop', () => {
   // 73102 (downtown) from home 73118. Distance is ~3.4mi, so the raw estimate
   // floors at 10, then +15.
-  assert.strictEqual(getDriveMins('73102'), 25);
+  assert.deepStrictEqual(getDriveMins('73102'), { minutes: 25, zipKnown: true });
 });
 
 test('getDriveMins: a 9-digit ZIP is truncated to 5', () => {
-  assert.strictEqual(getDriveMins('73102-1234'), 25);
+  assert.deepStrictEqual(getDriveMins('73102-1234'), { minutes: 25, zipKnown: true });
 });
 
-test('getDriveMins: an unknown ZIP silently returns 30 — BUG-1, pinned deliberately', () => {
-  // This is wrong and it is tracked as BUG-1. It is pinned here so the
-  // extraction cannot change it by accident; fixing it is a separate task
-  // with its own thought about what payroll should do.
-  assert.strictEqual(getDriveMins('99999'), 30);
-  assert.strictEqual(getDriveMins(''), 30);
-  assert.strictEqual(getDriveMins(null), 30);
+test('getDriveMins: an unknown ZIP still returns 30 — BUG-1, pinned deliberately', () => {
+  // The NUMBER is unchanged on purpose: it reaches payroll through
+  // total_minutes. zipKnown only lets a caller say it is a guess.
+  assert.deepStrictEqual(getDriveMins('99999'), { minutes: 30, zipKnown: false });
+  assert.deepStrictEqual(getDriveMins(''),      { minutes: 30, zipKnown: false });
+  assert.deepStrictEqual(getDriveMins(null),    { minutes: 30, zipKnown: false });
 });
 
 test('autoCalcTimes: total is load + drive + setup + party + pack + drive + home unload', async () => {
@@ -72,4 +72,54 @@ test('autoCalcTimes: no event_time means no schedule_start, not a guessed one', 
 
   await autoCalcTimes(c, 1, 9);
   assert.strictEqual(updates[0][6], null, 'schedule_start must stay null when the gig has no time');
+});
+
+const bookingRow = (over = {}) => ({
+  id: 9, service_id: 'magic', event_date: '2026-09-12', event_time: '14:00', event_zip: '73102', ...over,
+});
+
+const spanClient = (tmpl = [], svc = [{ duration_minutes: 60 }]) => ({
+  query: async (sql) => {
+    if (/FROM service_time_templates/i.test(sql)) return { rows: tmpl };
+    if (/FROM services/i.test(sql)) return { rows: svc };
+    return { rows: [] };
+  }
+});
+
+test('spanFor works on a booking with NO staff assignment — the reason this exists', async () => {
+  const s = await spanFor(spanClient(), bookingRow());
+  assert.strictEqual(s.windowKnown, true);
+  assert.strictEqual(s.totalMinutes, 220);
+  // Leaves home 12:20 Central = 17:20 UTC in September.
+  assert.strictEqual(s.startsAt.toISOString(), '2026-09-12T17:20:00.000Z');
+  // 12:20 + 220 minutes = 16:00 Central = 21:00 UTC.
+  assert.strictEqual(s.endsAt.toISOString(), '2026-09-12T21:00:00.000Z');
+});
+
+test('spanFor: no event_time gives windowKnown false and says why, never a guessed window', async () => {
+  const s = await spanFor(spanClient(), bookingRow({ event_time: null }));
+  assert.strictEqual(s.windowKnown, false);
+  assert.strictEqual(s.startsAt, null);
+  assert.strictEqual(s.endsAt, null);
+  assert.ok(s.unknowns.some(u => /time/i.test(u)), 'unknowns must name the missing time');
+});
+
+test('spanFor: an unknown ZIP reports zipKnown false while still returning the 30-minute figure', async () => {
+  const s = await spanFor(spanClient(), bookingRow({ event_zip: '99999' }));
+  assert.strictEqual(s.zipKnown, false);
+  assert.strictEqual(s.driveMinutes, 30);
+  assert.ok(s.unknowns.some(u => /zip/i.test(u)));
+});
+
+test('spanFor: assignment overrides beat the template', async () => {
+  const s = await spanFor(spanClient(), bookingRow(), { drive_minutes_each_way: 90, load_minutes: 10 });
+  // 10 + 90 + 45 + 60 + 20 + 90 + 15
+  assert.strictEqual(s.totalMinutes, 330);
+});
+
+test('spanFor: a template row beats the hardcoded defaults', async () => {
+  const tmpl = [{ load_minutes: 5, unload_minutes: 5, pack_out_minutes: 5, home_unload_minutes: 5 }];
+  const s = await spanFor(spanClient(tmpl), bookingRow());
+  // 5 + 25 + 5 + 60 + 5 + 25 + 5
+  assert.strictEqual(s.totalMinutes, 130);
 });
