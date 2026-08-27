@@ -74,6 +74,34 @@ test('autoCalcTimes: no event_time means no schedule_start, not a guessed one', 
   assert.strictEqual(updates[0][6], null, 'schedule_start must stay null when the gig has no time');
 });
 
+// Fix round 1: autoCalcTimes used to keep its own load/setup/pack/homeUn
+// defaults in a separate ?? chain, duplicating spanFor's. In sync today, but
+// a changed default in one place and not the other would silently desync the
+// persisted breakdown columns from total_minutes. Now both come from the same
+// span object, so this identity holds structurally rather than by luck — if
+// a future edit reintroduces a second copy of the defaults, this fails the
+// moment the two disagree.
+test('autoCalcTimes: persisted total_minutes equals the sum of the persisted component columns', async () => {
+  const updates = [];
+  const c = {
+    query: async (sql, params) => {
+      if (/FROM staff_assignments/i.test(sql)) return { rows: [{ id: 1, total_minutes: null }] };
+      if (/FROM bookings/i.test(sql)) return { rows: [{ id: 9, service_id: 'magic', event_time: '14:00', event_zip: '73102' }] };
+      if (/FROM service_time_templates/i.test(sql)) return { rows: [] };
+      if (/FROM services/i.test(sql)) return { rows: [{ duration_minutes: 60 }] };
+      if (/^\s*UPDATE staff_assignments/i.test(sql)) { updates.push(params); return { rows: [] }; }
+      return { rows: [] };
+    }
+  };
+
+  await autoCalcTimes(c, 1, 9);
+  const [load, setup, pack, homeUn, drive, total] = updates[0];
+  assert.strictEqual(
+    total, load + drive + setup + 60 + pack + drive + homeUn,
+    'total_minutes must be built from exactly the load/setup/pack/homeUn/drive values persisted alongside it'
+  );
+});
+
 const bookingRow = (over = {}) => ({
   id: 9, service_id: 'magic', event_date: '2026-09-12', event_time: '14:00', event_zip: '73102', ...over,
 });

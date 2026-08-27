@@ -105,7 +105,13 @@ async function spanFor(client, booking, overrides = {}) {
     windowKnown = true;
   }
 
-  return { startsAt, endsAt, totalMinutes, driveMinutes: driveM, zipKnown: drive.zipKnown, windowKnown, unknowns };
+  return {
+    startsAt, endsAt, totalMinutes, driveMinutes: driveM, zipKnown: drive.zipKnown, windowKnown, unknowns,
+    // The four components total_minutes is built from. Returned so a caller that
+    // must persist them as individual columns (autoCalcTimes) reads them from
+    // here rather than keeping its own copy of these defaults in sync by hand.
+    loadMinutes: load, unloadMinutes: setup, packOutMinutes: pack, homeUnloadMinutes: homeUn,
+  };
 }
 
 module.exports = { spanFor, getDriveMins, TZ };

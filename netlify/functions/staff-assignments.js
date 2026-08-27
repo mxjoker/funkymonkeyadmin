@@ -67,16 +67,15 @@ async function autoCalcTimes(client, assignmentId, bookingId, forceRecalc = fals
     const { rows: [b] } = await client.query('SELECT * FROM bookings WHERE id=$1', [bookingId]);
     if (!b) return;
 
-    const { rows: [tmpl] } = await client.query(
-      'SELECT * FROM service_time_templates WHERE service_id=$1', [b.service_id]
-    );
-
     const span = await spanFor(client, b, sa);
 
-    const load   = sa.load_minutes          ?? tmpl?.load_minutes          ?? 30;
-    const setup  = sa.unload_minutes        ?? tmpl?.unload_minutes        ?? 45;
-    const pack   = sa.pack_out_minutes      ?? tmpl?.pack_out_minutes      ?? 20;
-    const homeUn = sa.home_unload_minutes   ?? tmpl?.home_unload_minutes   ?? 15;
+    // These four columns are persisted individually, so they come straight off
+    // span rather than being recomputed here — one home for the defaults, per
+    // the whole point of this extraction. total already reflects them.
+    const load   = span.loadMinutes;
+    const setup  = span.unloadMinutes;
+    const pack   = span.packOutMinutes;
+    const homeUn = span.homeUnloadMinutes;
     const drive  = span.driveMinutes;
     const total  = span.totalMinutes;
 
