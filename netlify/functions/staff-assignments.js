@@ -1319,3 +1319,8 @@ exports.advancedStatus = advancedStatus;
 exports.ensureTables = ensureTables;
 module.exports.validPayOverride = validPayOverride;
 module.exports.payOverrideLog = payOverrideLog;
+
+// Exported for test/schedule-span.test.js, which pins this arithmetic before
+// it moves to _schedule.js. Both exports disappear again once it has.
+module.exports.autoCalcTimes = autoCalcTimes;
+module.exports.getDriveMins = getDriveMins;
