@@ -105,9 +105,17 @@ async function conflictsFor(client, booking, { excludeBookingId = null, now = ne
 // Everything a stranger is allowed to learn. No summaries, no feed labels, no
 // client names — and it fails CLOSED, because "we are not sure" must never let
 // somebody instant-book a Saturday Joe is already committed to.
+//
+// A parser warning (e.g. a BYSETPOS recurrence whose later occurrences could
+// not be expanded) means "there is a standing commitment here I cannot see" —
+// the exact shape of uncertainty this function exists to refuse. conflictsFor
+// deliberately keeps warnings separate from degraded, because the admin path
+// has Joe reading the panel and can weigh a partial-data warning himself; the
+// public path has no human on the other end, so any warning degrades it. That
+// asymmetry is the point — do not fold this back into conflictsFor.
 async function publicAvailability(client, booking, { now = new Date() } = {}) {
   const r = await conflictsFor(client, booking, { now });
-  if (r.degraded || !r.windowKnown) return { available: false, degraded: true };
+  if (r.degraded || !r.windowKnown || r.warnings.length > 0) return { available: false, degraded: true };
   const hard = r.bookings.some(b => b.tier === 'hard');
   return { available: r.external.length === 0 && !hard, degraded: false };
 }

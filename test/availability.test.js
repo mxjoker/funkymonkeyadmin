@@ -224,3 +224,24 @@ test('handler: no date and no booking_id is a 400', async () => {
   const res = await handler({ queryStringParameters: {} });
   assert.strictEqual(res.statusCode, 400);
 });
+
+// ── warnings and the public/admin asymmetry ─────────────────────────────────
+// A parser warning means "there is a standing commitment I cannot see" — the
+// same shape of uncertainty a stale/errored feed produces. The public path
+// has no human reading the result, so it must degrade on a warning even
+// though the feed itself synced fine. The admin path keeps warnings and
+// degraded separate on purpose: Joe can read a warning and judge it himself.
+test('publicAvailability degrades on a parser warning, even from an otherwise healthy feed', async () => {
+  const warned = { ...healthyFeed, last_warnings: [
+    "the recurring event \"School run\" uses BYSETPOS, which cannot be expanded — only its first occurrence is known" ] };
+  const r = await publicAvailability(client({ feeds: [warned] }), BOOKING, { now: NOW });
+  assert.deepStrictEqual(r, { available: false, degraded: true });
+});
+
+test('conflictsFor keeps warnings separate from degraded — the admin path is not public', async () => {
+  const warned = { ...healthyFeed, last_warnings: [
+    "the recurring event \"School run\" uses BYSETPOS, which cannot be expanded — only its first occurrence is known" ] };
+  const r = await conflictsFor(client({ feeds: [warned] }), BOOKING, { now: NOW });
+  assert.strictEqual(r.degraded, false);
+  assert.match(r.warnings.join(' '), /School run/);
+});
