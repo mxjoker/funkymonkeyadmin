@@ -1779,6 +1779,39 @@ function payLabel(assignment, rolePay, staff) {
     : `flat · ${money(s.flat_rate)}`;
 }
 
+// Turns an /api/availability result into something renderable. Pure, so
+// test/conflict-panel.test.js can hold it to the one rule that matters:
+// a degraded answer is never shown as "clear".
+function formatConflicts(r) {
+  const fmtTime = (iso) => new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(new Date(iso));
+
+  const notes = [
+    ...(r.degradedReasons || []),
+    ...(r.warnings || []),
+    ...(r.windowKnown ? [] : (r.unknowns || [])),
+  ];
+
+  const lines = [];
+  for (const e of (r.external || [])) {
+    lines.push(e.allDay
+      ? `${e.summary} — all day (${e.feedLabel})`
+      : `${e.summary} — ${fmtTime(e.startsAt)}–${fmtTime(e.endsAt)} (${e.feedLabel})`);
+  }
+  for (const b of (r.bookings || [])) {
+    const when = b.windowKnown ? `${fmtTime(b.startsAt)}–${fmtTime(b.endsAt)}` : 'time not set';
+    lines.push(`${b.reference} ${b.clientName} — ${when} (${b.status})`);
+  }
+
+  // Order matters. Uncertainty outranks a clean sweep, because "we found
+  // nothing" and "we could not look" must never render the same.
+  const uncertain = r.degraded || !r.windowKnown || (r.warnings || []).length > 0;
+  if (lines.length) return { tone: 'warn', headline: `${lines.length} thing${lines.length === 1 ? '' : 's'} overlap this gig`, lines, notes };
+  if (uncertain)    return { tone: 'unknown', headline: 'Nothing found — but the check is incomplete', lines, notes };
+  return { tone: 'clear', headline: 'Clear — nothing else on this date', lines, notes };
+}
+
 // ══ END PURE HELPERS ══
 
 // Default matches the old "Newest Inquiry" dropdown default, so the view the
@@ -2024,16 +2057,28 @@ function syncTimeField(name) {
 
   if (h.value && !mm.value) mm.value = '00';
 
-  if (!h.value && !mm.value && !a.value) { out.value = ''; if (warn) warn.textContent = ''; return; }
+  // Setting .value in JS does not fire a native 'change' event, and the hidden
+  // input is the only element carrying the .bk-edit/data-f contract — so
+  // anything listening for this field to change (the conflict panel) needs a
+  // dispatched event, not just the assignment below.
+  const fire = () => {
+    if (typeof Event !== 'undefined' && typeof out.dispatchEvent === 'function') {
+      out.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
+
+  if (!h.value && !mm.value && !a.value) { out.value = ''; if (warn) warn.textContent = ''; fire(); return; }
 
   if (!h.value || !a.value) {
     out.value = '';
     if (warn) warn.textContent = !h.value ? 'pick an hour' : 'AM or PM?';
+    fire();
     return;
   }
   if (warn) warn.textContent = '';
   const h24 = (Number(h.value) % 12) + (a.value === 'PM' ? 12 : 0);
   out.value = `${String(h24).padStart(2, '0')}:${mm.value}`;
+  fire();
 }
 
 function bookingField(label, name, value, type = 'text', opts = null) {
@@ -2139,6 +2184,64 @@ function removeItemRow(btn) {
   if (host) renderItemsTotal(host.id.replace('items-list-', ''));
 }
 
+// Renders formatConflicts()'s tone. 'clear' is the only reassuring one —
+// 'unknown' and the fetch-failure branch below both read as "not cleared",
+// on purpose: a blank or green panel on an uncertain answer is worse than no
+// panel at all.
+const CONFLICT_TONES = {
+  clear:   { bg: '#f0fdf4', border: '#86efac', fg: '#166534', icon: '✅' },
+  warn:    { bg: '#fef2f2', border: '#fca5a5', fg: '#991b1b', icon: '⚠️' },
+  unknown: { bg: '#fffbeb', border: '#fde68a', fg: '#92400e', icon: '❓' },
+};
+
+// Guards against a slow response from a booking the admin has since moved
+// away from: the panel is one shared #conflict-panel element, and opening
+// booking B before A's fetch resolves must never let A's answer (clear, warn,
+// or otherwise) get painted over B's date.
+let conflictSeq = 0;
+
+// bookingId is null for a not-yet-saved booking (no row to exclude-self
+// with); the endpoint reads date/time/ZIP straight off the query string in
+// that case. For an existing booking, passing booking_id lets the server
+// load its real service_id and defaults server-side — see availability.js's
+// comment on why there is no service_id field to read here at all.
+async function refreshConflictPanel(bookingId) {
+  const el = document.getElementById('conflict-panel');
+  if (!el) return;
+  const seq = ++conflictSeq;
+  const get = (f) => (document.querySelector(`.bk-edit[data-f="${f}"]`) || {}).value || '';
+  const date = get('event_date');
+  if (!date) { el.innerHTML = ''; return; }
+
+  el.innerHTML = `<div style="font-size:.85rem;color:#9ca3af">Checking the calendar…</div>`;
+  const qs = new URLSearchParams({ date, time: get('event_time'), zip: get('event_zip') });
+  if (bookingId) qs.set('booking_id', bookingId);
+
+  let r;
+  try {
+    const res = await apiFetch(`/api/availability?${qs}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    r = await res.json();
+  } catch (e) {
+    if (seq !== conflictSeq) return; // superseded by a newer check
+    // A failed check is NOT a clear date. Say so, rather than leaving the
+    // panel blank (which reads as "nothing wrong") or falling back to green.
+    el.innerHTML = `<div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:10px 14px;font-size:.85rem;color:#92400e">
+      ❓ Could not check the calendar (${esc(e.message)}). This date has <strong>not</strong> been cleared.</div>`;
+    return;
+  }
+  if (seq !== conflictSeq) return; // superseded by a newer check
+
+  const v = formatConflicts(r);
+  const t = CONFLICT_TONES[v.tone];
+  el.innerHTML = `
+    <div style="background:${t.bg};border:1.5px solid ${t.border};border-radius:10px;padding:10px 14px">
+      <div style="font-weight:700;color:${t.fg};font-size:.88rem">${t.icon} ${esc(v.headline)}</div>
+      ${v.lines.length ? `<ul style="margin:6px 0 0 18px;padding:0;color:${t.fg};font-size:.85rem">${v.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
+      ${v.notes.length ? `<div style="margin-top:6px;font-size:.78rem;color:${t.fg};opacity:.8">${v.notes.map(esc).join(' · ')}</div>` : ''}
+    </div>`;
+}
+
 // id === null opens an empty modal for a new booking taken over the phone.
 // Saving it POSTs a draft; every other path is identical to editing.
 function openBooking(id, seed) {
@@ -2179,6 +2282,9 @@ function openBooking(id, seed) {
         `<button class="status-pill ${b.status===s.id?'active-'+s.id:''}" ${isNew ? 'disabled' : `onclick="setStatus('${b.id}','${s.id}')"`}>${s.label}</button>`
       ).join('')}
     </div>
+
+    <!-- Conflict check against subscribed calendars and other FME bookings -->
+    <div id="conflict-panel" style="margin-bottom:14px"></div>
 
     <!-- Detail grid -->
     <div class="detail-grid">
@@ -2519,6 +2625,15 @@ function openBooking(id, seed) {
     renderItemsTotal(b.id);
   }
   ensureCatalogueLoaded(b.id);
+
+  // Conflict check: re-run whenever date/time/ZIP change, and once on open.
+  // isNew has no booking_id to exclude-self with, but the endpoint only needs
+  // one when there's an existing row to leave out of its own conflict check.
+  for (const f of ['event_date', 'event_time', 'event_zip']) {
+    const input = document.querySelector(`.bk-edit[data-f="${f}"]`);
+    if (input) input.addEventListener('change', () => refreshConflictPanel(isNew ? null : b.id));
+  }
+  refreshConflictPanel(isNew ? null : b.id);
 
   document.getElementById('booking-modal').classList.add('open');
 
