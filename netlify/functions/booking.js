@@ -392,6 +392,13 @@ exports.handler = async (event) => {
         if (u.admin_notes !== undefined) {
           await logChange(c, parseInt(id), 'Admin notes updated', '');
         }
+        // conflict_override is a signal from the admin UI's confirm dialog,
+        // not a booking field — it has no entry in colMap above, so the SET
+        // loop never persists it. All it does is leave a trail explaining a
+        // deliberate double-booking.
+        if (u.conflict_override) {
+          await logChange(c, parseInt(id), 'Saved over conflict', u.conflict_override);
+        }
 
         // Field-level logging for everything the allowlist now accepts.
         // These five already have bespoke log lines above — skip them so a

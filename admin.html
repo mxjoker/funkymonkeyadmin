@@ -625,6 +625,18 @@ input,select,textarea{font-family:inherit}
       <p class="text-muted" style="margin-bottom:20px">Changes save to the database and immediately appear in the booking form.</p>
       <div id="cat-loading" class="cat-loading"><div class="cat-spinner"></div>Loading…</div>
       <div id="cat-content" style="display:none"></div>
+
+      <div class="card" style="margin-top:24px">
+        <div class="card-hdr">
+          <h2>📅 Calendars</h2>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-outline btn-sm" onclick="refreshCalendarFeeds()">↻ Refresh Now</button>
+            <button class="btn btn-primary btn-sm" onclick="openFeedModal(null)">+ Add Calendar</button>
+          </div>
+        </div>
+        <p class="text-muted" style="padding:12px 20px 0;margin:0">Personal calendars checked hourly for clashes with gigs. The address is a credential — once saved it is never shown again, only replaced.</p>
+        <div id="calendar-feeds-body"><div style="text-align:center;padding:32px;color:#9ca3af">Loading…</div></div>
+      </div>
     </div>
 
     <!-- ══ AUTOMATIONS ══ -->
@@ -1218,7 +1230,7 @@ function showPage(name) {
   if (name === 'staff') { renderStaff(); }
   if (name === 'leads') loadLeads();
   if (name === 'otto') loadOtto();
-  if (name === 'catalogue') loadCatalogue();
+  if (name === 'catalogue') { loadCatalogue(); loadCalendarFeeds(); }
   if (name === 'automations') loadAutomations();
   if (name === 'payroll') loadPayroll();
   if (name === 'dashboard') checkStaleWarnings();
@@ -1779,6 +1791,93 @@ function payLabel(assignment, rolePay, staff) {
     : `flat · ${money(s.flat_rate)}`;
 }
 
+// Turns an /api/availability result into something renderable. Pure, so
+// test/conflict-panel.test.js can hold it to the one rule that matters:
+// a degraded answer is never shown as "clear".
+function formatConflicts(r) {
+  const fmtTime = (iso) => new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(new Date(iso));
+
+  const notes = [
+    ...(r.degradedReasons || []),
+    ...(r.warnings || []),
+    ...(r.unknowns || []),
+  ];
+
+  const lines = [];
+  for (const e of (r.external || [])) {
+    lines.push(e.allDay
+      ? `${e.summary} — all day (${e.feedLabel})`
+      : `${e.summary} — ${fmtTime(e.startsAt)}–${fmtTime(e.endsAt)} (${e.feedLabel})`);
+  }
+  for (const b of (r.bookings || [])) {
+    const when = b.windowKnown ? `${fmtTime(b.startsAt)}–${fmtTime(b.endsAt)}` : 'time not set';
+    lines.push(`${b.reference} ${b.clientName} — ${when} (${b.status})`);
+  }
+
+  // Order matters. Uncertainty outranks a clean sweep, because "we found
+  // nothing" and "we could not look" must never render the same.
+  const uncertain = isUncertainConflictCheck(r);
+  if (lines.length) return { tone: 'warn', headline: `${lines.length} thing${lines.length === 1 ? '' : 's'} overlap this gig`, lines, notes };
+  if (uncertain)    return { tone: 'unknown', headline: 'Nothing found — but the check is incomplete', lines, notes };
+  return { tone: 'clear', headline: 'Clear — nothing else on this date', lines, notes };
+}
+
+// Shared by formatConflicts (the panel) and conflictConfirmation (the save
+// gate) so the two cannot drift apart on what "we don't actually know"
+// means. A degraded fetch, an unknown time window, or an unexpanded
+// recurring-event warning all mean the same thing: this is not a clean
+// sweep, whatever else it does or doesn't show.
+function isUncertainConflictCheck(r) {
+  return !!(r.degraded || !r.windowKnown || (r.warnings || []).length > 0);
+}
+
+// What, if anything, must be confirmed before saving. Soft clashes (a quote out
+// for the same day) are shown in the panel but do not interrupt a save — you
+// have not promised anybody anything yet.
+function hardConflictSummary(r) {
+  const items = [
+    ...(r.external || []).map(e => `${e.summary} (${e.feedLabel})`),
+    ...(r.bookings || []).filter(b => b.tier === 'hard').map(b => `${b.reference} ${b.clientName} (${b.status})`),
+  ];
+  return items.length ? items.join('\n• ') : null;
+}
+
+// The save gate. A hard conflict and "we don't actually know" must read as
+// different questions to Joe — one names a clash, the other admits the
+// check never finished or came back degraded — so this returns which kind
+// (or null, meaning nothing to confirm) rather than a single yes/no. A
+// missing result (the fetch hasn't returned, or never ran) is treated the
+// same as a degraded one: an unread absence is not the same as a displayed
+// uncertainty, and the save path has no panel to display it in, so it must
+// ask instead of silently letting the save through. No date entered means
+// no check was ever owed, so that path stays silent.
+function conflictConfirmation(hasDate, result) {
+  if (!hasDate) return null;
+  const summary = hardConflictSummary(result || {});
+  if (summary) {
+    return { kind: 'hard', message: `This date already has:\n\n• ${summary}\n\nSave anyway?` };
+  }
+  if (!result || isUncertainConflictCheck(result)) {
+    return { kind: 'uncertain', message: "The conflict check hasn't finished or couldn't complete, so this date has not been cleared. Save anyway?" };
+  }
+  return null;
+}
+
+// A feed's health in one line. Never blank and never quietly optimistic: a feed
+// that has never synced reads as an error, because it is contributing nothing
+// to a check that is meant to keep gigs off booked days.
+function feedStatusLabel(f, now) {
+  if (!f.last_synced_at) return { tone: 'error', text: 'Never synced — this calendar is not being checked' };
+  if (f.last_status === 'error') return { tone: 'error', text: `Failed: ${f.last_error || 'unknown error'}` };
+  const hours = Math.round((now - new Date(f.last_synced_at)) / 3600000);
+  const warnCount = (f.last_warnings || []).length;
+  if (hours > 25) return { tone: 'warn', text: `Last synced ${hours} hours ago — may be out of date` };
+  if (warnCount) return { tone: 'warn', text: `${f.last_event_count || 0} events, ${warnCount} warning${warnCount === 1 ? '' : 's'}` };
+  return { tone: 'ok', text: `${f.last_event_count || 0} events, synced ${hours === 0 ? 'within the hour' : `${hours}h ago`}` };
+}
+
 // ══ END PURE HELPERS ══
 
 // Default matches the old "Newest Inquiry" dropdown default, so the view the
@@ -1963,6 +2062,13 @@ function wireAddressZip() {
     if (!existing) {
       addrEl.value = stripped;
       zipEl.value = found;
+      // Same seam syncTimeField fixes: assigning .value fires no native
+      // 'change', and the conflict panel listens for one on
+      // .bk-edit[data-f="event_zip"] — without this it keeps showing an
+      // answer computed against an empty ZIP and the 30-minute drive fallback.
+      if (typeof Event !== 'undefined' && typeof zipEl.dispatchEvent === 'function') {
+        zipEl.dispatchEvent(new Event('change', { bubbles: true }));
+      }
       if (hint) hint.textContent = `ZIP ${found} taken from the address.`;
     } else if (existing.slice(0, 5) === found) {
       addrEl.value = stripped;
@@ -2024,16 +2130,28 @@ function syncTimeField(name) {
 
   if (h.value && !mm.value) mm.value = '00';
 
-  if (!h.value && !mm.value && !a.value) { out.value = ''; if (warn) warn.textContent = ''; return; }
+  // Setting .value in JS does not fire a native 'change' event, and the hidden
+  // input is the only element carrying the .bk-edit/data-f contract — so
+  // anything listening for this field to change (the conflict panel) needs a
+  // dispatched event, not just the assignment below.
+  const fire = () => {
+    if (typeof Event !== 'undefined' && typeof out.dispatchEvent === 'function') {
+      out.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
+
+  if (!h.value && !mm.value && !a.value) { out.value = ''; if (warn) warn.textContent = ''; fire(); return; }
 
   if (!h.value || !a.value) {
     out.value = '';
     if (warn) warn.textContent = !h.value ? 'pick an hour' : 'AM or PM?';
+    fire();
     return;
   }
   if (warn) warn.textContent = '';
   const h24 = (Number(h.value) % 12) + (a.value === 'PM' ? 12 : 0);
   out.value = `${String(h24).padStart(2, '0')}:${mm.value}`;
+  fire();
 }
 
 function bookingField(label, name, value, type = 'text', opts = null) {
@@ -2139,6 +2257,96 @@ function removeItemRow(btn) {
   if (host) renderItemsTotal(host.id.replace('items-list-', ''));
 }
 
+// Renders formatConflicts()'s tone. 'clear' is the only reassuring one —
+// 'unknown' and the fetch-failure branch below both read as "not cleared",
+// on purpose: a blank or green panel on an uncertain answer is worse than no
+// panel at all.
+const CONFLICT_TONES = {
+  clear:   { bg: '#f0fdf4', border: '#86efac', fg: '#166534', icon: '✅' },
+  warn:    { bg: '#fef2f2', border: '#fca5a5', fg: '#991b1b', icon: '⚠️' },
+  unknown: { bg: '#fffbeb', border: '#fde68a', fg: '#92400e', icon: '❓' },
+};
+
+// Guards against a slow response from a booking the admin has since moved
+// away from: the panel is one shared #conflict-panel element, and opening
+// booking B before A's fetch resolves must never let A's answer (clear, warn,
+// or otherwise) get painted over B's date.
+let conflictSeq = 0;
+
+// The last availability result the panel actually rendered — what
+// saveBookingEdits asks hardConflictSummary about. Reset to null the instant
+// a new check starts (see refreshConflictPanel) so a stale answer from a
+// previous booking, or from before this one's fetch has returned, can never
+// be mistaken for a fresh "clear". A null/absent result asks for nothing —
+// see saveBookingEdits — which fails toward a silent save rather than a
+// nagging confirm, matching the panel's existing "unknown" tone: this check
+// has never blocked a save, only informed one.
+let lastConflictResult = null;
+
+// The in-flight promise from the most recent refreshConflictPanel call.
+// saveBookingEdits awaits this before consulting lastConflictResult, so a
+// save that happens to land right after a date/time/ZIP edit waits a beat
+// for the check to actually resolve instead of seeing lastConflictResult
+// still null and treating a perfectly clear date as "the check hasn't
+// finished" — the false positive that teaches a habit of clicking through
+// the fail-loud gate. refreshConflictPanel itself never throws (its own
+// try/catch renders the failure into the panel and resolves), so this needs
+// no error handling of its own.
+let conflictPending = null;
+
+// bookingId is null for a not-yet-saved booking (no row to exclude-self
+// with); the endpoint reads date/time/ZIP straight off the query string in
+// that case. For an existing booking, passing booking_id lets the server
+// load its real service_id and defaults server-side — see availability.js's
+// comment on why there is no service_id field to read here at all.
+async function refreshConflictPanel(bookingId) {
+  const el = document.getElementById('conflict-panel');
+  if (!el) return;
+  const seq = ++conflictSeq;
+  lastConflictResult = null; // superseded until this check resolves — see the declaration above
+  const get = (f) => (document.querySelector(`.bk-edit[data-f="${f}"]`) || {}).value || '';
+  const date = get('event_date');
+  if (!date) { el.innerHTML = ''; return; }
+
+  el.innerHTML = `<div style="font-size:.85rem;color:#9ca3af">Checking the calendar…</div>`;
+  const qs = new URLSearchParams({ date, time: get('event_time'), zip: get('event_zip') });
+  if (bookingId) qs.set('booking_id', bookingId);
+
+  // Everything after the fetch — JSON parsing, formatConflicts, the render
+  // itself — is inside this same try. formatConflicts throwing on a malformed
+  // 200 body used to leave "Checking the calendar…" on screen forever, which
+  // is worse than the honest blank/amber states: a spinner actively claims an
+  // answer is still coming. Any failure anywhere in this path now falls
+  // through to the same "not cleared" message as a network/HTTP failure.
+  try {
+    const res = await apiFetch(`/api/availability?${qs}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const r = await res.json();
+    if (seq !== conflictSeq) return; // superseded by a newer check
+    lastConflictResult = r;
+
+    const v = formatConflicts(r);
+    const t = CONFLICT_TONES[v.tone];
+    el.innerHTML = `
+      <div style="background:${t.bg};border:1.5px solid ${t.border};border-radius:10px;padding:10px 14px">
+        <div style="font-weight:700;color:${t.fg};font-size:.88rem">${t.icon} ${esc(v.headline)}</div>
+        ${v.lines.length ? `<ul style="margin:6px 0 0 18px;padding:0;color:${t.fg};font-size:.85rem">${v.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
+        ${v.notes.length ? `<div style="margin-top:6px;font-size:.78rem;color:${t.fg};opacity:.8">${v.notes.map(esc).join(' · ')}</div>` : ''}
+      </div>`;
+  } catch (e) {
+    if (seq !== conflictSeq) return; // superseded by a newer check
+    // A failed check is NOT a clear date. Say so, rather than leaving the
+    // panel blank (which reads as "nothing wrong"), stuck on "Checking…"
+    // (which reads as "still coming"), or falling back to green. Also log it —
+    // a genuine template bug (e.g. formatConflicts throwing) now surfaces as
+    // this same amber text, and a developer not staring at the panel would
+    // otherwise never know it happened.
+    console.error(e);
+    el.innerHTML = `<div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:10px 14px;font-size:.85rem;color:#92400e">
+      ❓ Could not check the calendar (${esc(e.message)}). This date has <strong>not</strong> been cleared.</div>`;
+  }
+}
+
 // id === null opens an empty modal for a new booking taken over the phone.
 // Saving it POSTs a draft; every other path is identical to editing.
 function openBooking(id, seed) {
@@ -2179,6 +2387,9 @@ function openBooking(id, seed) {
         `<button class="status-pill ${b.status===s.id?'active-'+s.id:''}" ${isNew ? 'disabled' : `onclick="setStatus('${b.id}','${s.id}')"`}>${s.label}</button>`
       ).join('')}
     </div>
+
+    <!-- Conflict check against subscribed calendars and other FME bookings -->
+    <div id="conflict-panel" style="margin-bottom:14px"></div>
 
     <!-- Detail grid -->
     <div class="detail-grid">
@@ -2519,6 +2730,15 @@ function openBooking(id, seed) {
     renderItemsTotal(b.id);
   }
   ensureCatalogueLoaded(b.id);
+
+  // Conflict check: re-run whenever date/time/ZIP change, and once on open.
+  // isNew has no booking_id to exclude-self with, but the endpoint only needs
+  // one when there's an existing row to leave out of its own conflict check.
+  for (const f of ['event_date', 'event_time', 'event_zip']) {
+    const input = document.querySelector(`.bk-edit[data-f="${f}"]`);
+    if (input) input.addEventListener('change', () => { conflictPending = refreshConflictPanel(isNew ? null : b.id); });
+  }
+  conflictPending = refreshConflictPanel(isNew ? null : b.id);
 
   document.getElementById('booking-modal').classList.add('open');
 
@@ -3339,6 +3559,34 @@ async function saveBookingEdits(id) {
     if (id === 'new') { alert('Nothing to save yet — enter at least a name.'); return; }
     flash('bk-flash-' + id);
     return;
+  }
+  // Deliberate double-booking is legitimate — two teams go out on the same
+  // day — so this asks rather than blocks. But a save that goes through
+  // before the conflict check has an answer (or after it failed/degraded)
+  // must ask too, distinctly — the panel can show "not cleared" to a human
+  // looking at it; the save path has no panel, so silence here would mean
+  // Joe never finds out at all. conflictConfirmation folds both cases into
+  // one gate; see its comment in the PURE HELPERS block.
+  //
+  // A real hard conflict's override travels as payload.conflict_override —
+  // a signal, not a field: booking.js's update allowlist (colMap) has no
+  // entry for it, so it is never written to a column; booking.js instead
+  // reads it to write a changelog line via the existing logChange(), so
+  // "why are there two gigs at 2pm" has an answer in six weeks. This is NOT
+  // appended to payload.admin_notes — that field is built from whichever
+  // .bk-edit inputs changed, and admin_notes is a separate textarea the
+  // admin may not have touched; writing it here would silently overwrite
+  // their own notes. The "check never finished" confirm has nothing known
+  // to log, so it carries no override signal.
+  // Wait for a check already in flight rather than judging lastConflictResult
+  // (still null) as "never finished" — see conflictPending's declaration.
+  if (conflictPending) await conflictPending;
+  const dateVal = (document.querySelector('.bk-edit[data-f="event_date"]') || {}).value || '';
+  const confirmation = conflictConfirmation(!!dateVal, lastConflictResult);
+  if (confirmation) {
+    const ok = confirm(confirmation.message);
+    if (!ok) return;
+    if (confirmation.kind === 'hard') payload.conflict_override = hardConflictSummary(lastConflictResult || {});
   }
   // Items replace the whole quote. service_name / service_price / total_price /
   // mileage_cost are derived server-side from these, so do not also send them —
@@ -6112,6 +6360,136 @@ async function runScheduledNow() {
     await loadAutomations();
   } catch(e) { alert('Error: ' + e.message); }
   btn.disabled = false; btn.textContent = '▶ Run Scheduled Now';
+}
+
+// ══════════════════════════════════════════════════
+// CALENDARS (feeds checked hourly for booking conflicts)
+// ══════════════════════════════════════════════════
+
+let calendarFeeds = [];
+
+async function loadCalendarFeeds() {
+  const el = document.getElementById('calendar-feeds-body');
+  try {
+    const res = await apiFetch('/api/calendar-feeds');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    calendarFeeds = data.feeds || [];
+    renderCalendarFeeds();
+  } catch (e) {
+    el.innerHTML = `<p style="padding:16px;color:#dc2626">Could not load calendars: ${esc(e.message)}</p>`;
+  }
+}
+
+// The health line is the point of this screen — feedStatusLabel (PURE HELPERS
+// block) never returns blank and never reads as reassuring for a feed that
+// isn't actually working. last_warnings (e.g. an unexpandable recurring rule)
+// is shown separately, underneath, because it's actionable even on an
+// otherwise-ok sync.
+function renderCalendarFeeds() {
+  const el = document.getElementById('calendar-feeds-body');
+  if (!calendarFeeds.length) {
+    el.innerHTML = '<p style="padding:16px;color:#9ca3af">No calendars yet. Add one to start checking gigs against it.</p>';
+    return;
+  }
+  const toneStyle = {
+    ok:    'background:#f0fdf4;color:#166534',
+    warn:  'background:#fffbeb;color:#92400e',
+    error: 'background:#fef2f2;color:#991b1b',
+  };
+  el.innerHTML = calendarFeeds.map(f => {
+    const s = feedStatusLabel(f, new Date());
+    const warnings = f.last_warnings || [];
+    return `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 20px;border-bottom:1px solid #f3f4f6">
+      <div>
+        <div style="font-weight:700">${esc(f.label)}${f.active === false ? ' <span style="color:#9ca3af;font-weight:500">(inactive)</span>' : ''}</div>
+        <div style="font-size:.78rem;color:#6b7280;font-family:monospace;margin-top:2px">${esc(f.url_masked)}</div>
+        <div style="font-size:.75rem;font-weight:600;padding:2px 8px;border-radius:10px;display:inline-block;margin-top:6px;${toneStyle[s.tone]}">${esc(s.text)}</div>
+        ${warnings.length ? `<div style="margin-top:6px;font-size:.75rem;color:#92400e">${warnings.map(w => `⚠️ ${esc(w)}`).join('<br>')}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button class="btn btn-outline btn-sm" onclick="openFeedModal(${JSON.stringify(f).replace(/"/g, '&quot;')})">Replace</button>
+        <button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="deleteFeed(${f.id})">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Add or replace. There is no "edit the URL" in place — the API never returns
+// a raw url to prefill (only url_masked), and calendar-feeds.js's save action
+// requires a fresh http(s)/webcal address every time, on an add or a replace
+// alike. So the address field always starts empty and is always required.
+function openFeedModal(feed) {
+  const f = feed || { label: '' };
+  document.getElementById('modal-title').textContent = f.id ? 'Replace Calendar' : 'Add Calendar';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:grid;gap:12px">
+      <div><label class="form-label">Label</label><input class="form-control" id="feed-label" value="${esc(f.label)}"></div>
+      <div><label class="form-label">Calendar address (ICS URL)</label>
+        <input class="form-control" id="feed-url" placeholder="https://... or webcal://...">
+        ${f.id
+          ? `<p class="text-muted" style="margin-top:6px;font-size:.75rem">Current: ${esc(f.url_masked)}. Paste the calendar's full address again to replace it — the old one can't be shown or reused, only overwritten.</p>`
+          : `<p class="text-muted" style="margin-top:6px;font-size:.75rem">The address is a credential. It's stored write-only — this app can display a masked form of it, but never the real thing, again.</p>`}
+      </div>
+      <div style="display:flex;gap:10px;padding-top:4px">
+        <button class="btn btn-primary" onclick="saveFeed(${f.id || 'null'})">Save</button>
+        ${f.id ? `<button class="btn btn-outline" style="color:#dc2626;border-color:#dc2626" onclick="deleteFeed(${f.id})">Delete</button>` : ''}
+      </div>
+    </div>`;
+  document.getElementById('booking-modal').classList.add('open');
+}
+
+async function saveFeed(id) {
+  const label = document.getElementById('feed-label').value.trim();
+  const url = document.getElementById('feed-url').value.trim();
+  if (!url) { alert('A calendar address is required — replacing a feed means pasting its address again.'); return; }
+  try {
+    const res = await apiFetch('/api/calendar-feeds', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save', id: id || undefined, label, url }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    calendarFeeds = data.feeds || [];
+    closeModal();
+    renderCalendarFeeds();
+  } catch (e) { alert('Save failed: ' + e.message); }
+}
+
+async function deleteFeed(id) {
+  if (!confirm('Delete this calendar? Gigs will no longer be checked against it.')) return;
+  try {
+    const res = await apiFetch('/api/calendar-feeds', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', id }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    calendarFeeds = data.feeds || [];
+    closeModal();
+    renderCalendarFeeds();
+  } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
+// Covers the one real weakness of hourly polling: a date blocked out on the
+// personal calendar twenty minutes ago, while a client is on the phone asking
+// to book it. Refreshes every feed, not one — matches calendar-sync.js's
+// syncAllFeeds, which has no single-feed entry point.
+async function refreshCalendarFeeds() {
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = 'Refreshing…';
+  try {
+    const res = await apiFetch('/api/calendar-feeds', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'refresh' }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    calendarFeeds = data.feeds || [];
+    renderCalendarFeeds();
+  } catch (e) { alert('Refresh failed: ' + e.message); }
+  btn.disabled = false; btn.textContent = '↻ Refresh Now';
 }
 
 // ══════════════════════════════════════════════════

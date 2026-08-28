@@ -6,6 +6,7 @@ const { esc, logChange, ensureBookingChanges, fmtEventDate } = require('./_email
 const { sendTemplate } = require('./automations');
 const { sendSms, ensureSmsTables } = require('./_sms');
 const { isValidPayType, resolvePayType, assignmentRefusal } = require('./_pay');
+const { spanFor } = require('./_schedule');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -55,57 +56,6 @@ function eligibleStaff(allStaff, tags) {
   return out;
 }
 
-// ── ZIP → coords map for OKC metro drive-time estimation ─────────────────────
-const ZIP_COORDS = {
-  '73099':{ lat:35.5176, lng:-97.7618 }, '73101':{ lat:35.4676, lng:-97.5164 },
-  '73102':{ lat:35.4714, lng:-97.5169 }, '73103':{ lat:35.4869, lng:-97.5245 },
-  '73104':{ lat:35.4781, lng:-97.5058 }, '73105':{ lat:35.4947, lng:-97.5112 },
-  '73106':{ lat:35.4875, lng:-97.5411 }, '73107':{ lat:35.4786, lng:-97.5631 },
-  '73108':{ lat:35.4531, lng:-97.5604 }, '73109':{ lat:35.4397, lng:-97.5245 },
-  '73110':{ lat:35.4631, lng:-97.4203 }, '73111':{ lat:35.5061, lng:-97.4913 },
-  '73112':{ lat:35.5008, lng:-97.5631 }, '73114':{ lat:35.5675, lng:-97.5245 },
-  '73115':{ lat:35.4275, lng:-97.4581 }, '73116':{ lat:35.5397, lng:-97.5631 },
-  '73117':{ lat:35.4841, lng:-97.4913 }, '73118':{ lat:35.5161, lng:-97.5411 },
-  '73119':{ lat:35.4231, lng:-97.5631 }, '73120':{ lat:35.5675, lng:-97.5831 },
-  '73121':{ lat:35.5008, lng:-97.4581 }, '73122':{ lat:35.5008, lng:-97.6031 },
-  '73127':{ lat:35.4786, lng:-97.6431 }, '73128':{ lat:35.4397, lng:-97.6431 },
-  '73129':{ lat:35.4231, lng:-97.4913 }, '73130':{ lat:35.4631, lng:-97.3803 },
-  '73131':{ lat:35.5397, lng:-97.4581 }, '73132':{ lat:35.5397, lng:-97.6231 },
-  '73134':{ lat:35.6097, lng:-97.5831 }, '73135':{ lat:35.3875, lng:-97.4581 },
-  '73139':{ lat:35.3875, lng:-97.5245 }, '73142':{ lat:35.6097, lng:-97.6231 },
-  '73149':{ lat:35.3875, lng:-97.4203 }, '73150':{ lat:35.4231, lng:-97.3803 },
-  '73159':{ lat:35.3875, lng:-97.6031 }, '73160':{ lat:35.3275, lng:-97.5245 },
-  '73162':{ lat:35.5675, lng:-97.6431 }, '73165':{ lat:35.3275, lng:-97.4203 },
-  '73169':{ lat:35.3875, lng:-97.6431 }, '73170':{ lat:35.3275, lng:-97.6031 },
-  '73179':{ lat:35.4397, lng:-97.6831 },
-  '73003':{ lat:35.6597, lng:-97.4781 }, '73007':{ lat:35.6097, lng:-97.4203 },
-  '73008':{ lat:35.5397, lng:-97.6831 }, '73013':{ lat:35.6397, lng:-97.5631 },
-  '73020':{ lat:35.4631, lng:-97.2803 }, '73025':{ lat:35.6597, lng:-97.7418 },
-  '73026':{ lat:35.2275, lng:-97.4413 }, '73034':{ lat:35.6597, lng:-97.3803 },
-  '73044':{ lat:35.8597, lng:-97.4581 }, '73049':{ lat:35.4631, lng:-97.1803 },
-  '73051':{ lat:35.1275, lng:-97.3803 }, '73054':{ lat:35.6097, lng:-97.2803 },
-  '73059':{ lat:35.3275, lng:-97.8031 }, '73064':{ lat:35.4097, lng:-97.7618 },
-  '73066':{ lat:35.5397, lng:-97.2803 }, '73069':{ lat:35.2275, lng:-97.2803 },
-  '73071':{ lat:35.2275, lng:-97.4413 }, '73072':{ lat:35.2275, lng:-97.4413 },
-  '73073':{ lat:36.1597, lng:-97.5831 }, '73074':{ lat:34.9275, lng:-97.4413 },
-  '73078':{ lat:35.5675, lng:-97.7818 }, '73080':{ lat:35.2275, lng:-97.6031 },
-  '73084':{ lat:35.5397, lng:-97.3803 }, '73089':{ lat:35.3275, lng:-97.7218 },
-  '73093':{ lat:35.2275, lng:-97.5631 }, '73097':{ lat:35.3875, lng:-97.7218 },
-};
-const HOME_ZIP = '73118';
-
-function getDriveMins(destZip) {
-  const home = ZIP_COORDS[HOME_ZIP];
-  const dest = ZIP_COORDS[(destZip || '').toString().substring(0, 5)];
-  if (!home || !dest) return 30;
-  const R = 3958.8;
-  const dLat = (dest.lat - home.lat) * Math.PI / 180;
-  const dLng = (dest.lng - home.lng) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(home.lat*Math.PI/180)*Math.cos(dest.lat*Math.PI/180)*Math.sin(dLng/2)**2;
-  const miles = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return Math.max(10, Math.round((miles / 35) * 60)) + 15;
-}
-
 // Auto-calculate and persist schedule times for an assignment.
 async function autoCalcTimes(client, assignmentId, bookingId, forceRecalc = false) {
   try {
@@ -117,23 +67,23 @@ async function autoCalcTimes(client, assignmentId, bookingId, forceRecalc = fals
     const { rows: [b] } = await client.query('SELECT * FROM bookings WHERE id=$1', [bookingId]);
     if (!b) return;
 
-    const { rows: [tmpl] } = await client.query(
-      'SELECT * FROM service_time_templates WHERE service_id=$1', [b.service_id]
-    );
+    const span = await spanFor(client, b, sa);
 
-    const { rows: [svc] } = await client.query(
-      'SELECT duration_minutes FROM services WHERE service_id=$1', [b.service_id]
-    );
+    // These four columns are persisted individually, so they come straight off
+    // span rather than being recomputed here — one home for the defaults, per
+    // the whole point of this extraction. total already reflects them.
+    const load   = span.loadMinutes;
+    const setup  = span.unloadMinutes;
+    const pack   = span.packOutMinutes;
+    const homeUn = span.homeUnloadMinutes;
+    const drive  = span.driveMinutes;
+    const total  = span.totalMinutes;
 
-    const load   = sa.load_minutes          ?? tmpl?.load_minutes          ?? 30;
-    const setup  = sa.unload_minutes         ?? tmpl?.unload_minutes         ?? 45;
-    const pack   = sa.pack_out_minutes       ?? tmpl?.pack_out_minutes       ?? 20;
-    const homeUn = sa.home_unload_minutes    ?? tmpl?.home_unload_minutes    ?? 15;
-    const drive  = sa.drive_minutes_each_way ?? getDriveMins(b.event_zip);
-    const party  = svc?.duration_minutes     ?? 60;
-
-    const total = load + drive + setup + party + pack + drive + homeUn;
-
+    // schedule_start is a wall-clock "HH:MM" column derived from event_time
+    // alone (never event_date) — kept as plain clock-of-day arithmetic rather
+    // than formatting span.startsAt, because spanFor's windowKnown requires
+    // event_date and this column never has needed one. A booking missing
+    // event_date must not silently lose its schedule_start.
     let scheduleStart = null;
     if (b.event_time) {
       const [hh, mm] = b.event_time.split(':').map(Number);
@@ -1319,3 +1269,8 @@ exports.advancedStatus = advancedStatus;
 exports.ensureTables = ensureTables;
 module.exports.validPayOverride = validPayOverride;
 module.exports.payOverrideLog = payOverrideLog;
+
+// Exported for test/schedule-span.test.js, which drives autoCalcTimes directly
+// against a mock client. getDriveMins moved to _schedule.js and is no longer
+// exported here.
+module.exports.autoCalcTimes = autoCalcTimes;

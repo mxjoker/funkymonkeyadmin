@@ -1,0 +1,304 @@
+// A parser for the ICS feeds Joe subscribes to. Pure: a string in, busy periods
+// out, no I/O and no database.
+//
+// The escaping and folding rules here are the inverse of esc() and fold() in
+// calendar.js. RFC 5545 is unforgiving in both directions — a feed that is
+// mis-unfolded produces silently wrong summaries rather than an error.
+//
+// Everything this file cannot understand becomes a WARNING, never a silent
+// omission. A dropped event is a gig double-booked.
+
+const { zonedToInstant, dayBoundsInZone } = require('./_tz');
+
+// Continuation lines begin with a space or tab and belong to the line above.
+function unfold(text) {
+  return String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n[ \t]/g, '').split('\n');
+}
+
+// RFC 5545 unescaping must be a single left-to-right scan, not sequential
+// global replaces — two passes let a backslash freed by the first pass pair
+// with a character from a different original escape (a literal `\` followed
+// by the letter `n` would wrongly collapse into a newline).
+function unescapeText(v) {
+  const s = String(v);
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '\\' && i + 1 < s.length) {
+      const next = s[i + 1];
+      out += next === 'n' || next === 'N' ? '\n' : next;
+      i++;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+// "DTSTART;TZID=America/Chicago:20260912T140000" -> name, params, value
+function parseLine(line) {
+  const colon = line.indexOf(':');
+  if (colon === -1) return null;
+  const left = line.slice(0, colon);
+  const value = line.slice(colon + 1);
+  const [name, ...paramParts] = left.split(';');
+  const params = {};
+  for (const p of paramParts) {
+    const eq = p.indexOf('=');
+    if (eq > 0) params[p.slice(0, eq).toUpperCase()] = p.slice(eq + 1).replace(/^"|"$/g, '');
+  }
+  return { name: name.toUpperCase(), params, value };
+}
+
+// The three forms a date-time arrives in, plus VALUE=DATE.
+function toInstant({ params, value }, tz) {
+  if (params.VALUE === 'DATE' || /^\d{8}$/.test(value)) {
+    const iso = `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+    return { at: dayBoundsInZone(iso, tz).start, allDay: true, isoDate: iso };
+  }
+  const m = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/);
+  if (!m) return null;
+  const [, Y, Mo, D, h, mi, s, z] = m;
+  if (z) return { at: new Date(Date.UTC(+Y, +Mo - 1, +D, +h, +mi, +s)), allDay: false };
+  // No Z: either TZID-qualified or floating. Floating is read as the local zone,
+  // which is what every calendar client does.
+  return { at: zonedToInstant(+Y, +Mo, +D, +h, +mi, params.TZID || tz), allDay: false };
+}
+
+// PT90M, PT1H30M, P1D — enough of ISO 8601 for calendar durations.
+function durationMs(v) {
+  const m = String(v).match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
+  if (!m) return null;
+  return ((+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0)) * 1000;
+}
+
+// SUMMARY if present, else UID, else a plain label — used only for naming an
+// event in a warning, never for the event's own summary field.
+function labelFor(props) {
+  if (props.SUMMARY) return unescapeText(props.SUMMARY.value);
+  if (props.UID) return props.UID.value;
+  return 'an untitled event';
+}
+
+// A VEVENT that never got its END:VEVENT — a truncated feed download, or a
+// BEGIN:VEVENT arriving before the previous one closed. Fail toward flagging,
+// never toward silence: warn by name, then still try to recover it through
+// finishEvent (which will itself skip-and-warn if it has no usable DTSTART).
+// A truncated feed over-reports busy time rather than under-reporting it.
+function closeUnterminated(cur, opts, events, warnings) {
+  warnings.push(`"${labelFor(cur.props)}" was never closed (missing END:VEVENT) and was recovered rather than dropped`);
+  finishEvent(cur, opts, events, warnings);
+}
+
+function parseIcs(text, { windowStart, windowEnd, tz }) {
+  const lines = unfold(text);
+  const opts = { windowStart, windowEnd, tz };
+  const events = [];
+  const warnings = [];
+  let cur = null;
+
+  for (const raw of lines) {
+    if (/^BEGIN:VEVENT\s*$/i.test(raw)) {
+      if (cur) closeUnterminated(cur, opts, events, warnings);
+      cur = { props: {} };
+      continue;
+    }
+    if (/^END:VEVENT\s*$/i.test(raw)) {
+      if (cur) finishEvent(cur, opts, events, warnings);
+      cur = null; continue;
+    }
+    if (!cur) continue;
+    const p = parseLine(raw);
+    if (!p) continue;
+    if (p.name === 'EXDATE') (cur.props.EXDATE ||= []).push(p);
+    else cur.props[p.name] = p;
+  }
+  if (cur) closeUnterminated(cur, opts, events, warnings);
+
+  events.sort((a, b) => a.startsAt - b.startsAt);
+  return { events, warnings };
+}
+
+const DAY_CODES = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+// WKST is deliberately NOT here. It only changes anything when WEEKLY has
+// both INTERVAL > 1 and a BYDAY spanning the week boundary, and implementing
+// it correctly is real work with real bug surface for a case that is rare in
+// a personal calendar. Claiming it as supported without honouring it would
+// expand such a rule wrongly and silently — the exact failure this file
+// exists to prevent. Over-warning is the safe direction.
+const SUPPORTED_RRULE_PARTS = new Set(['FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'BYDAY']);
+const MAX_OCCURRENCES = 1000; // a hard stop, independent of the window — a malformed feed cannot spin.
+
+function parseRrule(value) {
+  const parts = {};
+  for (const bit of String(value).split(';')) {
+    const eq = bit.indexOf('=');
+    if (eq > 0) parts[bit.slice(0, eq).toUpperCase()] = bit.slice(eq + 1);
+  }
+  const unsupported = Object.keys(parts).filter(k => !SUPPORTED_RRULE_PARTS.has(k));
+  // A missing or unrecognised FREQ is not one of the "extra part" cases above
+  // (there may be no extra parts at all) but it is just as unexpandable, and
+  // silently keeping one occurrence with no warning is the exact bug this
+  // file exists to prevent.
+  const freq = String(parts.FREQ || '').toUpperCase();
+  if (!/^(DAILY|WEEKLY|MONTHLY|YEARLY)$/.test(freq)) {
+    unsupported.push('FREQ');
+  }
+  // BYDAY sits in SUPPORTED_RRULE_PARTS as a blanket membership test, but
+  // expandRrule only ever reads it on FREQ=WEEKLY — on DAILY/MONTHLY/YEARLY it
+  // is silently dropped and the rule expands on DTSTART's raw day instead of
+  // the days actually named. Same failure class as WKST, caught the same way
+  // (a part that changes nothing, or changes the wrong thing, while the
+  // membership check waves it through): gate support on the FREQ it actually
+  // applies to, not just on its own presence.
+  if (parts.BYDAY && freq !== 'WEEKLY') {
+    unsupported.push('BYDAY');
+  }
+  return { parts, unsupported };
+}
+
+// Occurrence starts, as instants. BYDAY only applies to WEEKLY here; on any
+// other FREQ it is part of a pattern we do not support, and parseRrule has
+// already flagged it.
+//
+// Each occurrence is re-derived through zonedToInstant from wall-clock
+// Y/M/D/H/Mi rather than by adding multiples of 24h, so a 3pm weekly event
+// stays at 3pm across a DST boundary instead of drifting to 2pm.
+function expandRrule(startAt, parts, windowEnd, tz) {
+  const freq = String(parts.FREQ || '').toUpperCase();
+  const interval = Math.max(1, Number(parts.INTERVAL || 1));
+  const count = parts.COUNT ? Number(parts.COUNT) : null;
+  const until = parts.UNTIL ? toInstant({ params: {}, value: parts.UNTIL }, tz)?.at : null;
+  const hardEnd = until && until < windowEnd ? until : windowEnd;
+
+  const byDay = (freq === 'WEEKLY' && parts.BYDAY)
+    ? String(parts.BYDAY).split(',').map(d => DAY_CODES[d.trim().toUpperCase()]).filter(n => n != null)
+    : null;
+
+  // Wall-clock hour/minute of the first occurrence, in the calendar's zone.
+  const wall = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).formatToParts(startAt).reduce((a, p) => (a[p.type] = p.value, a), {});
+  const H = Number(wall.hour) % 24, Mi = Number(wall.minute);
+  let cursor = new Date(Date.UTC(+wall.year, +wall.month - 1, +wall.day));
+
+  const out = [];
+  let n = 0;
+  for (; n < MAX_OCCURRENCES; n++) {
+    if (count != null && out.length >= count) break;
+
+    let candidates;
+    if (freq === 'WEEKLY' && byDay) {
+      const weekStart = new Date(cursor);
+      weekStart.setUTCDate(weekStart.getUTCDate() - weekStart.getUTCDay());
+      candidates = byDay
+        .slice().sort((a, b) => a - b)
+        .map(dow => {
+          const d = new Date(weekStart);
+          d.setUTCDate(d.getUTCDate() + dow);
+          return zonedToInstant(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), H, Mi, tz);
+        })
+        .filter(at => at >= startAt);
+    } else {
+      candidates = [zonedToInstant(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, cursor.getUTCDate(), H, Mi, tz)];
+    }
+
+    // Dates only move forward, so once every candidate this period falls past
+    // the window/UNTIL cutoff, no later period can produce anything earlier —
+    // stop here rather than spinning to the MAX_OCCURRENCES cap.
+    let anyWithinEnd = false;
+    for (const at of candidates) {
+      if (at > hardEnd) continue;
+      anyWithinEnd = true;
+      if (count == null || out.length < count) out.push(at);
+    }
+    if (!anyWithinEnd) break;
+
+    if (freq === 'DAILY') cursor.setUTCDate(cursor.getUTCDate() + interval);
+    else if (freq === 'WEEKLY') cursor.setUTCDate(cursor.getUTCDate() + 7 * interval);
+    else if (freq === 'MONTHLY') cursor.setUTCMonth(cursor.getUTCMonth() + interval);
+    else if (freq === 'YEARLY') cursor.setUTCFullYear(cursor.getUTCFullYear() + interval);
+    else break;
+  }
+
+  // The loop ran out its full iteration budget without a natural stop (past
+  // UNTIL/the window, or COUNT satisfied) — an old daily rule with no COUNT
+  // or UNTIL exhausts MAX_OCCURRENCES counting from DTSTART, not from the
+  // window, and would otherwise expand to zero occurrences with no warning.
+  const capped = n >= MAX_OCCURRENCES;
+
+  return { occurrences: out, capped };
+}
+
+function finishEvent(cur, opts, events, warnings) {
+  const p = cur.props;
+  const summary = p.SUMMARY ? unescapeText(p.SUMMARY.value) : '(no title)';
+  const uid = p.UID ? p.UID.value : null;
+
+  if (p.STATUS && /CANCELLED/i.test(p.STATUS.value)) return;
+  if (p.TRANSP && /TRANSPARENT/i.test(p.TRANSP.value)) return;
+
+  if (!p.DTSTART) { warnings.push(`"${summary}" has no start time and was skipped`); return; }
+  const start = toInstant(p.DTSTART, opts.tz);
+  if (!start) { warnings.push(`"${summary}" has an unreadable start time and was skipped`); return; }
+
+  let end;
+  if (p.DTEND) {
+    const e = toInstant(p.DTEND, opts.tz);
+    // DTEND on an all-day event is exclusive: DTEND 20261102 means the event
+    // ends at the START of 2 Nov, which is the end of 1 Nov.
+    end = e ? e.at : null;
+  } else if (p.DURATION) {
+    const ms = durationMs(p.DURATION.value);
+    end = ms == null ? null : new Date(start.at.getTime() + ms);
+  }
+  // RFC 5545 §3.6.1: a DATE-valued DTSTART with no DTEND/DURATION lasts one
+  // day, not zero — only a timed event with no end is genuinely zero-length.
+  // toInstant already computed isoDate for the all-day case; dayBoundsInZone
+  // turns it into local-midnight-to-next-local-midnight, the same way an
+  // explicit DTEND on an all-day event is read a few lines above.
+  if (!end) end = start.allDay ? dayBoundsInZone(start.isoDate, opts.tz).end : new Date(start.at.getTime());
+
+  const durMs = end.getTime() - start.at.getTime();
+  const base = { uid, summary, allDay: start.allDay };
+
+  if (!p.RRULE) {
+    pushIfInWindow(events, { ...base, startsAt: start.at, endsAt: end }, opts);
+    return;
+  }
+
+  const { parts, unsupported } = parseRrule(p.RRULE.value);
+  if (unsupported.length) {
+    // The first instance is still real, so it is still busy. But an unexpanded
+    // rule is a standing commitment the CRM cannot see, and that has to be said
+    // out loud — it ends up in the conflict panel, not in a log.
+    warnings.push(`the recurring event "${summary}" uses ${unsupported.join(', ')}, which cannot be expanded — only its first occurrence is known`);
+    pushIfInWindow(events, { ...base, startsAt: start.at, endsAt: end }, opts);
+    return;
+  }
+
+  const exdates = new Set();
+  for (const x of (p.EXDATE || [])) {
+    for (const v of String(x.value).split(',')) {
+      const inst = toInstant({ params: x.params, value: v.trim() }, opts.tz);
+      if (inst) exdates.add(inst.at.getTime());
+    }
+  }
+
+  const { occurrences, capped } = expandRrule(start.at, parts, opts.windowEnd, opts.tz);
+  if (capped) {
+    warnings.push(`the recurring event "${summary}" has too many occurrences to expand from its start date — some are not known`);
+  }
+  for (const at of occurrences) {
+    if (exdates.has(at.getTime())) continue;
+    pushIfInWindow(events, { ...base, startsAt: at, endsAt: new Date(at.getTime() + durMs) }, opts);
+  }
+}
+
+function pushIfInWindow(events, e, { windowStart, windowEnd }) {
+  if (e.endsAt <= windowStart || e.startsAt >= windowEnd) return;
+  events.push(e);
+}
+
+module.exports = { parseIcs, unescapeText };
