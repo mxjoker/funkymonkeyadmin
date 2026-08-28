@@ -155,6 +155,101 @@ test('an unterminated event with no usable DTSTART is skipped, but still warned 
   assert.match(warnings.join(' '), /No Start/);
 });
 
+test('a weekly rule expands across the window', () => {
+  const { events } = parseIcs(cal(...ev(
+    'UID:r1@test', 'SUMMARY:School run',
+    'DTSTART;TZID=America/Chicago:20260907T150000',
+    'DTEND;TZID=America/Chicago:20260907T160000',
+    'RRULE:FREQ=WEEKLY;COUNT=4',
+  )), WIN);
+  assert.strictEqual(events.length, 4);
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-09-07', '2026-09-14', '2026-09-21', '2026-09-28']
+  );
+});
+
+test('UNTIL terminates the series', () => {
+  const { events } = parseIcs(cal(...ev(
+    'UID:r2@test', 'SUMMARY:Standup',
+    'DTSTART:20260907T140000Z', 'DTEND:20260907T143000Z',
+    'RRULE:FREQ=DAILY;UNTIL=20260910T000000Z',
+  )), WIN);
+  assert.strictEqual(events.length, 3); // 7th, 8th, 9th
+});
+
+test('INTERVAL is honoured', () => {
+  const { events } = parseIcs(cal(...ev(
+    'UID:r3@test', 'SUMMARY:Fortnightly',
+    'DTSTART:20260907T140000Z', 'DTEND:20260907T150000Z',
+    'RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=3',
+  )), WIN);
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-09-07', '2026-09-21', '2026-10-05']
+  );
+});
+
+test('BYDAY generates several days per week', () => {
+  const { events } = parseIcs(cal(...ev(
+    'UID:r4@test', 'SUMMARY:MWF',
+    'DTSTART;TZID=America/Chicago:20260907T090000',
+    'DTEND;TZID=America/Chicago:20260907T100000',
+    'RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=3',
+  )), WIN);
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-09-07', '2026-09-09', '2026-09-11']
+  );
+});
+
+test('EXDATE removes an occurrence', () => {
+  const { events } = parseIcs(cal(...ev(
+    'UID:r5@test', 'SUMMARY:Weekly',
+    'DTSTART;TZID=America/Chicago:20260907T150000',
+    'DTEND;TZID=America/Chicago:20260907T160000',
+    'RRULE:FREQ=WEEKLY;COUNT=3',
+    'EXDATE;TZID=America/Chicago:20260914T150000',
+  )), WIN);
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-09-07', '2026-09-21']
+  );
+});
+
+test('a MONTHLY rule steps by calendar month', () => {
+  const { events } = parseIcs(cal(...ev(
+    'UID:r6@test', 'SUMMARY:Monthly',
+    'DTSTART:20260115T140000Z', 'DTEND:20260115T150000Z',
+    'RRULE:FREQ=MONTHLY;COUNT=3',
+  )), WIN);
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-01-15', '2026-02-15', '2026-03-15']
+  );
+});
+
+test('an unsupported rule keeps the first instance AND warns — never silence', () => {
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:r7@test', 'SUMMARY:Third Thursday',
+    'DTSTART:20260115T140000Z', 'DTEND:20260115T150000Z',
+    'RRULE:FREQ=MONTHLY;BYSETPOS=3;BYDAY=TH',
+  )), WIN);
+  assert.strictEqual(events.length, 1, 'the first instance is still busy');
+  assert.strictEqual(warnings.length, 1);
+  assert.match(warnings[0], /Third Thursday/);
+  assert.match(warnings[0], /BYSETPOS/);
+});
+
+test('expansion stops at the window end rather than running forever', () => {
+  const { events } = parseIcs(cal(...ev(
+    'UID:r8@test', 'SUMMARY:Endless',
+    'DTSTART:20260101T140000Z', 'DTEND:20260101T150000Z',
+    'RRULE:FREQ=DAILY',
+  )), { windowStart: new Date('2026-01-01T00:00:00Z'), windowEnd: new Date('2026-01-11T00:00:00Z'), tz: TZ });
+  assert.strictEqual(events.length, 10);
+});
+
 test('unescapeText round-trips through calendar.js esc(), including a literal backslash-n and a trailing backslash', () => {
   const cases = [
     'Lunch, then gym; maybe',

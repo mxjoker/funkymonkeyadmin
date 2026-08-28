@@ -119,6 +119,87 @@ function parseIcs(text, { windowStart, windowEnd, tz }) {
   return { events, warnings };
 }
 
+const DAY_CODES = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+const SUPPORTED_RRULE_PARTS = new Set(['FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'BYDAY', 'WKST']);
+const MAX_OCCURRENCES = 1000; // a hard stop, independent of the window — a malformed feed cannot spin.
+
+function parseRrule(value) {
+  const parts = {};
+  for (const bit of String(value).split(';')) {
+    const eq = bit.indexOf('=');
+    if (eq > 0) parts[bit.slice(0, eq).toUpperCase()] = bit.slice(eq + 1);
+  }
+  const unsupported = Object.keys(parts).filter(k => !SUPPORTED_RRULE_PARTS.has(k));
+  return { parts, unsupported };
+}
+
+// Occurrence starts, as instants. BYDAY only applies to WEEKLY here; on any
+// other FREQ it is part of a pattern we do not support, and parseRrule has
+// already flagged it.
+//
+// Each occurrence is re-derived through zonedToInstant from wall-clock
+// Y/M/D/H/Mi rather than by adding multiples of 24h, so a 3pm weekly event
+// stays at 3pm across a DST boundary instead of drifting to 2pm.
+function expandRrule(startAt, parts, windowEnd, tz) {
+  const freq = String(parts.FREQ || '').toUpperCase();
+  const interval = Math.max(1, Number(parts.INTERVAL || 1));
+  const count = parts.COUNT ? Number(parts.COUNT) : null;
+  const until = parts.UNTIL ? toInstant({ params: {}, value: parts.UNTIL }, tz)?.at : null;
+  const hardEnd = until && until < windowEnd ? until : windowEnd;
+
+  const byDay = (freq === 'WEEKLY' && parts.BYDAY)
+    ? String(parts.BYDAY).split(',').map(d => DAY_CODES[d.trim().toUpperCase()]).filter(n => n != null)
+    : null;
+
+  // Wall-clock hour/minute of the first occurrence, in the calendar's zone.
+  const wall = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).formatToParts(startAt).reduce((a, p) => (a[p.type] = p.value, a), {});
+  const H = Number(wall.hour) % 24, Mi = Number(wall.minute);
+  let cursor = new Date(Date.UTC(+wall.year, +wall.month - 1, +wall.day));
+
+  const out = [];
+  for (let n = 0; n < MAX_OCCURRENCES; n++) {
+    if (count != null && out.length >= count) break;
+
+    let candidates;
+    if (freq === 'WEEKLY' && byDay) {
+      const weekStart = new Date(cursor);
+      weekStart.setUTCDate(weekStart.getUTCDate() - weekStart.getUTCDay());
+      candidates = byDay
+        .slice().sort((a, b) => a - b)
+        .map(dow => {
+          const d = new Date(weekStart);
+          d.setUTCDate(d.getUTCDate() + dow);
+          return zonedToInstant(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), H, Mi, tz);
+        })
+        .filter(at => at >= startAt);
+    } else {
+      candidates = [zonedToInstant(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, cursor.getUTCDate(), H, Mi, tz)];
+    }
+
+    // Dates only move forward, so once every candidate this period falls past
+    // the window/UNTIL cutoff, no later period can produce anything earlier —
+    // stop here rather than spinning to the MAX_OCCURRENCES cap.
+    let anyWithinEnd = false;
+    for (const at of candidates) {
+      if (at > hardEnd) continue;
+      anyWithinEnd = true;
+      if (count == null || out.length < count) out.push(at);
+    }
+    if (!anyWithinEnd) break;
+
+    if (freq === 'DAILY') cursor.setUTCDate(cursor.getUTCDate() + interval);
+    else if (freq === 'WEEKLY') cursor.setUTCDate(cursor.getUTCDate() + 7 * interval);
+    else if (freq === 'MONTHLY') cursor.setUTCMonth(cursor.getUTCMonth() + interval);
+    else if (freq === 'YEARLY') cursor.setUTCFullYear(cursor.getUTCFullYear() + interval);
+    else break;
+  }
+
+  return out;
+}
+
 function finishEvent(cur, opts, events, warnings) {
   const p = cur.props;
   const summary = p.SUMMARY ? unescapeText(p.SUMMARY.value) : '(no title)';
@@ -143,8 +224,36 @@ function finishEvent(cur, opts, events, warnings) {
   }
   if (!end) end = new Date(start.at.getTime());
 
-  // Task 5 replaces this with expansion.
-  pushIfInWindow(events, { uid, summary, startsAt: start.at, endsAt: end, allDay: start.allDay }, opts);
+  const durMs = end.getTime() - start.at.getTime();
+  const base = { uid, summary, allDay: start.allDay };
+
+  if (!p.RRULE) {
+    pushIfInWindow(events, { ...base, startsAt: start.at, endsAt: end }, opts);
+    return;
+  }
+
+  const { parts, unsupported } = parseRrule(p.RRULE.value);
+  if (unsupported.length) {
+    // The first instance is still real, so it is still busy. But an unexpanded
+    // rule is a standing commitment the CRM cannot see, and that has to be said
+    // out loud — it ends up in the conflict panel, not in a log.
+    warnings.push(`the recurring event "${summary}" uses ${unsupported.join(', ')}, which cannot be expanded — only its first occurrence is known`);
+    pushIfInWindow(events, { ...base, startsAt: start.at, endsAt: end }, opts);
+    return;
+  }
+
+  const exdates = new Set();
+  for (const x of (p.EXDATE || [])) {
+    for (const v of String(x.value).split(',')) {
+      const inst = toInstant({ params: x.params, value: v.trim() }, opts.tz);
+      if (inst) exdates.add(inst.at.getTime());
+    }
+  }
+
+  for (const at of expandRrule(start.at, parts, opts.windowEnd, opts.tz)) {
+    if (exdates.has(at.getTime())) continue;
+    pushIfInWindow(events, { ...base, startsAt: at, endsAt: new Date(at.getTime() + durMs) }, opts);
+  }
 }
 
 function pushIfInWindow(events, e, { windowStart, windowEnd }) {
@@ -152,4 +261,4 @@ function pushIfInWindow(events, e, { windowStart, windowEnd }) {
   events.push(e);
 }
 
-module.exports = { parseIcs, unfold, parseLine, toInstant, durationMs, unescapeText };
+module.exports = { parseIcs, unfold, parseLine, toInstant, durationMs, unescapeText, parseRrule, expandRrule };
