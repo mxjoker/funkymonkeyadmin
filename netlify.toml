@@ -177,6 +177,12 @@
 [functions."automations-scheduled"]
   schedule = "0 14 * * *"  # Every day at 14:00 UTC (9am Central)
 
+# Inbound calendar pull. Hourly at :17 rather than on the hour, so it is not
+# queueing behind every other cron on the platform. Staleness between runs is
+# covered by the Refresh Now button in settings.
+[functions."calendar-sync"]
+  schedule = "17 * * * *"
+
 # Calendar feed. Two paths to one function: the .ics form is what a calendar
 # client subscribes to, the bare form is the admin call that returns the URL.
 [[redirects]]
