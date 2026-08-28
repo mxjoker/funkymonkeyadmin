@@ -130,6 +130,13 @@ function parseRrule(value) {
     if (eq > 0) parts[bit.slice(0, eq).toUpperCase()] = bit.slice(eq + 1);
   }
   const unsupported = Object.keys(parts).filter(k => !SUPPORTED_RRULE_PARTS.has(k));
+  // A missing or unrecognised FREQ is not one of the "extra part" cases above
+  // (there may be no extra parts at all) but it is just as unexpandable, and
+  // silently keeping one occurrence with no warning is the exact bug this
+  // file exists to prevent.
+  if (!/^(DAILY|WEEKLY|MONTHLY|YEARLY)$/.test(String(parts.FREQ).toUpperCase())) {
+    unsupported.push('FREQ');
+  }
   return { parts, unsupported };
 }
 
