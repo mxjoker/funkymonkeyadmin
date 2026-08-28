@@ -2217,29 +2217,34 @@ async function refreshConflictPanel(bookingId) {
   const qs = new URLSearchParams({ date, time: get('event_time'), zip: get('event_zip') });
   if (bookingId) qs.set('booking_id', bookingId);
 
-  let r;
+  // Everything after the fetch — JSON parsing, formatConflicts, the render
+  // itself — is inside this same try. formatConflicts throwing on a malformed
+  // 200 body used to leave "Checking the calendar…" on screen forever, which
+  // is worse than the honest blank/amber states: a spinner actively claims an
+  // answer is still coming. Any failure anywhere in this path now falls
+  // through to the same "not cleared" message as a network/HTTP failure.
   try {
     const res = await apiFetch(`/api/availability?${qs}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    r = await res.json();
+    const r = await res.json();
+    if (seq !== conflictSeq) return; // superseded by a newer check
+
+    const v = formatConflicts(r);
+    const t = CONFLICT_TONES[v.tone];
+    el.innerHTML = `
+      <div style="background:${t.bg};border:1.5px solid ${t.border};border-radius:10px;padding:10px 14px">
+        <div style="font-weight:700;color:${t.fg};font-size:.88rem">${t.icon} ${esc(v.headline)}</div>
+        ${v.lines.length ? `<ul style="margin:6px 0 0 18px;padding:0;color:${t.fg};font-size:.85rem">${v.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
+        ${v.notes.length ? `<div style="margin-top:6px;font-size:.78rem;color:${t.fg};opacity:.8">${v.notes.map(esc).join(' · ')}</div>` : ''}
+      </div>`;
   } catch (e) {
     if (seq !== conflictSeq) return; // superseded by a newer check
     // A failed check is NOT a clear date. Say so, rather than leaving the
-    // panel blank (which reads as "nothing wrong") or falling back to green.
+    // panel blank (which reads as "nothing wrong"), stuck on "Checking…"
+    // (which reads as "still coming"), or falling back to green.
     el.innerHTML = `<div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:10px 14px;font-size:.85rem;color:#92400e">
       ❓ Could not check the calendar (${esc(e.message)}). This date has <strong>not</strong> been cleared.</div>`;
-    return;
   }
-  if (seq !== conflictSeq) return; // superseded by a newer check
-
-  const v = formatConflicts(r);
-  const t = CONFLICT_TONES[v.tone];
-  el.innerHTML = `
-    <div style="background:${t.bg};border:1.5px solid ${t.border};border-radius:10px;padding:10px 14px">
-      <div style="font-weight:700;color:${t.fg};font-size:.88rem">${t.icon} ${esc(v.headline)}</div>
-      ${v.lines.length ? `<ul style="margin:6px 0 0 18px;padding:0;color:${t.fg};font-size:.85rem">${v.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
-      ${v.notes.length ? `<div style="margin-top:6px;font-size:.78rem;color:${t.fg};opacity:.8">${v.notes.map(esc).join(' · ')}</div>` : ''}
-    </div>`;
 }
 
 // id === null opens an empty modal for a new booking taken over the phone.

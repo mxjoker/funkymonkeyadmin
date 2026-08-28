@@ -72,3 +72,15 @@ test('parser warnings appear as notes even when nothing clashes', () => {
   assert.match(v.notes.join(' '), /School run/);
   assert.notStrictEqual(v.tone, 'clear', 'an unexpanded recurring rule means the answer is not certain');
 });
+
+// Fix round 1: formatConflicts and the render used to sit outside
+// refreshConflictPanel's try/catch, so a malformed 200 body left the panel
+// stuck on "Checking the calendar…" forever — silence dressed up as motion.
+test('an empty object is unknown, not clear — a malformed-but-truthy body must not read as a clean sweep', () => {
+  const v = formatConflicts({});
+  assert.strictEqual(v.tone, 'unknown');
+});
+
+test('null throws rather than silently rendering — the render path\'s try/catch is what must catch this', () => {
+  assert.throws(() => formatConflicts(null));
+});
