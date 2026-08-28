@@ -217,16 +217,155 @@ test('BYDAY generates several days per week', () => {
   assert.strictEqual(warnings.length, 0);
 });
 
-test('BYDAY on MONTHLY is unsupported — it would otherwise expand on DTSTART\'s raw day instead of the named weekday', () => {
+test('BYDAY on MONTHLY is supported and honours a bare entry as every matching weekday in the month', () => {
   const { events, warnings } = parseIcs(cal(...ev(
-    'UID:r11@test', 'SUMMARY:Every Monday (monthly, wrongly)',
+    'UID:r11@test', 'SUMMARY:Every Monday (monthly)',
     'DTSTART:20260105T140000Z', 'DTEND:20260105T150000Z',
     'RRULE:FREQ=MONTHLY;BYDAY=MO;COUNT=3',
   )), WIN);
-  assert.strictEqual(events.length, 1, 'only the first instance is kept');
-  assert.strictEqual(warnings.length, 1);
-  assert.match(warnings[0], /Every Monday \(monthly, wrongly\)/);
-  assert.match(warnings[0], /BYDAY/);
+  // 5 Jan 2026 is a Monday; COUNT=3 exhausts within January itself.
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-01-05', '2026-01-12', '2026-01-19']
+  );
+  assert.strictEqual(warnings.length, 0);
+});
+
+test('FREQ=WEEKLY;BYDAY=TU;WKST=SU expands weekly with no warning ("Magic Class")', () => {
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:g1@test', 'SUMMARY:Magic Class',
+    'DTSTART:20260901T140000Z', 'DTEND:20260901T150000Z',
+    'RRULE:FREQ=WEEKLY;BYDAY=TU;WKST=SU;COUNT=3',
+  )), WIN);
+  // 1 Sep 2026 is a Tuesday.
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-09-01', '2026-09-08', '2026-09-15']
+  );
+  assert.strictEqual(warnings.length, 0);
+});
+
+test('FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;WKST=SU (every weekday) expands with no warning', () => {
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:g2@test', 'SUMMARY:Every weekday',
+    'DTSTART:20260831T140000Z', 'DTEND:20260831T150000Z',
+    'RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;WKST=SU;COUNT=5',
+  )), WIN);
+  // 31 Aug 2026 is a Monday.
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-08-31', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04']
+  );
+  assert.strictEqual(warnings.length, 0);
+});
+
+test('FREQ=MONTHLY;BYDAY=1FR expands to the first Friday of successive months ("Paseo 1st Friday")', () => {
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:g3@test', 'SUMMARY:Paseo 1st Friday',
+    'DTSTART:20260102T190000Z', 'DTEND:20260102T220000Z',
+    'RRULE:FREQ=MONTHLY;BYDAY=1FR;COUNT=3',
+  )), WIN);
+  // 2 Jan 2026 is the first Friday of January; 6 Feb and 6 Mar follow.
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-01-02', '2026-02-06', '2026-03-06']
+  );
+  assert.strictEqual(warnings.length, 0);
+});
+
+test('FREQ=MONTHLY;BYDAY=1TH expands to the first Thursday of successive months ("First Thursdays Classen Curve")', () => {
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:g4@test', 'SUMMARY:First Thursdays Classen Curve',
+    'DTSTART:20260101T190000Z', 'DTEND:20260101T220000Z',
+    'RRULE:FREQ=MONTHLY;BYDAY=1TH;COUNT=3',
+  )), WIN);
+  // 1 Jan 2026 is the first Thursday of January; 5 Feb and 5 Mar follow.
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-01-01', '2026-02-05', '2026-03-05']
+  );
+  assert.strictEqual(warnings.length, 0);
+});
+
+test('FREQ=MONTHLY;BYDAY=-1FR expands to the last Friday, including a 5-Friday month', () => {
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:g5@test', 'SUMMARY:Last Friday social',
+    'DTSTART:20260424T190000Z', 'DTEND:20260424T220000Z',
+    'RRULE:FREQ=MONTHLY;BYDAY=-1FR;COUNT=2',
+  )), WIN);
+  // April 2026 has 4 Fridays (3,10,17,24) so the last is the 24th. May 2026
+  // has 5 Fridays (1,8,15,22,29) — the last Friday is the 5th one, 29 May,
+  // not "the 4th Friday" a naive fixed-count implementation might produce.
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-04-24', '2026-05-29']
+  );
+  assert.strictEqual(warnings.length, 0);
+});
+
+test('FREQ=MONTHLY;BYMONTHDAY=15 expands monthly on the 15th', () => {
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:g6@test', 'SUMMARY:Rent due',
+    'DTSTART:20260115T140000Z', 'DTEND:20260115T150000Z',
+    'RRULE:FREQ=MONTHLY;BYMONTHDAY=15;COUNT=3',
+  )), WIN);
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-01-15', '2026-02-15', '2026-03-15']
+  );
+  assert.strictEqual(warnings.length, 0);
+});
+
+test('FREQ=MONTHLY;BYMONTHDAY=-1 expands to the last day across a 31-day, a 28-day (Feb), and back to a 31-day month', () => {
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:g7@test', 'SUMMARY:Month-end close',
+    'DTSTART:20260131T140000Z', 'DTEND:20260131T150000Z',
+    'RRULE:FREQ=MONTHLY;BYMONTHDAY=-1;COUNT=3',
+  )), WIN);
+  // Jan 2026 has 31 days, Feb 2026 (not a leap year) has 28, Mar has 31.
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-01-31', '2026-02-28', '2026-03-31']
+  );
+  assert.strictEqual(warnings.length, 0);
+});
+
+test('FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=17 expands an annual birthday', () => {
+  // WIN's windowEnd (2027-12-31) is too short for a 3-year expectation — give
+  // this one its own wider window rather than widening WIN, which other
+  // tests' expectations depend on staying put.
+  const win3y = { windowStart: WIN.windowStart, windowEnd: new Date('2029-12-31T00:00:00Z'), tz: WIN.tz };
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:g8@test', 'SUMMARY:Birthday',
+    'DTSTART:20260317T140000Z', 'DTEND:20260317T150000Z',
+    'RRULE:FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=17;COUNT=3',
+  )), win3y);
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-03-17', '2027-03-17', '2028-03-17']
+  );
+  assert.strictEqual(warnings.length, 0);
+});
+
+test('FREQ=MONTHLY;BYMONTHDAY=29,30,31 skips months where none of those days exist, without corrupting the month after', () => {
+  // This is the case that would have caught the cursor-overflow bug on its
+  // own, independent of the BYMONTHDAY=-1 test: a cursor sitting on day 31
+  // rolls "Feb 31" forward into March when stepped with setUTCMonth, which
+  // both skips February AND leaves March expanding from the wrong anchor.
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:g9@test', 'SUMMARY:Near month-end',
+    'DTSTART:20260129T140000Z', 'DTEND:20260129T150000Z',
+    'RRULE:FREQ=MONTHLY;BYMONTHDAY=29,30,31;COUNT=6',
+  )), WIN);
+  // Jan 2026: 29, 30, 31 all exist. Feb 2026 (28 days, not leap): none of
+  // 29/30/31 exist — the month is skipped entirely, not silently dropped.
+  // Mar 2026: 29, 30, 31 all exist again, and March must still be itself
+  // (not rolled forward from a corrupted February).
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-01-29', '2026-01-30', '2026-01-31', '2026-03-29', '2026-03-30', '2026-03-31']
+  );
+  assert.strictEqual(warnings.length, 0);
 });
 
 test('BYDAY on DAILY is unsupported for the same reason', () => {
