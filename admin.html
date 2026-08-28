@@ -1812,6 +1812,17 @@ function formatConflicts(r) {
   return { tone: 'clear', headline: 'Clear — nothing else on this date', lines, notes };
 }
 
+// What, if anything, must be confirmed before saving. Soft clashes (a quote out
+// for the same day) are shown in the panel but do not interrupt a save — you
+// have not promised anybody anything yet.
+function hardConflictSummary(r) {
+  const items = [
+    ...(r.external || []).map(e => `${e.summary} (${e.feedLabel})`),
+    ...(r.bookings || []).filter(b => b.tier === 'hard').map(b => `${b.reference} ${b.clientName} (${b.status})`),
+  ];
+  return items.length ? items.join('\n• ') : null;
+}
+
 // ══ END PURE HELPERS ══
 
 // Default matches the old "Newest Inquiry" dropdown default, so the view the
@@ -2200,6 +2211,16 @@ const CONFLICT_TONES = {
 // or otherwise) get painted over B's date.
 let conflictSeq = 0;
 
+// The last availability result the panel actually rendered — what
+// saveBookingEdits asks hardConflictSummary about. Reset to null the instant
+// a new check starts (see refreshConflictPanel) so a stale answer from a
+// previous booking, or from before this one's fetch has returned, can never
+// be mistaken for a fresh "clear". A null/absent result asks for nothing —
+// see saveBookingEdits — which fails toward a silent save rather than a
+// nagging confirm, matching the panel's existing "unknown" tone: this check
+// has never blocked a save, only informed one.
+let lastConflictResult = null;
+
 // bookingId is null for a not-yet-saved booking (no row to exclude-self
 // with); the endpoint reads date/time/ZIP straight off the query string in
 // that case. For an existing booking, passing booking_id lets the server
@@ -2209,6 +2230,7 @@ async function refreshConflictPanel(bookingId) {
   const el = document.getElementById('conflict-panel');
   if (!el) return;
   const seq = ++conflictSeq;
+  lastConflictResult = null; // superseded until this check resolves — see the declaration above
   const get = (f) => (document.querySelector(`.bk-edit[data-f="${f}"]`) || {}).value || '';
   const date = get('event_date');
   if (!date) { el.innerHTML = ''; return; }
@@ -2228,6 +2250,7 @@ async function refreshConflictPanel(bookingId) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const r = await res.json();
     if (seq !== conflictSeq) return; // superseded by a newer check
+    lastConflictResult = r;
 
     const v = formatConflicts(r);
     const t = CONFLICT_TONES[v.tone];
@@ -2241,7 +2264,11 @@ async function refreshConflictPanel(bookingId) {
     if (seq !== conflictSeq) return; // superseded by a newer check
     // A failed check is NOT a clear date. Say so, rather than leaving the
     // panel blank (which reads as "nothing wrong"), stuck on "Checking…"
-    // (which reads as "still coming"), or falling back to green.
+    // (which reads as "still coming"), or falling back to green. Also log it —
+    // a genuine template bug (e.g. formatConflicts throwing) now surfaces as
+    // this same amber text, and a developer not staring at the panel would
+    // otherwise never know it happened.
+    console.error(e);
     el.innerHTML = `<div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:10px 14px;font-size:.85rem;color:#92400e">
       ❓ Could not check the calendar (${esc(e.message)}). This date has <strong>not</strong> been cleared.</div>`;
   }
@@ -3459,6 +3486,21 @@ async function saveBookingEdits(id) {
     if (id === 'new') { alert('Nothing to save yet — enter at least a name.'); return; }
     flash('bk-flash-' + id);
     return;
+  }
+  // Deliberate double-booking is legitimate — two teams go out on the same
+  // day — so this asks rather than blocks. conflict_override travels as a
+  // signal, not a field: booking.js's update allowlist (colMap) has no entry
+  // for it, so it is never written to a column; booking.js instead reads it
+  // to write a changelog line via the existing logChange(), so "why are there
+  // two gigs at 2pm" has an answer in six weeks. This is NOT appended to
+  // payload.admin_notes — that field is built from whichever .bk-edit inputs
+  // changed, and admin_notes is a separate textarea the admin may not have
+  // touched; writing it here would silently overwrite their own notes.
+  const summary = hardConflictSummary(lastConflictResult || {});
+  if (summary) {
+    const ok = confirm(`This date already has:\n\n• ${summary}\n\nSave anyway?`);
+    if (!ok) return;
+    payload.conflict_override = summary;
   }
   // Items replace the whole quote. service_name / service_price / total_price /
   // mileage_cost are derived server-side from these, so do not also send them —

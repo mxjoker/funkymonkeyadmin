@@ -13,10 +13,10 @@ function loadHelpers() {
   assert.ok(a !== -1 && b !== -1, 'pure-helper sentinels missing from admin.html');
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(HTML.slice(a, b) + '\nout = { formatConflicts };', ctx);
+  vm.runInContext(HTML.slice(a, b) + '\nout = { formatConflicts, hardConflictSummary };', ctx);
   return ctx.out;
 }
-const { formatConflicts } = loadHelpers();
+const { formatConflicts, hardConflictSummary } = loadHelpers();
 
 const clean = { windowKnown: true, external: [], bookings: [], degraded: false, degradedReasons: [], warnings: [], unknowns: [] };
 
@@ -83,4 +83,25 @@ test('an empty object is unknown, not clear — a malformed-but-truthy body must
 
 test('null throws rather than silently rendering — the render path\'s try/catch is what must catch this', () => {
   assert.throws(() => formatConflicts(null));
+});
+
+test('hardConflictSummary: a clean result needs no confirmation', () => {
+  assert.strictEqual(hardConflictSummary(clean), null);
+});
+
+test('hardConflictSummary: a soft (quoted) clash alone does not block the save', () => {
+  const r = { ...clean, bookings: [{ reference: 'FM-B', clientName: 'Bob', status: 'quoted', tier: 'soft', windowKnown: true, startsAt: '2026-09-12T19:00:00Z', endsAt: '2026-09-12T21:00:00Z' }] };
+  assert.strictEqual(hardConflictSummary(r), null);
+});
+
+test('hardConflictSummary: a confirmed booking clash asks first', () => {
+  const r = { ...clean, bookings: [{ reference: 'FM-A', clientName: 'Ann', status: 'confirmed', tier: 'hard', windowKnown: true, startsAt: '2026-09-12T19:00:00Z', endsAt: '2026-09-12T21:00:00Z' }] };
+  const s = hardConflictSummary(r);
+  assert.ok(s, 'a hard clash must produce a confirmation message');
+  assert.match(s, /FM-A/);
+});
+
+test('hardConflictSummary: any calendar event asks first', () => {
+  const r = { ...clean, external: [{ feedLabel: 'Personal', summary: 'Dentist', allDay: false, startsAt: '2026-09-12T18:30:00Z', endsAt: '2026-09-12T19:00:00Z' }] };
+  assert.match(hardConflictSummary(r), /Dentist/);
 });
