@@ -15,8 +15,24 @@ function unfold(text) {
   return String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n[ \t]/g, '').split('\n');
 }
 
+// RFC 5545 unescaping must be a single left-to-right scan, not sequential
+// global replaces — two passes let a backslash freed by the first pass pair
+// with a character from a different original escape (a literal `\` followed
+// by the letter `n` would wrongly collapse into a newline).
 function unescapeText(v) {
-  return String(v).replace(/\\n/gi, '\n').replace(/\\([;,\\])/g, '$1');
+  const s = String(v);
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '\\' && i + 1 < s.length) {
+      const next = s[i + 1];
+      out += next === 'n' || next === 'N' ? '\n' : next;
+      i++;
+      continue;
+    }
+    out += c;
+  }
+  return out;
 }
 
 // "DTSTART;TZID=America/Chicago:20260912T140000" -> name, params, value
@@ -56,16 +72,39 @@ function durationMs(v) {
   return ((+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0)) * 1000;
 }
 
+// SUMMARY if present, else UID, else a plain label — used only for naming an
+// event in a warning, never for the event's own summary field.
+function labelFor(props) {
+  if (props.SUMMARY) return unescapeText(props.SUMMARY.value);
+  if (props.UID) return props.UID.value;
+  return 'an untitled event';
+}
+
+// A VEVENT that never got its END:VEVENT — a truncated feed download, or a
+// BEGIN:VEVENT arriving before the previous one closed. Fail toward flagging,
+// never toward silence: warn by name, then still try to recover it through
+// finishEvent (which will itself skip-and-warn if it has no usable DTSTART).
+// A truncated feed over-reports busy time rather than under-reporting it.
+function closeUnterminated(cur, opts, events, warnings) {
+  warnings.push(`"${labelFor(cur.props)}" was never closed (missing END:VEVENT) and was recovered rather than dropped`);
+  finishEvent(cur, opts, events, warnings);
+}
+
 function parseIcs(text, { windowStart, windowEnd, tz }) {
   const lines = unfold(text);
+  const opts = { windowStart, windowEnd, tz };
   const events = [];
   const warnings = [];
   let cur = null;
 
   for (const raw of lines) {
-    if (/^BEGIN:VEVENT\s*$/i.test(raw)) { cur = { props: {} }; continue; }
+    if (/^BEGIN:VEVENT\s*$/i.test(raw)) {
+      if (cur) closeUnterminated(cur, opts, events, warnings);
+      cur = { props: {} };
+      continue;
+    }
     if (/^END:VEVENT\s*$/i.test(raw)) {
-      if (cur) finishEvent(cur, { windowStart, windowEnd, tz }, events, warnings);
+      if (cur) finishEvent(cur, opts, events, warnings);
       cur = null; continue;
     }
     if (!cur) continue;
@@ -74,6 +113,7 @@ function parseIcs(text, { windowStart, windowEnd, tz }) {
     if (p.name === 'EXDATE') (cur.props.EXDATE ||= []).push(p);
     else cur.props[p.name] = p;
   }
+  if (cur) closeUnterminated(cur, opts, events, warnings);
 
   events.sort((a, b) => a.startsAt - b.startsAt);
   return { events, warnings };

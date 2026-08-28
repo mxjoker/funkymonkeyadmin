@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { parseIcs } = require('../netlify/functions/_ics.js');
+const { parseIcs, unescapeText } = require('../netlify/functions/_ics.js');
+const { esc } = require('../netlify/functions/calendar.js');
 
 const TZ = 'America/Chicago';
 const WIN = { windowStart: new Date('2026-01-01T00:00:00Z'), windowEnd: new Date('2027-12-31T00:00:00Z'), tz: TZ };
@@ -110,4 +111,59 @@ test('results are sorted by start', () => {
     ...ev('UID:n@test', 'SUMMARY:Sooner', 'DTSTART:20260912T180000Z', 'DTEND:20260912T190000Z'),
   ), WIN);
   assert.deepStrictEqual(events.map(e => e.summary), ['Sooner', 'Later']);
+});
+
+test('a truncated feed (last VEVENT never closed) recovers the event and warns, never silently drops it', () => {
+  const text = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0',
+    'BEGIN:VEVENT', 'UID:o@test', 'SUMMARY:Wedding in Tulsa',
+    'DTSTART:20260912T190000Z', 'DTEND:20260912T200000Z',
+    // no END:VEVENT, no END:VCALENDAR — the download stopped mid-stream.
+  ].join('\r\n');
+  const { events, warnings } = parseIcs(text, WIN);
+  assert.strictEqual(events.length, 1);
+  assert.strictEqual(events[0].summary, 'Wedding in Tulsa');
+  assert.strictEqual(warnings.length, 1);
+  assert.match(warnings[0], /Wedding in Tulsa/);
+});
+
+test('a BEGIN:VEVENT arriving while one is still open displaces it exactly once — recovered and warned, not lost, not double-counted', () => {
+  const text = cal(
+    'BEGIN:VEVENT', 'UID:p@test', 'SUMMARY:First',
+    'DTSTART:20260912T190000Z', 'DTEND:20260912T200000Z',
+    // no END:VEVENT before the next BEGIN:VEVENT displaces it
+    'BEGIN:VEVENT', 'UID:q@test', 'SUMMARY:Second',
+    'DTSTART:20260912T210000Z', 'DTEND:20260912T220000Z',
+    'END:VEVENT',
+  );
+  const { events, warnings } = parseIcs(text, WIN);
+  assert.strictEqual(events.length, 2);
+  assert.deepStrictEqual(events.map(e => e.summary), ['First', 'Second']);
+  assert.strictEqual(warnings.length, 1);
+  assert.match(warnings[0], /First/);
+});
+
+test('an unterminated event with no usable DTSTART is skipped, but still warned about', () => {
+  const text = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0',
+    'BEGIN:VEVENT', 'UID:r@test', 'SUMMARY:No Start',
+    // no DTSTART at all, and the feed is truncated on top of that
+  ].join('\r\n');
+  const { events, warnings } = parseIcs(text, WIN);
+  assert.strictEqual(events.length, 0);
+  assert.strictEqual(warnings.length, 2); // "never closed" + finishEvent's own "no start time"
+  assert.match(warnings.join(' '), /No Start/);
+});
+
+test('unescapeText round-trips through calendar.js esc(), including a literal backslash-n and a trailing backslash', () => {
+  const cases = [
+    'Lunch, then gym; maybe',
+    'a literal backslash then n: \\n (not a newline)',
+    'trailing backslash: \\',
+    'multi\nline\nsummary',
+    'semicolons; and, commas, and\\backslashes\\',
+  ];
+  for (const original of cases) {
+    assert.strictEqual(unescapeText(esc(original)), original, `round-trip failed for: ${JSON.stringify(original)}`);
+  }
 });
