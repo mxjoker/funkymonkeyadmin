@@ -189,6 +189,11 @@
   to = "/.netlify/functions/calendar"
   status = 200
 
+[[redirects]]
+  from = "/api/calendar-feeds"
+  to = "/.netlify/functions/calendar-feeds"
+  status = 200
+
 # Twilio webhooks. The signature check rebuilds the signed URL from SITE_URL +
 # these exact paths, so Twilio must be configured with these URLs and no query
 # string — see _twilio-sig.js.
