@@ -120,7 +120,13 @@ function parseIcs(text, { windowStart, windowEnd, tz }) {
 }
 
 const DAY_CODES = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
-const SUPPORTED_RRULE_PARTS = new Set(['FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'BYDAY', 'WKST']);
+// WKST is deliberately NOT here. It only changes anything when WEEKLY has
+// both INTERVAL > 1 and a BYDAY spanning the week boundary, and implementing
+// it correctly is real work with real bug surface for a case that is rare in
+// a personal calendar. Claiming it as supported without honouring it would
+// expand such a rule wrongly and silently — the exact failure this file
+// exists to prevent. Over-warning is the safe direction.
+const SUPPORTED_RRULE_PARTS = new Set(['FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'BYDAY']);
 const MAX_OCCURRENCES = 1000; // a hard stop, independent of the window — a malformed feed cannot spin.
 
 function parseRrule(value) {

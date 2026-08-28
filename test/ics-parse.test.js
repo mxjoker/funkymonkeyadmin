@@ -250,6 +250,39 @@ test('expansion stops at the window end rather than running forever', () => {
   assert.strictEqual(events.length, 10);
 });
 
+test('a weekly rule holds its local wall-clock time across the fall-back DST transition', () => {
+  const { events } = parseIcs(cal(...ev(
+    'UID:r9@test', 'SUMMARY:Weekly 3pm',
+    'DTSTART;TZID=America/Chicago:20261023T150000',
+    'DTEND;TZID=America/Chicago:20261023T160000',
+    'RRULE:FREQ=WEEKLY;COUNT=4',
+  )), WIN);
+  assert.strictEqual(events.length, 4);
+  const localClock = (d) => new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, hour12: false, hour: '2-digit', minute: '2-digit',
+  }).format(d);
+  // The UTC instant legitimately shifts by an hour across the Nov 1 fall-back
+  // (CDT -5 to CST -6) — asserting on it would obscure the property being
+  // pinned, which is that the LOCAL clock reading never moves off 15:00.
+  assert.deepStrictEqual(events.map(e => localClock(e.startsAt)), ['15:00', '15:00', '15:00', '15:00']);
+  assert.deepStrictEqual(
+    events.map(e => e.startsAt.toISOString().slice(0, 10)),
+    ['2026-10-23', '2026-10-30', '2026-11-06', '2026-11-13']
+  );
+});
+
+test('WKST is not honoured, so a rule carrying it takes the unsupported path rather than expanding silently wrong', () => {
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:r10@test', 'SUMMARY:Weekend split',
+    'DTSTART:20260906T140000Z', 'DTEND:20260906T150000Z',
+    'RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,SA;WKST=MO',
+  )), WIN);
+  assert.strictEqual(events.length, 1, 'only the first instance is kept');
+  assert.strictEqual(warnings.length, 1);
+  assert.match(warnings[0], /Weekend split/);
+  assert.match(warnings[0], /WKST/);
+});
+
 test('unescapeText round-trips through calendar.js esc(), including a literal backslash-n and a trailing backslash', () => {
   const cases = [
     'Lunch, then gym; maybe',
