@@ -191,7 +191,7 @@ test('INTERVAL is honoured', () => {
 });
 
 test('BYDAY generates several days per week', () => {
-  const { events } = parseIcs(cal(...ev(
+  const { events, warnings } = parseIcs(cal(...ev(
     'UID:r4@test', 'SUMMARY:MWF',
     'DTSTART;TZID=America/Chicago:20260907T090000',
     'DTEND;TZID=America/Chicago:20260907T100000',
@@ -201,6 +201,33 @@ test('BYDAY generates several days per week', () => {
     events.map(e => e.startsAt.toISOString().slice(0, 10)),
     ['2026-09-07', '2026-09-09', '2026-09-11']
   );
+  // BYDAY is genuinely supported on WEEKLY — pin that the fix for the
+  // MONTHLY/DAILY case below does not regress the one FREQ where it works.
+  assert.strictEqual(warnings.length, 0);
+});
+
+test('BYDAY on MONTHLY is unsupported — it would otherwise expand on DTSTART\'s raw day instead of the named weekday', () => {
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:r11@test', 'SUMMARY:Every Monday (monthly, wrongly)',
+    'DTSTART:20260105T140000Z', 'DTEND:20260105T150000Z',
+    'RRULE:FREQ=MONTHLY;BYDAY=MO;COUNT=3',
+  )), WIN);
+  assert.strictEqual(events.length, 1, 'only the first instance is kept');
+  assert.strictEqual(warnings.length, 1);
+  assert.match(warnings[0], /Every Monday \(monthly, wrongly\)/);
+  assert.match(warnings[0], /BYDAY/);
+});
+
+test('BYDAY on DAILY is unsupported for the same reason', () => {
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:r12@test', 'SUMMARY:MWF (daily, wrongly)',
+    'DTSTART:20260105T140000Z', 'DTEND:20260105T150000Z',
+    'RRULE:FREQ=DAILY;BYDAY=MO,WE,FR;COUNT=3',
+  )), WIN);
+  assert.strictEqual(events.length, 1, 'only the first instance is kept');
+  assert.strictEqual(warnings.length, 1);
+  assert.match(warnings[0], /MWF \(daily, wrongly\)/);
+  assert.match(warnings[0], /BYDAY/);
 });
 
 test('EXDATE removes an occurrence', () => {

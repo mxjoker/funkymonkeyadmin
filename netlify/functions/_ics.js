@@ -140,8 +140,19 @@ function parseRrule(value) {
   // (there may be no extra parts at all) but it is just as unexpandable, and
   // silently keeping one occurrence with no warning is the exact bug this
   // file exists to prevent.
-  if (!/^(DAILY|WEEKLY|MONTHLY|YEARLY)$/.test(String(parts.FREQ).toUpperCase())) {
+  const freq = String(parts.FREQ || '').toUpperCase();
+  if (!/^(DAILY|WEEKLY|MONTHLY|YEARLY)$/.test(freq)) {
     unsupported.push('FREQ');
+  }
+  // BYDAY sits in SUPPORTED_RRULE_PARTS as a blanket membership test, but
+  // expandRrule only ever reads it on FREQ=WEEKLY — on DAILY/MONTHLY/YEARLY it
+  // is silently dropped and the rule expands on DTSTART's raw day instead of
+  // the days actually named. Same failure class as WKST, caught the same way
+  // (a part that changes nothing, or changes the wrong thing, while the
+  // membership check waves it through): gate support on the FREQ it actually
+  // applies to, not just on its own presence.
+  if (parts.BYDAY && freq !== 'WEEKLY') {
+    unsupported.push('BYDAY');
   }
   return { parts, unsupported };
 }
