@@ -98,7 +98,19 @@ async function spanFor(client, booking, overrides = {}) {
   } else if (!t) {
     unknowns.push('no event time on this booking — the working window cannot be computed');
   } else {
-    const [Y, Mo, D] = String(booking.event_date).slice(0, 10).split('-').map(Number);
+    // pg hands DATE columns back as JS Date objects (see _email.js's
+    // fmtEventDate for the same gotcha) — String(aDate) is
+    // "Wed Sep 12 2026 00:00:00 GMT-0500 ..." whose first 10 characters are
+    // NOT "2026-09-12". A row read straight from `bookings` (as conflictsFor's
+    // "other bookings" loop and autoCalcTimes both do) would silently produce
+    // NaN → Invalid Date → windowKnown left true, and an Invalid Date compares
+    // false against everything, so overlaps() would never fire. That is a
+    // "definitely clear" wearing a "nothing found" mask — exactly the bug
+    // class this file exists to avoid. Normalize both shapes.
+    const ymd = booking.event_date instanceof Date
+      ? `${booking.event_date.getFullYear()}-${String(booking.event_date.getMonth() + 1).padStart(2, '0')}-${String(booking.event_date.getDate()).padStart(2, '0')}`
+      : String(booking.event_date).slice(0, 10);
+    const [Y, Mo, D] = ymd.split('-').map(Number);
     const eventAt = zonedToInstant(Y, Mo, D, Number(t[1]), Number(t[2]), TZ);
     startsAt = new Date(eventAt.getTime() - leadMinutes * 60000);
     endsAt   = new Date(startsAt.getTime() + totalMinutes * 60000);

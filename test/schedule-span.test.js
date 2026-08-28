@@ -151,3 +151,14 @@ test('spanFor: a template row beats the hardcoded defaults', async () => {
   // 5 + 25 + 5 + 60 + 5 + 25 + 5
   assert.strictEqual(s.totalMinutes, 130);
 });
+
+test('spanFor: event_date as a real JS Date (what pg actually hands back from a DATE column) is not garbled', async () => {
+  // A row read straight off `bookings` never carries a "YYYY-MM-DD" string —
+  // pg parses DATE columns into a JS Date. Before the fix, String(aDate).slice(0,10)
+  // sliced "Sat Sep 12" off of "Sat Sep 12 2026 00:00:00 GMT..." and produced
+  // NaN dates while still reporting windowKnown: true.
+  const s = await spanFor(spanClient(), bookingRow({ event_date: new Date(2026, 8, 12) }));
+  assert.strictEqual(s.windowKnown, true);
+  assert.strictEqual(s.startsAt.toISOString(), '2026-09-12T17:20:00.000Z');
+  assert.strictEqual(s.endsAt.toISOString(), '2026-09-12T21:00:00.000Z');
+});
