@@ -13,10 +13,10 @@ function loadHelpers() {
   assert.ok(a !== -1 && b !== -1, 'pure-helper sentinels missing from admin.html');
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(HTML.slice(a, b) + '\nout = { formatConflicts, hardConflictSummary };', ctx);
+  vm.runInContext(HTML.slice(a, b) + '\nout = { formatConflicts, hardConflictSummary, conflictConfirmation };', ctx);
   return ctx.out;
 }
-const { formatConflicts, hardConflictSummary } = loadHelpers();
+const { formatConflicts, hardConflictSummary, conflictConfirmation } = loadHelpers();
 
 const clean = { windowKnown: true, external: [], bookings: [], degraded: false, degradedReasons: [], warnings: [], unknowns: [] };
 
@@ -104,4 +104,42 @@ test('hardConflictSummary: a confirmed booking clash asks first', () => {
 test('hardConflictSummary: any calendar event asks first', () => {
   const r = { ...clean, external: [{ feedLabel: 'Personal', summary: 'Dentist', allDay: false, startsAt: '2026-09-12T18:30:00Z', endsAt: '2026-09-12T19:00:00Z' }] };
   assert.match(hardConflictSummary(r), /Dentist/);
+});
+
+// Fix round 1: a save that goes through before the conflict check has an
+// answer used to fail silently — lastConflictResult was simply null, and
+// hardConflictSummary(null || {}) has nothing to say. The panel can show
+// "not cleared" to a human looking at it; the save path has no panel, so
+// silence there means Joe never finds out at all. conflictConfirmation is
+// the fix: an absent or uncertain result asks too, distinctly from a real
+// hard conflict.
+
+test('conflictConfirmation: no date entered means no check is owed', () => {
+  assert.strictEqual(conflictConfirmation(false, clean), null);
+});
+
+test('conflictConfirmation: a clean result with a date present needs no confirmation', () => {
+  assert.strictEqual(conflictConfirmation(true, clean), null);
+});
+
+test('conflictConfirmation: a null result (check never returned) asks, distinctly from a hard conflict', () => {
+  const c = conflictConfirmation(true, null);
+  assert.ok(c, 'an absent result must still ask before saving');
+  assert.strictEqual(c.kind, 'uncertain');
+});
+
+test('conflictConfirmation: a degraded result with no findings still asks', () => {
+  const r = { ...clean, degraded: true, degradedReasons: ['"Personal" last synced 40 hours ago'] };
+  const c = conflictConfirmation(true, r);
+  assert.ok(c);
+  assert.strictEqual(c.kind, 'uncertain');
+});
+
+test('conflictConfirmation: a hard booking conflict takes priority over an uncertain check', () => {
+  const r = { ...clean, warnings: ['some parser warning'], bookings: [
+    { reference: 'FM-A', clientName: 'Ann', status: 'confirmed', tier: 'hard', windowKnown: true, startsAt: '2026-09-12T19:00:00Z', endsAt: '2026-09-12T21:00:00Z' },
+  ] };
+  const c = conflictConfirmation(true, r);
+  assert.strictEqual(c.kind, 'hard');
+  assert.match(c.message, /FM-A/);
 });
