@@ -89,6 +89,23 @@ test('deleting an id that does not exist returns 404, not a silent no-op 200', a
   assert.strictEqual(res.statusCode, 404, 'deleting a nonexistent feed must not report success');
 });
 
+test('a webcal:// address is accepted and stored as https:// — Apple\'s share hands out webcal://', async () => {
+  let savedUrl = null;
+  const fakeClient = { query: async (sql, params) => {
+    if (/^INSERT INTO calendar_feeds/i.test(sql)) { savedUrl = params[1]; return { rows: [] }; }
+    return { rows: [] };
+  } };
+  const { handler } = loadHandler(fakeClient);
+
+  const res = await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({ action: 'save', label: 'iCloud', url: 'webcal://p01-caldav.icloud.com/published/2/abc123' }),
+  });
+
+  assert.strictEqual(res.statusCode, 200);
+  assert.strictEqual(savedUrl, 'https://p01-caldav.icloud.com/published/2/abc123', 'webcal:// must be normalised to https:// before it is stored');
+});
+
 test('ensureCalendarTables creates both tables and the range index', async () => {
   const sqls = [];
   const c = { query: async (sql) => { sqls.push(sql); return { rows: [] }; } };

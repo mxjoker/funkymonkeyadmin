@@ -13,10 +13,10 @@ function loadHelpers() {
   assert.ok(a !== -1 && b !== -1, 'pure-helper sentinels missing from admin.html');
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(HTML.slice(a, b) + '\nout = { formatConflicts, hardConflictSummary, conflictConfirmation };', ctx);
+  vm.runInContext(HTML.slice(a, b) + '\nout = { formatConflicts, hardConflictSummary, conflictConfirmation, feedStatusLabel };', ctx);
   return ctx.out;
 }
-const { formatConflicts, hardConflictSummary, conflictConfirmation } = loadHelpers();
+const { formatConflicts, hardConflictSummary, conflictConfirmation, feedStatusLabel } = loadHelpers();
 
 const clean = { windowKnown: true, external: [], bookings: [], degraded: false, degradedReasons: [], warnings: [], unknowns: [] };
 
@@ -142,4 +142,44 @@ test('conflictConfirmation: a hard booking conflict takes priority over an uncer
   const c = conflictConfirmation(true, r);
   assert.strictEqual(c.kind, 'hard');
   assert.match(c.message, /FM-A/);
+});
+
+// A soft (quoted) clash alone must not block a save — only hardConflictSummary
+// was exercised for this before; conflictConfirmation is the actual save gate
+// and the easy way to get this backwards is to have it ask anyway.
+test('conflictConfirmation: a soft-only clash needs no confirmation', () => {
+  const r = { ...clean, bookings: [
+    { reference: 'FM-B', clientName: 'Bob', status: 'quoted', tier: 'soft', windowKnown: true, startsAt: '2026-09-12T19:00:00Z', endsAt: '2026-09-12T21:00:00Z' },
+  ] };
+  assert.strictEqual(conflictConfirmation(true, r), null);
+});
+
+test('feedStatusLabel: a fresh successful sync is ok', () => {
+  const s = feedStatusLabel({ label: 'Personal', last_status: 'ok', last_synced_at: '2026-09-01T11:00:00Z', last_event_count: 42, last_warnings: [] }, new Date('2026-09-01T12:00:00Z'));
+  assert.strictEqual(s.tone, 'ok');
+  assert.match(s.text, /42/);
+});
+
+test('feedStatusLabel: an error is an error, and shows the reason', () => {
+  const s = feedStatusLabel({ label: 'Personal', last_status: 'error', last_error: 'HTTP 404', last_synced_at: '2026-09-01T11:00:00Z' }, new Date('2026-09-01T12:00:00Z'));
+  assert.strictEqual(s.tone, 'error');
+  assert.match(s.text, /404/);
+});
+
+test('feedStatusLabel: never synced is an error, not a blank', () => {
+  const s = feedStatusLabel({ label: 'Personal', last_status: null, last_synced_at: null }, new Date('2026-09-01T12:00:00Z'));
+  assert.strictEqual(s.tone, 'error');
+  assert.match(s.text, /never/i);
+});
+
+test('feedStatusLabel: stale is a warning', () => {
+  const s = feedStatusLabel({ label: 'Personal', last_status: 'ok', last_synced_at: '2026-08-29T11:00:00Z', last_event_count: 42 }, new Date('2026-09-01T12:00:00Z'));
+  assert.strictEqual(s.tone, 'warn');
+  assert.match(s.text, /hours ago/);
+});
+
+test('feedStatusLabel: warnings are mentioned even on a successful sync', () => {
+  const s = feedStatusLabel({ label: 'Personal', last_status: 'ok', last_synced_at: '2026-09-01T11:00:00Z', last_event_count: 42, last_warnings: ['a thing'] }, new Date('2026-09-01T12:00:00Z'));
+  assert.strictEqual(s.tone, 'warn');
+  assert.match(s.text, /1 warning/);
 });

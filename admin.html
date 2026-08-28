@@ -625,6 +625,18 @@ input,select,textarea{font-family:inherit}
       <p class="text-muted" style="margin-bottom:20px">Changes save to the database and immediately appear in the booking form.</p>
       <div id="cat-loading" class="cat-loading"><div class="cat-spinner"></div>Loading…</div>
       <div id="cat-content" style="display:none"></div>
+
+      <div class="card" style="margin-top:24px">
+        <div class="card-hdr">
+          <h2>📅 Calendars</h2>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-outline btn-sm" onclick="refreshCalendarFeeds()">↻ Refresh Now</button>
+            <button class="btn btn-primary btn-sm" onclick="openFeedModal(null)">+ Add Calendar</button>
+          </div>
+        </div>
+        <p class="text-muted" style="padding:12px 20px 0;margin:0">Personal calendars checked hourly for clashes with gigs. The address is a credential — once saved it is never shown again, only replaced.</p>
+        <div id="calendar-feeds-body"><div style="text-align:center;padding:32px;color:#9ca3af">Loading…</div></div>
+      </div>
     </div>
 
     <!-- ══ AUTOMATIONS ══ -->
@@ -1218,7 +1230,7 @@ function showPage(name) {
   if (name === 'staff') { renderStaff(); }
   if (name === 'leads') loadLeads();
   if (name === 'otto') loadOtto();
-  if (name === 'catalogue') loadCatalogue();
+  if (name === 'catalogue') { loadCatalogue(); loadCalendarFeeds(); }
   if (name === 'automations') loadAutomations();
   if (name === 'payroll') loadPayroll();
   if (name === 'dashboard') checkStaleWarnings();
@@ -1851,6 +1863,19 @@ function conflictConfirmation(hasDate, result) {
     return { kind: 'uncertain', message: "The conflict check hasn't finished or couldn't complete, so this date has not been cleared. Save anyway?" };
   }
   return null;
+}
+
+// A feed's health in one line. Never blank and never quietly optimistic: a feed
+// that has never synced reads as an error, because it is contributing nothing
+// to a check that is meant to keep gigs off booked days.
+function feedStatusLabel(f, now) {
+  if (!f.last_synced_at) return { tone: 'error', text: 'Never synced — this calendar is not being checked' };
+  if (f.last_status === 'error') return { tone: 'error', text: `Failed: ${f.last_error || 'unknown error'}` };
+  const hours = Math.round((now - new Date(f.last_synced_at)) / 3600000);
+  const warnCount = (f.last_warnings || []).length;
+  if (hours > 25) return { tone: 'warn', text: `Last synced ${hours} hours ago — may be out of date` };
+  if (warnCount) return { tone: 'warn', text: `${f.last_event_count || 0} events, ${warnCount} warning${warnCount === 1 ? '' : 's'}` };
+  return { tone: 'ok', text: `${f.last_event_count || 0} events, synced ${hours === 0 ? 'within the hour' : `${hours}h ago`}` };
 }
 
 // ══ END PURE HELPERS ══
@@ -6314,6 +6339,136 @@ async function runScheduledNow() {
     await loadAutomations();
   } catch(e) { alert('Error: ' + e.message); }
   btn.disabled = false; btn.textContent = '▶ Run Scheduled Now';
+}
+
+// ══════════════════════════════════════════════════
+// CALENDARS (feeds checked hourly for booking conflicts)
+// ══════════════════════════════════════════════════
+
+let calendarFeeds = [];
+
+async function loadCalendarFeeds() {
+  const el = document.getElementById('calendar-feeds-body');
+  try {
+    const res = await apiFetch('/api/calendar-feeds');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    calendarFeeds = data.feeds || [];
+    renderCalendarFeeds();
+  } catch (e) {
+    el.innerHTML = `<p style="padding:16px;color:#dc2626">Could not load calendars: ${esc(e.message)}</p>`;
+  }
+}
+
+// The health line is the point of this screen — feedStatusLabel (PURE HELPERS
+// block) never returns blank and never reads as reassuring for a feed that
+// isn't actually working. last_warnings (e.g. an unexpandable recurring rule)
+// is shown separately, underneath, because it's actionable even on an
+// otherwise-ok sync.
+function renderCalendarFeeds() {
+  const el = document.getElementById('calendar-feeds-body');
+  if (!calendarFeeds.length) {
+    el.innerHTML = '<p style="padding:16px;color:#9ca3af">No calendars yet. Add one to start checking gigs against it.</p>';
+    return;
+  }
+  const toneStyle = {
+    ok:    'background:#f0fdf4;color:#166534',
+    warn:  'background:#fffbeb;color:#92400e',
+    error: 'background:#fef2f2;color:#991b1b',
+  };
+  el.innerHTML = calendarFeeds.map(f => {
+    const s = feedStatusLabel(f, new Date());
+    const warnings = f.last_warnings || [];
+    return `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 20px;border-bottom:1px solid #f3f4f6">
+      <div>
+        <div style="font-weight:700">${esc(f.label)}${f.active === false ? ' <span style="color:#9ca3af;font-weight:500">(inactive)</span>' : ''}</div>
+        <div style="font-size:.78rem;color:#6b7280;font-family:monospace;margin-top:2px">${esc(f.url_masked)}</div>
+        <div style="font-size:.75rem;font-weight:600;padding:2px 8px;border-radius:10px;display:inline-block;margin-top:6px;${toneStyle[s.tone]}">${esc(s.text)}</div>
+        ${warnings.length ? `<div style="margin-top:6px;font-size:.75rem;color:#92400e">${warnings.map(w => `⚠️ ${esc(w)}`).join('<br>')}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button class="btn btn-outline btn-sm" onclick="openFeedModal(${JSON.stringify(f).replace(/"/g, '&quot;')})">Replace</button>
+        <button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="deleteFeed(${f.id})">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Add or replace. There is no "edit the URL" in place — the API never returns
+// a raw url to prefill (only url_masked), and calendar-feeds.js's save action
+// requires a fresh http(s)/webcal address every time, on an add or a replace
+// alike. So the address field always starts empty and is always required.
+function openFeedModal(feed) {
+  const f = feed || { label: '' };
+  document.getElementById('modal-title').textContent = f.id ? 'Replace Calendar' : 'Add Calendar';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:grid;gap:12px">
+      <div><label class="form-label">Label</label><input class="form-control" id="feed-label" value="${esc(f.label)}"></div>
+      <div><label class="form-label">Calendar address (ICS URL)</label>
+        <input class="form-control" id="feed-url" placeholder="https://... or webcal://...">
+        ${f.id
+          ? `<p class="text-muted" style="margin-top:6px;font-size:.75rem">Current: ${esc(f.url_masked)}. Paste the calendar's full address again to replace it — the old one can't be shown or reused, only overwritten.</p>`
+          : `<p class="text-muted" style="margin-top:6px;font-size:.75rem">The address is a credential. It's stored write-only — this app can display a masked form of it, but never the real thing, again.</p>`}
+      </div>
+      <div style="display:flex;gap:10px;padding-top:4px">
+        <button class="btn btn-primary" onclick="saveFeed(${f.id || 'null'})">Save</button>
+        ${f.id ? `<button class="btn btn-outline" style="color:#dc2626;border-color:#dc2626" onclick="deleteFeed(${f.id})">Delete</button>` : ''}
+      </div>
+    </div>`;
+  document.getElementById('booking-modal').classList.add('open');
+}
+
+async function saveFeed(id) {
+  const label = document.getElementById('feed-label').value.trim();
+  const url = document.getElementById('feed-url').value.trim();
+  if (!url) { alert('A calendar address is required — replacing a feed means pasting its address again.'); return; }
+  try {
+    const res = await apiFetch('/api/calendar-feeds', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save', id: id || undefined, label, url }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    calendarFeeds = data.feeds || [];
+    closeModal();
+    renderCalendarFeeds();
+  } catch (e) { alert('Save failed: ' + e.message); }
+}
+
+async function deleteFeed(id) {
+  if (!confirm('Delete this calendar? Gigs will no longer be checked against it.')) return;
+  try {
+    const res = await apiFetch('/api/calendar-feeds', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', id }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    calendarFeeds = data.feeds || [];
+    closeModal();
+    renderCalendarFeeds();
+  } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
+// Covers the one real weakness of hourly polling: a date blocked out on the
+// personal calendar twenty minutes ago, while a client is on the phone asking
+// to book it. Refreshes every feed, not one — matches calendar-sync.js's
+// syncAllFeeds, which has no single-feed entry point.
+async function refreshCalendarFeeds() {
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = 'Refreshing…';
+  try {
+    const res = await apiFetch('/api/calendar-feeds', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'refresh' }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    calendarFeeds = data.feeds || [];
+    renderCalendarFeeds();
+  } catch (e) { alert('Refresh failed: ' + e.message); }
+  btn.disabled = false; btn.textContent = '↻ Refresh Now';
 }
 
 // ══════════════════════════════════════════════════

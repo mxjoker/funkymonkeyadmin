@@ -86,7 +86,11 @@ exports.handler = async (event) => {
 
         if (body.action === 'save') {
           const label = String(body.label || '').trim();
-          const url = String(body.url || '').trim();
+          // webcal:// and https:// are the same address with a different scheme
+          // prefix — it's what Apple's "Public Calendar" share hands you, and
+          // iCloud is one of the two providers this feature exists to read.
+          // Normalise here so any caller gets the same relaxed rule.
+          const url = String(body.url || '').trim().replace(/^webcal:\/\//i, 'https://');
           if (!label) return json(400, { error: 'A label is required.' });
           if (!/^https?:\/\//i.test(url)) return json(400, { error: 'The calendar address must be a http(s) URL.' });
           if (body.id) {
