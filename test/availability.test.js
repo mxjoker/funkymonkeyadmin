@@ -59,6 +59,30 @@ test('other FME bookings are conflicts too, tiered hard and soft', async () => {
   assert.deepStrictEqual(r.bookings.map(b => [b.reference, b.tier]), [['FM-A', 'hard'], ['FM-B', 'soft']]);
 });
 
+test('a booking with status "review" — the default for every inquiry and public-form submission — is a soft conflict, not invisible', async () => {
+  // Unlike the generic client() helper above, this fake client actually
+  // mirrors the real "WHERE status = ANY($2)" filter, so the test fails
+  // honestly if 'review' is ever dropped back out of SOFT_STATUSES — the
+  // generic helper ignores params and would return the row either way.
+  const reviewBooking = { id: 11, reference: 'FM-C', client_name: 'Cara', status: 'review',
+                          event_date: '2026-09-12', event_time: '15:00', event_zip: '73102', service_id: 'magic' };
+  const fakeClient = {
+    query: async (sql, params) => {
+      if (/FROM service_time_templates/i.test(sql)) return { rows: [] };
+      if (/FROM services/i.test(sql)) return { rows: [{ duration_minutes: 60 }] };
+      if (/FROM calendar_feeds/i.test(sql)) return { rows: [healthyFeed] };
+      if (/FROM external_busy/i.test(sql)) return { rows: [] };
+      if (/FROM bookings/i.test(sql)) {
+        const statuses = params[1];
+        return { rows: statuses.includes(reviewBooking.status) ? [reviewBooking] : [] };
+      }
+      return { rows: [] };
+    },
+  };
+  const r = await conflictsFor(fakeClient, BOOKING, { now: NOW });
+  assert.deepStrictEqual(r.bookings.map(b => [b.reference, b.tier]), [['FM-C', 'soft']]);
+});
+
 test('the booking being edited is never a conflict with itself', async () => {
   const bookings = [{ id: 5, reference: 'FM-SELF', client_name: 'Joe', status: 'confirmed',
                       event_date: '2026-09-12', event_time: '14:00', event_zip: '73102', service_id: 'magic' }];

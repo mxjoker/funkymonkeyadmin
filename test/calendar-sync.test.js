@@ -64,6 +64,32 @@ test('a non-200 response is an error, not an empty calendar', async () => {
   assert.ok(!c.sqls.some(s => /DELETE FROM external_busy/i.test(s.sql)));
 });
 
+// The most important test in this file: with redirect: 'follow', a revoked
+// or rotated secret URL commonly answers 200 with an HTML sign-in page, not
+// an HTTP error. parseIcs would find zero events in that body — the same
+// shape as a genuinely empty calendar — and the feed would be stamped
+// healthy with last_event_count=0, which is exactly the failure the spec
+// forbids: a rotated Google URL must read as broken, never as an empty
+// calendar that reports Joe free.
+test('a 200 response that is not a calendar (e.g. an HTML sign-in page) is an error, and DELETES NOTHING', async () => {
+  const c = recordingClient();
+  const loginPage = async () => ({ ok: true, status: 200, text: async () => (
+    '<!doctype html><html><head><title>Sign in</title></head>' +
+    '<body><form action="/signin">Please sign in to continue</form></body></html>'
+  ) });
+  const r = await syncFeed(c, { id: 7, label: 'Personal', url: 'https://x/ics' }, new Date(), loginPage);
+
+  assert.strictEqual(r.ok, false);
+  assert.match(r.error, /did not return a calendar/i);
+  assert.match(r.error, /address/i);
+
+  const text = c.sqls.map(s => s.sql).join('\n');
+  assert.ok(!/DELETE FROM external_busy/i.test(text),
+    'a non-calendar body must not wipe existing busy rows — that would report Joe free on a broken feed');
+  const upd = c.sqls.find(s => /UPDATE calendar_feeds/i.test(s.sql));
+  assert.ok(upd.params.includes('error'));
+});
+
 test('an oversized feed is refused rather than parsed', async () => {
   const c = recordingClient();
   const huge = async () => ({ ok: true, status: 200, text: async () => 'x'.repeat(5 * 1024 * 1024 + 1) });

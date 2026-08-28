@@ -39,6 +39,17 @@ test('an unknown window is not clear either', () => {
   assert.match(v.notes.join(' '), /no event time/);
 });
 
+// Previously unknowns only rendered when windowKnown was false, which
+// discarded every unknown generated for a KNOWN window — including "drive
+// time estimated — ZIP not in the table" and "service duration unknown —
+// assumed 60 minutes", the exact cases zipKnown/booking_id exist to surface.
+test('unknowns render even when the window IS known — that is the case they exist for', () => {
+  const v = formatConflicts({ ...clean, windowKnown: true,
+    unknowns: ['drive time estimated — ZIP not in the table', 'service duration unknown — assumed 60 minutes'] });
+  assert.match(v.notes.join(' '), /ZIP not in the table/);
+  assert.match(v.notes.join(' '), /assumed 60 minutes/);
+});
+
 test('external events are listed with their feed and time', () => {
   const v = formatConflicts({ ...clean, external: [{
     feedLabel: 'Personal', summary: 'Dentist', allDay: false,

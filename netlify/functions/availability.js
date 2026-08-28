@@ -18,6 +18,7 @@
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
 const { conflictsFor } = require('./_availability');
+const { ensureCalendarTables } = require('./calendar-feeds');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -29,6 +30,13 @@ exports.handler = async (event) => {
 
   try {
     return await withClient(async (client) => {
+      // calendar-feeds.js and calendar-sync.js both call this before touching
+      // calendar_feeds/external_busy; this endpoint queries both (via
+      // conflictsFor) but called neither, so on a fresh deploy — before the
+      // cron has run or anyone has visited the Catalogue page — the tables
+      // don't exist and every booking modal 500s.
+      await ensureCalendarTables(client);
+
       let loaded = null;
       if (q.booking_id) {
         const { rows } = await client.query(

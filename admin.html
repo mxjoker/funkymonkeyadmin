@@ -1802,7 +1802,7 @@ function formatConflicts(r) {
   const notes = [
     ...(r.degradedReasons || []),
     ...(r.warnings || []),
-    ...(r.windowKnown ? [] : (r.unknowns || [])),
+    ...(r.unknowns || []),
   ];
 
   const lines = [];
@@ -2062,6 +2062,13 @@ function wireAddressZip() {
     if (!existing) {
       addrEl.value = stripped;
       zipEl.value = found;
+      // Same seam syncTimeField fixes: assigning .value fires no native
+      // 'change', and the conflict panel listens for one on
+      // .bk-edit[data-f="event_zip"] — without this it keeps showing an
+      // answer computed against an empty ZIP and the 30-minute drive fallback.
+      if (typeof Event !== 'undefined' && typeof zipEl.dispatchEvent === 'function') {
+        zipEl.dispatchEvent(new Event('change', { bubbles: true }));
+      }
       if (hint) hint.textContent = `ZIP ${found} taken from the address.`;
     } else if (existing.slice(0, 5) === found) {
       addrEl.value = stripped;
@@ -2275,6 +2282,17 @@ let conflictSeq = 0;
 // nagging confirm, matching the panel's existing "unknown" tone: this check
 // has never blocked a save, only informed one.
 let lastConflictResult = null;
+
+// The in-flight promise from the most recent refreshConflictPanel call.
+// saveBookingEdits awaits this before consulting lastConflictResult, so a
+// save that happens to land right after a date/time/ZIP edit waits a beat
+// for the check to actually resolve instead of seeing lastConflictResult
+// still null and treating a perfectly clear date as "the check hasn't
+// finished" — the false positive that teaches a habit of clicking through
+// the fail-loud gate. refreshConflictPanel itself never throws (its own
+// try/catch renders the failure into the panel and resolves), so this needs
+// no error handling of its own.
+let conflictPending = null;
 
 // bookingId is null for a not-yet-saved booking (no row to exclude-self
 // with); the endpoint reads date/time/ZIP straight off the query string in
@@ -2718,9 +2736,9 @@ function openBooking(id, seed) {
   // one when there's an existing row to leave out of its own conflict check.
   for (const f of ['event_date', 'event_time', 'event_zip']) {
     const input = document.querySelector(`.bk-edit[data-f="${f}"]`);
-    if (input) input.addEventListener('change', () => refreshConflictPanel(isNew ? null : b.id));
+    if (input) input.addEventListener('change', () => { conflictPending = refreshConflictPanel(isNew ? null : b.id); });
   }
-  refreshConflictPanel(isNew ? null : b.id);
+  conflictPending = refreshConflictPanel(isNew ? null : b.id);
 
   document.getElementById('booking-modal').classList.add('open');
 
@@ -3560,6 +3578,9 @@ async function saveBookingEdits(id) {
   // admin may not have touched; writing it here would silently overwrite
   // their own notes. The "check never finished" confirm has nothing known
   // to log, so it carries no override signal.
+  // Wait for a check already in flight rather than judging lastConflictResult
+  // (still null) as "never finished" — see conflictPending's declaration.
+  if (conflictPending) await conflictPending;
   const dateVal = (document.querySelector('.bk-edit[data-f="event_date"]') || {}).value || '';
   const confirmation = conflictConfirmation(!!dateVal, lastConflictResult);
   if (confirmation) {

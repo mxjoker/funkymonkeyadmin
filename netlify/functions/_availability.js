@@ -15,7 +15,13 @@ const { spanFor, TZ } = require('./_schedule');
 
 const STALE_MS = 25 * 3600 * 1000;   // a day plus an hour of slack for the hourly cron
 const HARD_STATUSES = ['accepted', 'confirmed', 'completed'];
-const SOFT_STATUSES = ['quoted', 'draft'];
+// 'review' belongs here too: bookings.js defaults status to 'review' and the
+// public form inserts every inquiry as 'review', making it the most common
+// status in the table. Leaving it out of both tiers made it invisible to the
+// conflict check entirely. calendar.js:25 already treats 'review' and
+// 'draft' as a pair (neither is a commitment worth putting on the calendar);
+// this restores that same pairing here.
+const SOFT_STATUSES = ['quoted', 'draft', 'review'];
 
 // Half-open [start, end). A gig ending at 15:00 and an appointment starting at
 // 15:00 do not clash — get this wrong and every back-to-back day cries wolf,

@@ -56,6 +56,14 @@ async function syncFeed(client, feed, now, fetchImpl = fetch) {
 
     if (text.length > MAX_BYTES) throw new Error(`feed is too large (${text.length} bytes)`);
 
+    // With redirect: 'follow', a revoked or rotated secret URL commonly answers
+    // 200 with an HTML sign-in page rather than an HTTP error. parseIcs would
+    // find zero events in that body — indistinguishable from a genuinely empty
+    // calendar — and the feed would be stamped healthy with last_event_count=0.
+    // A rotated Google URL must read as a broken feed, never as an empty
+    // calendar that reports Joe free.
+    if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error('feed did not return a calendar (is the address still valid?)');
+
     const parsed = parseIcs(text, { windowStart, windowEnd, tz: TZ });
     events = parsed.events;
     warnings = parsed.warnings;

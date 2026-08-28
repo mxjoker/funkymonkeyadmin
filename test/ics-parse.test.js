@@ -46,6 +46,17 @@ test('an all-day event covers local midnight to local midnight', () => {
   assert.strictEqual(events[0].endsAt.toISOString(),   '2026-11-02T06:00:00.000Z');
 });
 
+test('an all-day event with no DTEND lasts one day (RFC 5545 3.6.1), not zero', () => {
+  const { events } = parseIcs(cal(...ev(
+    'UID:d2@test', 'SUMMARY:Family trip to Dallas', 'DTSTART;VALUE=DATE:20261101',
+  )), WIN);
+  assert.strictEqual(events[0].allDay, true);
+  // Same 25-hour fall-back day as the explicit-DTEND all-day test above —
+  // local midnight 1 Nov to local midnight 2 Nov.
+  assert.strictEqual(events[0].startsAt.toISOString(), '2026-11-01T05:00:00.000Z');
+  assert.strictEqual(events[0].endsAt.toISOString(),   '2026-11-02T06:00:00.000Z');
+});
+
 test('DURATION is honoured when DTEND is absent', () => {
   const { events } = parseIcs(cal(...ev(
     'UID:e@test', 'SUMMARY:Short', 'DTSTART:20260912T190000Z', 'DURATION:PT90M',
@@ -275,6 +286,23 @@ test('expansion stops at the window end rather than running forever', () => {
     'RRULE:FREQ=DAILY',
   )), { windowStart: new Date('2026-01-01T00:00:00Z'), windowEnd: new Date('2026-01-11T00:00:00Z'), tz: TZ });
   assert.strictEqual(events.length, 10);
+});
+
+test('an old daily rule with no COUNT/UNTIL exhausts the occurrence cap before reaching the window, and warns rather than silently expanding to zero', () => {
+  // MAX_OCCURRENCES (1000) counts from DTSTART, not from the window. A DAILY
+  // rule started here in 2020 uses its whole 1000-occurrence budget by
+  // ~2022-09 — years before this WIN's 2026-01-01 start — so it would
+  // otherwise produce zero occurrences with no warning at all, the same
+  // silent-standing-commitment failure as the WKST/BYDAY cases above.
+  const { events, warnings } = parseIcs(cal(...ev(
+    'UID:r13@test', 'SUMMARY:Standing daily reminder',
+    'DTSTART:20200101T140000Z', 'DTEND:20200101T143000Z',
+    'RRULE:FREQ=DAILY',
+  )), WIN);
+  assert.strictEqual(events.length, 0, 'the cap is exhausted long before DTSTART+1000 days reaches the window');
+  assert.strictEqual(warnings.length, 1);
+  assert.match(warnings[0], /Standing daily reminder/);
+  assert.match(warnings[0], /too many occurrences/i);
 });
 
 test('a weekly rule holds its local wall-clock time across the fall-back DST transition', () => {

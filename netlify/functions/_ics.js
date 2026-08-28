@@ -184,7 +184,8 @@ function expandRrule(startAt, parts, windowEnd, tz) {
   let cursor = new Date(Date.UTC(+wall.year, +wall.month - 1, +wall.day));
 
   const out = [];
-  for (let n = 0; n < MAX_OCCURRENCES; n++) {
+  let n = 0;
+  for (; n < MAX_OCCURRENCES; n++) {
     if (count != null && out.length >= count) break;
 
     let candidates;
@@ -221,7 +222,13 @@ function expandRrule(startAt, parts, windowEnd, tz) {
     else break;
   }
 
-  return out;
+  // The loop ran out its full iteration budget without a natural stop (past
+  // UNTIL/the window, or COUNT satisfied) — an old daily rule with no COUNT
+  // or UNTIL exhausts MAX_OCCURRENCES counting from DTSTART, not from the
+  // window, and would otherwise expand to zero occurrences with no warning.
+  const capped = n >= MAX_OCCURRENCES;
+
+  return { occurrences: out, capped };
 }
 
 function finishEvent(cur, opts, events, warnings) {
@@ -246,7 +253,12 @@ function finishEvent(cur, opts, events, warnings) {
     const ms = durationMs(p.DURATION.value);
     end = ms == null ? null : new Date(start.at.getTime() + ms);
   }
-  if (!end) end = new Date(start.at.getTime());
+  // RFC 5545 §3.6.1: a DATE-valued DTSTART with no DTEND/DURATION lasts one
+  // day, not zero — only a timed event with no end is genuinely zero-length.
+  // toInstant already computed isoDate for the all-day case; dayBoundsInZone
+  // turns it into local-midnight-to-next-local-midnight, the same way an
+  // explicit DTEND on an all-day event is read a few lines above.
+  if (!end) end = start.allDay ? dayBoundsInZone(start.isoDate, opts.tz).end : new Date(start.at.getTime());
 
   const durMs = end.getTime() - start.at.getTime();
   const base = { uid, summary, allDay: start.allDay };
@@ -274,7 +286,11 @@ function finishEvent(cur, opts, events, warnings) {
     }
   }
 
-  for (const at of expandRrule(start.at, parts, opts.windowEnd, opts.tz)) {
+  const { occurrences, capped } = expandRrule(start.at, parts, opts.windowEnd, opts.tz);
+  if (capped) {
+    warnings.push(`the recurring event "${summary}" has too many occurrences to expand from its start date — some are not known`);
+  }
+  for (const at of occurrences) {
     if (exdates.has(at.getTime())) continue;
     pushIfInWindow(events, { ...base, startsAt: at, endsAt: new Date(at.getTime() + durMs) }, opts);
   }
@@ -285,4 +301,4 @@ function pushIfInWindow(events, e, { windowStart, windowEnd }) {
   events.push(e);
 }
 
-module.exports = { parseIcs, unfold, parseLine, toInstant, durationMs, unescapeText, parseRrule, expandRrule };
+module.exports = { parseIcs, unescapeText };
