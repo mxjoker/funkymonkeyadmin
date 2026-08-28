@@ -33,6 +33,62 @@ test('listFeeds never returns the raw url — the URL is the credential', async 
   assert.ok(feeds[0].url_masked, 'a masked form must be provided for display');
 });
 
+test('maskUrl rejects non-http(s) schemes, even though save enforces http(s) upstream', () => {
+  const dataUrl = maskUrl('data:text/plain;base64,SECRETTOKEN==');
+  assert.ok(!dataUrl.includes('SECRETTOKEN'), 'a data: URL must not leak its payload');
+
+  const mailto = maskUrl('mailto:someone@example.com?body=SECRET');
+  assert.ok(!mailto.includes('SECRET'), 'a mailto: URL must not leak its query');
+  assert.ok(!mailto.includes('someone@example.com'), 'a mailto: URL must not leak its address');
+
+  const js = maskUrl('javascript:alert(document.cookie)SECRET');
+  assert.ok(!js.includes('SECRET'), 'a javascript: URL must not leak its body');
+});
+
+// HTTP handler with _db/_auth stubbed out, matching the pattern in
+// sms-automations.test.js — neither talks to a real database or session.
+function loadHandler(fakeClient) {
+  for (const m of ['../netlify/functions/calendar-feeds.js', '../netlify/functions/_db.js', '../netlify/functions/_auth.js']) {
+    delete require.cache[require.resolve(m)];
+  }
+  const dbMod = require('../netlify/functions/_db.js');
+  dbMod.withClient = async (fn) => fn(fakeClient);
+  const authMod = require('../netlify/functions/_auth.js');
+  authMod.requireAuth = async () => ({ role: 'admin' });
+  authMod.preflight = () => null;
+  return require('../netlify/functions/calendar-feeds.js');
+}
+
+test('saving with an id that does not exist returns 404, not a silent no-op 200', async () => {
+  const fakeClient = { query: async (sql) => {
+    if (/^UPDATE calendar_feeds/i.test(sql)) return { rowCount: 0, rows: [] };
+    return { rows: [] };
+  } };
+  const { handler } = loadHandler(fakeClient);
+
+  const res = await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({ action: 'save', id: 999, label: 'Ghost', url: 'https://example.com/x.ics' }),
+  });
+
+  assert.strictEqual(res.statusCode, 404, 'updating a nonexistent feed must not report success');
+});
+
+test('deleting an id that does not exist returns 404, not a silent no-op 200', async () => {
+  const fakeClient = { query: async (sql) => {
+    if (/^DELETE FROM calendar_feeds/i.test(sql)) return { rowCount: 0, rows: [] };
+    return { rows: [] };
+  } };
+  const { handler } = loadHandler(fakeClient);
+
+  const res = await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({ action: 'delete', id: 999 }),
+  });
+
+  assert.strictEqual(res.statusCode, 404, 'deleting a nonexistent feed must not report success');
+});
+
 test('ensureCalendarTables creates both tables and the range index', async () => {
   const sqls = [];
   const c = { query: async (sql) => { sqls.push(sql); return { rows: [] }; } };

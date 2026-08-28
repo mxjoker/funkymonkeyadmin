@@ -41,10 +41,17 @@ async function ensureCalendarTables(client) {
 
 // Host and filename only. Everything between them is secret in every provider's
 // scheme, so none of it survives.
+//
+// Only http(s) gets this treatment. Other schemes (data:, mailto:, javascript:,
+// ...) carry their payload in places `new URL()` happily parses as "pathname" —
+// which would walk the whole secret straight through. `save` only ever lets
+// http(s) into the table today, but this function does not get to assume that:
+// it must not depend on validation performed by a caller it doesn't control.
 function maskUrl(url) {
   const s = String(url || '');
   try {
     const u = new URL(s);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return s ? '…' : '';
     const last = u.pathname.split('/').filter(Boolean).pop() || '';
     return `${u.protocol}//${u.host}/…/${last}`;
   } catch {
@@ -83,7 +90,8 @@ exports.handler = async (event) => {
           if (!label) return json(400, { error: 'A label is required.' });
           if (!/^https?:\/\//i.test(url)) return json(400, { error: 'The calendar address must be a http(s) URL.' });
           if (body.id) {
-            await client.query('UPDATE calendar_feeds SET label=$1, url=$2 WHERE id=$3', [label, url, body.id]);
+            const r = await client.query('UPDATE calendar_feeds SET label=$1, url=$2 WHERE id=$3', [label, url, body.id]);
+            if (r.rowCount === 0) return json(404, { error: `No feed with id ${body.id}.` });
           } else {
             await client.query('INSERT INTO calendar_feeds (label, url) VALUES ($1,$2)', [label, url]);
           }
@@ -92,7 +100,8 @@ exports.handler = async (event) => {
 
         if (body.action === 'delete') {
           if (!body.id) return json(400, { error: 'Which feed?' });
-          await client.query('DELETE FROM calendar_feeds WHERE id=$1', [body.id]);
+          const r = await client.query('DELETE FROM calendar_feeds WHERE id=$1', [body.id]);
+          if (r.rowCount === 0) return json(404, { error: `No feed with id ${body.id}.` });
           return json(200, { feeds: await listFeeds(client) });
         }
 
