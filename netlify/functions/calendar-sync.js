@@ -27,13 +27,17 @@ function windowFor(now) {
 // read access to a personal calendar). Node's fetch embeds the exact URL it
 // was given, verbatim, in TypeError messages for a malformed address (e.g.
 // "Failed to parse URL from https://...token=SECRET") — confirmed by hand
-// against the real global fetch, not assumed. Every other observed failure
-// (DNS, connection refused, redirect, abort) reports host/port/code only, but
-// this is the one path that reproduces, so strip the literal URL from
-// whatever comes back rather than trusting each failure mode individually.
+// against the real global fetch, not assumed. Exact-string removal only
+// catches that one spelling, though — a lowercased host, a stripped default
+// port, a percent-encoded space, or a redirect target that came back
+// normalised all survive it. There is no diagnostic case where a raw URL in
+// an error is worth that risk: a human fixes a broken feed by its label, not
+// its address. So strip the known URL first, then blanket-redact anything
+// URL-shaped, closing the class rather than the one instance.
 function redactUrl(message, url) {
-  const s = String(message == null ? '' : message);
-  return url ? s.split(url).join('[feed url redacted]') : s;
+  let s = String(message == null ? '' : message);
+  if (url) s = s.split(url).join('[feed url redacted]');
+  return s.replace(/https?:\/\/\S+/gi, '[feed url redacted]');
 }
 
 async function syncFeed(client, feed, now, fetchImpl = fetch) {

@@ -109,3 +109,40 @@ test('a URL-embedding fetch failure never leaks the feed URL into the error', as
   assert.ok(!text.includes(secretUrl), 'the raw feed URL must not appear in any SQL params written to the DB');
   assert.ok(!text.includes('SECRETTOKEN123'), 'the secret token must not appear in any SQL params written to the DB');
 });
+
+// Exact-string matching only catches the one spelling that was stored. A
+// case-shifted host is a different string but the same credential — this
+// must be redacted by the blanket https?://\S+ rule, not the exact-match one.
+test('a case-shifted variant of the feed URL is redacted too, not just the exact spelling', async () => {
+  const c = recordingClient();
+  const storedUrl = 'https://calendar.google.com/private-secrettoken123/basic.ics';
+  const shiftedInMessage = 'https://CALENDAR.GOOGLE.COM/private-secrettoken123/basic.ics';
+  const leaky = async () => { throw new TypeError(`Failed to parse URL from ${shiftedInMessage}`); };
+  const r = await syncFeed(c, { id: 7, label: 'Personal', url: storedUrl }, new Date(), leaky);
+
+  assert.strictEqual(r.ok, false);
+  assert.ok(!r.error.toLowerCase().includes('secrettoken123'), 'the secret token must not survive under any casing');
+
+  const text = JSON.stringify(c.sqls).toLowerCase();
+  assert.ok(!text.includes('secrettoken123'), 'the secret token must not appear in any SQL params, under any casing');
+});
+
+// A redirect target embedded in an error message is a different URL from the
+// one stored on the feed — the exact-match strip against feed.url cannot
+// touch it. It can itself be secret-bearing (a redirect chain can land on
+// another private address), so the blanket URL-shaped rule must catch it too.
+test('a different URL entirely (e.g. a redirect target) is redacted, not just the stored feed URL', async () => {
+  const c = recordingClient();
+  const storedUrl = 'https://calendar.google.com/private-abc/basic.ics';
+  const redirectTarget = 'https://mirror.example.com/private-REDIRECTSECRET456/cal.ics';
+  const leaky = async () => { throw new TypeError(`unexpected redirect to ${redirectTarget}`); };
+  const r = await syncFeed(c, { id: 7, label: 'Personal', url: storedUrl }, new Date(), leaky);
+
+  assert.strictEqual(r.ok, false);
+  assert.ok(!r.error.includes(redirectTarget), 'the redirect target URL must not appear in the returned error');
+  assert.ok(!r.error.includes('REDIRECTSECRET456'), 'a secret in the redirect target must not appear in the returned error');
+
+  const text = JSON.stringify(c.sqls);
+  assert.ok(!text.includes(redirectTarget), 'the redirect target URL must not appear in any SQL params written to the DB');
+  assert.ok(!text.includes('REDIRECTSECRET456'), 'a secret in the redirect target must not appear in any SQL params written to the DB');
+});
