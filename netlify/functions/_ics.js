@@ -120,13 +120,12 @@ function parseIcs(text, { windowStart, windowEnd, tz }) {
 }
 
 const DAY_CODES = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
-// WKST is deliberately NOT here. It only changes anything when WEEKLY has
-// both INTERVAL > 1 and a BYDAY spanning the week boundary, and implementing
-// it correctly is real work with real bug surface for a case that is rare in
-// a personal calendar. Claiming it as supported without honouring it would
-// expand such a rule wrongly and silently — the exact failure this file
-// exists to prevent. Over-warning is the safe direction.
-const SUPPORTED_RRULE_PARTS = new Set(['FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'BYDAY']);
+// Every part below is gated to the FREQ(s) it actually changes the outcome
+// for — membership here is necessary but not sufficient. A part that is
+// waved through by this set but ignored by expandRrule for the FREQ it
+// arrived on would expand a rule wrongly and silently, which is the one
+// failure this file exists to prevent. See the per-part gates in parseRrule.
+const SUPPORTED_RRULE_PARTS = new Set(['FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'BYDAY', 'WKST', 'BYMONTHDAY', 'BYMONTH']);
 const MAX_OCCURRENCES = 1000; // a hard stop, independent of the window — a malformed feed cannot spin.
 
 function parseRrule(value) {
@@ -144,22 +143,107 @@ function parseRrule(value) {
   if (!/^(DAILY|WEEKLY|MONTHLY|YEARLY)$/.test(freq)) {
     unsupported.push('FREQ');
   }
-  // BYDAY sits in SUPPORTED_RRULE_PARTS as a blanket membership test, but
-  // expandRrule only ever reads it on FREQ=WEEKLY — on DAILY/MONTHLY/YEARLY it
-  // is silently dropped and the rule expands on DTSTART's raw day instead of
-  // the days actually named. Same failure class as WKST, caught the same way
-  // (a part that changes nothing, or changes the wrong thing, while the
-  // membership check waves it through): gate support on the FREQ it actually
-  // applies to, not just on its own presence.
-  if (parts.BYDAY && freq !== 'WEEKLY') {
-    unsupported.push('BYDAY');
+  const interval = Math.max(1, Number(parts.INTERVAL || 1));
+
+  // WKST only changes anything when WEEKLY has both INTERVAL > 1 and a BYDAY
+  // spanning the week boundary — it decides which days fall in a skipped
+  // week. Everywhere else (including every FREQ=WEEKLY;INTERVAL=1 rule,
+  // which is most of them — Google emits WKST on every weekly rule) it is
+  // decorative, so only reject it in the one case where ignoring it would
+  // silently change the result.
+  if (parts.WKST && freq === 'WEEKLY' && interval > 1) {
+    unsupported.push('WKST');
   }
+
+  // BYDAY applies to WEEKLY, MONTHLY and YEARLY. On WEEKLY, an entry is
+  // always a bare weekday (MO, TU, ...) — an ordinal prefix there (1MO)
+  // is meaningless and genuinely unsupported. On MONTHLY/YEARLY, an ordinal
+  // prefix picks the Nth occurrence in the month (1FR = first Friday, -1FR
+  // = last) and a bare entry means every matching weekday in the period;
+  // expandRrule honours both. On DAILY, BYDAY changes nothing expandRrule
+  // reads and is unsupported outright — same failure class as WKST above,
+  // caught the same way: gate support on the FREQ it actually applies to.
+  if (parts.BYDAY) {
+    const entries = String(parts.BYDAY).split(',').map(d => d.trim().toUpperCase());
+    if (freq === 'DAILY') unsupported.push('BYDAY');
+    else if (freq === 'WEEKLY' && entries.some(e => /^[+-]?\d/.test(e))) unsupported.push('BYDAY');
+  }
+
+  // BYMONTHDAY (a day-of-month, negative counting from the end) applies to
+  // MONTHLY and YEARLY.
+  if (parts.BYMONTHDAY && freq !== 'MONTHLY' && freq !== 'YEARLY') {
+    unsupported.push('BYMONTHDAY');
+  }
+
+  // BYMONTH filters which months an occurrence may fall in. Only YEARLY is
+  // implemented (the real case: annual events) and tested here — Google's
+  // MONTHLY UI option never emits it, so leaving MONTHLY+BYMONTH unsupported
+  // costs nothing and keeps expandRrule from having to reason about a month
+  // filter racing against its own month-stepping cursor.
+  if (parts.BYMONTH && freq !== 'YEARLY') {
+    unsupported.push('BYMONTH');
+  }
+
   return { parts, unsupported };
 }
 
-// Occurrence starts, as instants. BYDAY only applies to WEEKLY here; on any
-// other FREQ it is part of a pattern we do not support, and parseRrule has
-// already flagged it.
+// Day-of-month numbers (1-based, ascending) satisfying BYDAY (bare or
+// ordinal-prefixed) or BYMONTHDAY within ONE calendar month. BYDAY takes
+// precedence when both are given — Google's UI never emits both together on
+// the same rule, and combining them per RFC 5545's intersection/union rules
+// is real work for a case this file will never see.
+// ponytail: returns null (not []) when neither is given, so the caller can
+// fall back to DTSTART's own day-of-month for a plain "same day every
+// month/year" rule — a real state, not an empty result.
+function daysInPeriodMonth(year, month /* 1-based */, byDayOrdinal, byMonthDay) {
+  const lastDom = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (byDayOrdinal) {
+    const out = new Set();
+    for (const entry of byDayOrdinal) {
+      const m = /^([+-]?\d+)?(SU|MO|TU|WE|TH|FR|SA)$/.exec(entry);
+      if (!m) continue;
+      const dow = DAY_CODES[m[2]];
+      const ord = m[1] ? Number(m[1]) : null;
+      const matches = [];
+      for (let d = 1; d <= lastDom; d++) {
+        if (new Date(Date.UTC(year, month - 1, d)).getUTCDay() === dow) matches.push(d);
+      }
+      if (ord == null) matches.forEach(d => out.add(d));
+      else if (ord > 0 && matches[ord - 1] != null) out.add(matches[ord - 1]);
+      else if (ord < 0 && matches[matches.length + ord] != null) out.add(matches[matches.length + ord]);
+    }
+    return Array.from(out).sort((a, b) => a - b);
+  }
+  if (byMonthDay) {
+    const out = new Set();
+    for (const n of byMonthDay) {
+      const day = n > 0 ? n : lastDom + n + 1;
+      if (day >= 1 && day <= lastDom) out.add(day);
+    }
+    return Array.from(out).sort((a, b) => a - b);
+  }
+  return null;
+}
+
+// One period's occurrence instants for MONTHLY/YEARLY. `cursor` carries the
+// period's year (and, absent BYMONTH, its month/day too — the plain
+// "same day every month/year" case). BYMONTH (YEARLY only) picks which
+// month(s) of that year are in play; each is expanded independently and the
+// results are date-ordered since months don't overlap.
+function monthlyOrYearlyCandidates(cursor, byDayOrdinal, byMonthDay, byMonth, H, Mi, tz) {
+  const year = cursor.getUTCFullYear();
+  const months = byMonth ? byMonth.slice().sort((a, b) => a - b) : [cursor.getUTCMonth() + 1];
+  const out = [];
+  for (const month of months) {
+    const days = daysInPeriodMonth(year, month, byDayOrdinal, byMonthDay) || [cursor.getUTCDate()];
+    for (const d of days) out.push(zonedToInstant(year, month, d, H, Mi, tz));
+  }
+  return out.sort((a, b) => a - b);
+}
+
+// Occurrence starts, as instants. BYDAY/BYMONTHDAY/BYMONTH are each read only
+// on the FREQ they are gated to (see parseRrule); any other combination is a
+// pattern we do not support, and parseRrule has already flagged it.
 //
 // Each occurrence is re-derived through zonedToInstant from wall-clock
 // Y/M/D/H/Mi rather than by adding multiples of 24h, so a 3pm weekly event
@@ -175,13 +259,39 @@ function expandRrule(startAt, parts, windowEnd, tz) {
     ? String(parts.BYDAY).split(',').map(d => DAY_CODES[d.trim().toUpperCase()]).filter(n => n != null)
     : null;
 
+  // MONTHLY/YEARLY BYDAY keeps its ordinal prefix (1FR, -1SA) — resolved per
+  // calendar month by daysInPeriodMonth, not collapsed to a day-of-week set
+  // the way WEEKLY's byDay is.
+  const byDayOrdinal = ((freq === 'MONTHLY' || freq === 'YEARLY') && parts.BYDAY)
+    ? String(parts.BYDAY).split(',').map(d => d.trim().toUpperCase())
+    : null;
+
+  const byMonthDay = parts.BYMONTHDAY
+    ? String(parts.BYMONTHDAY).split(',').map(Number).filter(n => Number.isFinite(n) && n !== 0)
+    : null;
+
+  const byMonth = (freq === 'YEARLY' && parts.BYMONTH)
+    ? String(parts.BYMONTH).split(',').map(Number).filter(n => Number.isFinite(n))
+    : null;
+
+  const useMonthlyYearlyExpansion = (freq === 'MONTHLY' || freq === 'YEARLY')
+    && (byDayOrdinal || byMonthDay || byMonth);
+
   // Wall-clock hour/minute of the first occurrence, in the calendar's zone.
   const wall = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz, hour12: false,
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
   }).formatToParts(startAt).reduce((a, p) => (a[p.type] = p.value, a), {});
   const H = Number(wall.hour) % 24, Mi = Number(wall.minute);
-  let cursor = new Date(Date.UTC(+wall.year, +wall.month - 1, +wall.day));
+  // For MONTHLY with BYDAY/BYMONTHDAY, the cursor's day is never read (the
+  // real day-of-month is recomputed per period in monthlyOrYearlyCandidates)
+  // — only its year/month are. Pin it to 1 so setUTCMonth's own stepping
+  // never overflows: a cursor sitting on day 31 rolls "Feb 31" forward into
+  // March, silently skipping February every year the rule runs. YEARLY
+  // doesn't need this (setUTCFullYear never changes month length), and every
+  // other FREQ keeps using the day for real, so only this one case is pinned.
+  const cursorDay = (useMonthlyYearlyExpansion && freq === 'MONTHLY') ? 1 : +wall.day;
+  let cursor = new Date(Date.UTC(+wall.year, +wall.month - 1, cursorDay));
 
   const out = [];
   let n = 0;
@@ -200,20 +310,28 @@ function expandRrule(startAt, parts, windowEnd, tz) {
           return zonedToInstant(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), H, Mi, tz);
         })
         .filter(at => at >= startAt);
+    } else if (useMonthlyYearlyExpansion) {
+      candidates = monthlyOrYearlyCandidates(cursor, byDayOrdinal, byMonthDay, byMonth, H, Mi, tz)
+        .filter(at => at >= startAt);
     } else {
       candidates = [zonedToInstant(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, cursor.getUTCDate(), H, Mi, tz)];
     }
 
     // Dates only move forward, so once every candidate this period falls past
     // the window/UNTIL cutoff, no later period can produce anything earlier —
-    // stop here rather than spinning to the MAX_OCCURRENCES cap.
+    // stop here rather than spinning to the MAX_OCCURRENCES cap. But a period
+    // that produced NO candidates at all (BYMONTHDAY=31 in April, "5th Friday"
+    // in a 4-Friday month) is not the same thing as one whose candidates all
+    // fell past the cutoff — that just means this period is empty, and a
+    // later one may still be in range, so only the latter stops the loop.
+    const periodHadCandidates = candidates.length > 0;
     let anyWithinEnd = false;
     for (const at of candidates) {
       if (at > hardEnd) continue;
       anyWithinEnd = true;
       if (count == null || out.length < count) out.push(at);
     }
-    if (!anyWithinEnd) break;
+    if (periodHadCandidates && !anyWithinEnd) break;
 
     if (freq === 'DAILY') cursor.setUTCDate(cursor.getUTCDate() + interval);
     else if (freq === 'WEEKLY') cursor.setUTCDate(cursor.getUTCDate() + 7 * interval);
