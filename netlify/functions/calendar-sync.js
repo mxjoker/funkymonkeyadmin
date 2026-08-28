@@ -130,8 +130,13 @@ exports.handler = async () => {
     const result = await withClient((client) => syncAllFeeds(client, new Date()));
     return { statusCode: 200, body: JSON.stringify(result) };
   } catch (e) {
-    console.error('calendar-sync FAILED:', e.message);
-    return { statusCode: 500, body: JSON.stringify({ error: e.message }) };
+    // Every per-feed path redacts before returning, so nothing here should
+    // carry a URL today — but this is the one checkpoint explicitly named as
+    // needing it, and "no path reaches it today" is what every leak is until
+    // someone adds a path. Redact anyway.
+    const message = redactUrl(e.message);
+    console.error('calendar-sync FAILED:', message);
+    return { statusCode: 500, body: JSON.stringify({ error: message }) };
   }
 };
 

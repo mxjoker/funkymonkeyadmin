@@ -146,3 +146,55 @@ test('a different URL entirely (e.g. a redirect target) is redacted, not just th
   assert.ok(!text.includes(redirectTarget), 'the redirect target URL must not appear in any SQL params written to the DB');
   assert.ok(!text.includes('REDIRECTSECRET456'), 'a secret in the redirect target must not appear in any SQL params written to the DB');
 });
+
+// A write failure mid-transaction (INSERT rejects after DELETE already ran)
+// is the exact silent-lie case the DELETE-then-refetch design exists to
+// prevent, arriving by a different route: without ROLLBACK, the feed would
+// be left with zero rows in external_busy and last_status='ok'. This proves
+// the ROLLBACK path is actually exercised, not just present in the source.
+function recordingClientThatFailsOn(pattern) {
+  const sqls = [];
+  return {
+    sqls,
+    query: async (sql, params) => {
+      sqls.push({ sql, params });
+      if (pattern.test(sql)) throw new Error('relation "external_busy" is locked');
+      return { rows: [] };
+    },
+  };
+}
+
+test('a write failure mid-transaction rolls back and records error, never a false ok', async () => {
+  const c = recordingClientThatFailsOn(/INSERT INTO external_busy/i);
+  const r = await syncFeed(c, { id: 7, label: 'Personal', url: 'https://x/ics' }, new Date('2026-08-27T12:00:00Z'), okFetch);
+
+  assert.strictEqual(r.ok, false);
+  assert.match(r.error, /relation "external_busy" is locked/);
+
+  const text = c.sqls.map(s => s.sql).join('\n');
+  assert.match(text, /ROLLBACK/, 'a failed write must be rolled back, not left half-applied');
+
+  const updates = c.sqls.filter(s => /UPDATE calendar_feeds/i.test(s.sql));
+  const last = updates[updates.length - 1];
+  assert.ok(last.params.includes('error'), 'the feed must end in last_status=error, never a stale/false ok');
+  assert.ok(!last.params.includes('ok'), 'the feed must not end in last_status=ok after a rolled-back write');
+});
+
+// The timeout branch exists specifically so a human sees "this feed is slow
+// or hanging" rather than an opaque generic failure — that distinction is
+// the entire point of checking e.name === 'AbortError' separately.
+test('a timed-out fetch is reported as a timeout, not a generic failure', async () => {
+  const c = recordingClient();
+  const timedOut = async () => {
+    const e = new Error('The operation was aborted');
+    e.name = 'AbortError';
+    throw e;
+  };
+  const r = await syncFeed(c, { id: 7, label: 'Personal', url: 'https://x/ics' }, new Date(), timedOut);
+
+  assert.strictEqual(r.ok, false);
+  assert.match(r.error, /timed out/i);
+
+  const text = c.sqls.map(s => s.sql).join('\n');
+  assert.ok(!/DELETE FROM external_busy/i.test(text), 'a timeout must not touch existing rows either');
+});
