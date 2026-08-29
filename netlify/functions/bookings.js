@@ -8,6 +8,7 @@ const { sendSms } = require('./_sms');
 const { sendTemplate } = require('./automations');
 const { normaliseAddress } = require('./_address');
 const { getDriveMins } = require('./_schedule');
+const { ensureTables: ensureCampTables } = require('./camps');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -392,6 +393,11 @@ exports.handler = async (event) => {
     const rawMileageMiles = b.mileage_miles !== undefined ? Number(b.mileage_miles) : 0;
     const mileageMiles = Math.max(0, Math.floor(isNaN(rawMileageMiles) ? 0 : rawMileageMiles));
 
+    // A day of a camp — set only by admin.html's "+ Day" flow, which always
+    // supplies a real camp's id. Anything else (missing, 0, non-numeric)
+    // stores NULL, which is exactly how every booking behaves today.
+    const campId = b.camp_id ? (Number(b.camp_id) || null) : null;
+
     // Trim strings, cap free text at 5000
     const cap5k = (v) => String(v || '').trim().slice(0, 5000);
     const cap255 = (v) => String(v || '').trim().slice(0, 255);
@@ -404,6 +410,9 @@ exports.handler = async (event) => {
 
     return withClient(async (client) => {
       await ensureTable(client);
+      // Guarantees bookings.camp_id exists before it's referenced below —
+      // see camps.js's comment on why this can't just live in ensureTable.
+      await ensureCampTables(client);
 
       // Retry loop for unique reference
       let reference;
@@ -433,7 +442,7 @@ exports.handler = async (event) => {
           child_name, brand,
           organisation_name, occasion, surface_type, venue, customer_type,
           guests_of_honour, deposit_paid_at, deposit_method, deposit_ref,
-          sms_consent, sms_consent_at, sms_consent_text
+          sms_consent, sms_consent_at, sms_consent_text, camp_id
         ) VALUES (
           $1, $29,
           $2, $3, $4,
@@ -446,7 +455,7 @@ exports.handler = async (event) => {
           $27, $28,
           $30, $31, $32, $33, $34,
           $35, $36, $37, $38,
-          $39, $40, $41
+          $39, $40, $41, $42
         ) RETURNING *
       `, [
         reference,
@@ -490,6 +499,7 @@ exports.handler = async (event) => {
         smsConsent,
         smsConsent ? new Date() : null,
         smsConsent ? SMS_CONSENT_TEXT : '',
+        campId,
       ]);
 
       const booking = rows[0];

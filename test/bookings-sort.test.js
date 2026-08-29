@@ -15,7 +15,7 @@ function loadHelpers() {
   const ctx = {};
   vm.createContext(ctx);
   vm.runInContext(
-    HTML.slice(a, b) + '\nout = { BOOKING_COLUMNS, sortBookings, nextSort, incompleteReasons, needsZipEstimate, zipEstimateBookings, driveEstimateNote, driveTimeIsEstimated };',
+    HTML.slice(a, b) + '\nout = { BOOKING_COLUMNS, sortBookings, nextSort, incompleteReasons, needsZipEstimate, zipEstimateBookings, driveEstimateNote, driveTimeIsEstimated, groupBookingsByCamp, campDateRangeLabel };',
     ctx
   );
   return ctx.out;
@@ -290,4 +290,117 @@ test('driveTimeIsEstimated: an override wins regardless of ZIP — a hand-entere
 
 test('driveTimeIsEstimated: a missing booking (lookup failed) reads as estimated, not a crash', () => {
   assert.strictEqual(driveTimeIsEstimated({ drive_minutes_each_way: null }, undefined), true);
+});
+
+// ── groupBookingsByCamp ──────────────────────────────────────────────────────
+// Phase 1 of camps. Nothing here decides what a camp IS (that's explicit, at
+// creation, in camps.js) — this only decides how an already-filtered flat
+// list of bookings is displayed: an ordinary booking passes through
+// untouched, and a booking whose camp_id names a known camp gets pulled into
+// one group row per camp.
+const { groupBookingsByCamp, campDateRangeLabel } = loadHelpers();
+
+// The MAC's real 5-day camp, 14-18 Jul, one row per day exactly as it
+// actually sits in production today — camp_id null on every one, since the
+// column didn't exist until this feature shipped.
+const MAC_DAYS = ['14', '15', '16', '17', '18'].map((d, i) => ({
+  id: 100 + i, reference: `FM-MAC${i}`, camp_id: 1,
+  client_name: 'The MAC', service_name: 'Foam Party',
+  event_date: `2026-07-${d}`, created_at: '2026-06-01', total_price: 300, status: 'confirmed',
+}));
+const CAMPS = [{ id: 1, label: 'MAC Summer Camp' }];
+
+test('with no camps in the table, the list is untouched — byte-identical to today', () => {
+  const plainBookings = [
+    { id: 1, reference: 'A', event_date: '2026-09-01' },
+    { id: 2, reference: 'B', event_date: '2026-09-02', camp_id: null },
+  ];
+  const rows = groupBookingsByCamp(plainBookings, []);
+  assert.deepStrictEqual(plain(rows), plain(plainBookings));
+});
+
+// A camp_id that doesn't match any known camp (e.g. the camp was looked up
+// from a stale local cache) must never crash or silently vanish the booking
+// — it passes through as an ordinary row, same as camp_id null.
+test('a camp_id with no matching camp record passes through untouched, not dropped', () => {
+  const rows = groupBookingsByCamp([{ id: 9, reference: 'X', camp_id: 999, event_date: '2026-09-01' }], []);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].isCamp, undefined);
+  assert.strictEqual(rows[0].reference, 'X');
+});
+
+test('five days of one camp collapse into one row carrying all five days', () => {
+  const rows = groupBookingsByCamp(MAC_DAYS, CAMPS);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].isCamp, true);
+  assert.strictEqual(rows[0].label, 'MAC Summer Camp');
+  assert.strictEqual(rows[0].days.length, 5);
+  assert.strictEqual(rows[0].dateRangeLabel, '14–18 Jul');
+});
+
+test('a camp row sorts by its earliest day, alongside ordinary bookings', () => {
+  const others = [
+    { id: 1, reference: 'BEFORE', event_date: '2026-07-01' },
+    { id: 2, reference: 'BETWEEN', event_date: '2026-07-16' },
+    { id: 3, reference: 'AFTER', event_date: '2026-08-01' },
+  ];
+  const rows = groupBookingsByCamp([...MAC_DAYS, ...others], CAMPS);
+  const ordered = sortBookings(rows, { key: 'event', dir: 'asc' }).map(r => r.isCamp ? 'CAMP' : r.reference);
+  // The camp's earliest day is 14 Jul, so it lands between BEFORE (1 Jul)
+  // and BETWEEN (16 Jul) — not wherever its last day or an unsorted day would.
+  // plain(): rows/ordered are built inside the vm realm (see the file's own
+  // comment on `plain` above) — round-trip through JSON before comparing.
+  assert.deepStrictEqual(plain(ordered), ['BEFORE', 'CAMP', 'BETWEEN', 'AFTER']);
+});
+
+test('total_price on a camp row is the sum of its days, not just the first', () => {
+  const rows = groupBookingsByCamp(MAC_DAYS, CAMPS);
+  assert.strictEqual(rows[0].total_price, 300 * 5);
+});
+
+// The filter-then-group contract: renderBookingsTable filters the flat list
+// FIRST, then groups the survivors — so a filter matching only some of a
+// camp's days must show the camp with just those days, never the whole camp
+// and never nothing.
+test('a filter matching only some days of a camp shows the camp with only those days', () => {
+  const filtered = MAC_DAYS.filter(b => b.event_date <= '2026-07-16'); // 14, 15, 16 survive
+  const rows = groupBookingsByCamp(filtered, CAMPS);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].days.length, 3);
+  assert.strictEqual(rows[0].dateRangeLabel, '14–16 Jul');
+});
+
+test('a filter matching zero days of a camp shows nothing for that camp — not the whole camp', () => {
+  const filtered = MAC_DAYS.filter(b => b.event_date >= '2026-09-01'); // none survive
+  const rows = groupBookingsByCamp(filtered, CAMPS);
+  assert.strictEqual(rows.length, 0);
+});
+
+// jfuller@eols.org: 14 separate summer shows in one week for one client, no
+// camp_id on any of them. Grouping those would be the exact bug the spec
+// calls out — this proves camp_id, not client/date proximity, is what groups.
+test('bookings with no camp_id never group, however many share a client or a week', () => {
+  const busyWeek = Array.from({ length: 14 }, (_, i) => ({
+    id: 200 + i, reference: `FM-J${i}`, client_name: 'jfuller@eols.org',
+    event_date: '2026-06-0' + (1 + (i % 7)),
+  }));
+  const rows = groupBookingsByCamp(busyWeek, []);
+  assert.strictEqual(rows.length, 14);
+  assert.ok(rows.every(r => r.isCamp === undefined));
+});
+
+test('campDateRangeLabel: a single day reads as just that day', () => {
+  assert.strictEqual(campDateRangeLabel([{ event_date: '2026-07-14' }]), '14 Jul');
+});
+
+test('campDateRangeLabel: crossing months names both', () => {
+  assert.strictEqual(
+    campDateRangeLabel([{ event_date: '2026-07-30' }, { event_date: '2026-08-02' }]),
+    '30 Jul–2 Aug'
+  );
+});
+
+test('campDateRangeLabel: no dated days at all says so rather than crashing', () => {
+  assert.strictEqual(campDateRangeLabel([]), 'no dates');
+  assert.strictEqual(campDateRangeLabel([{ event_date: null }]), 'no dates');
 });
