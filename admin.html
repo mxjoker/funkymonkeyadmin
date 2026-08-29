@@ -1945,14 +1945,31 @@ function feedStatusLabel(f, now) {
   return { tone: 'ok', text: `${f.last_event_count || 0} events, synced ${hours === 0 ? 'within the hour' : `${hours}h ago`}` };
 }
 
+// Whether a rendered drive/departure figure is a guess rather than known.
+// Fix-round-2: this used to be a persisted staff_assignments.drive_estimated
+// column, set once by autoCalcTimes — but autoCalcTimes only writes when
+// total_minutes is still null, which is never true for an existing
+// assignment (no production caller passes forceRecalc), so the column would
+// have stuck at NULL forever on every gig it was meant for, including
+// FM-E5EFPPQX. Deriving it at render time instead means it reflects the ZIP
+// NOW: fill in the booking's missing ZIP and the qualifier disappears on its
+// own, no re-save required.
+//
+// A manual per-assignment override wins regardless of ZIP — a hand-entered
+// drive time is a real number, not a fabricated one, so it is never a guess.
+// booking.zip_known is computed server-side (bookings.js and, for the staff
+// portal, staff-assignments.js's ?staff_id= query) through the ONE ZIP table
+// in _schedule.js — this function never sees ZIPs or coordinates itself.
+function driveTimeIsEstimated(assignment, booking) {
+  if (assignment && assignment.drive_minutes_each_way != null) return false;
+  return !(booking && booking.zip_known);
+}
+
 // A small qualifier for the schedule timeline's Depart badge — not an alarm,
 // just enough that whoever is reading Load/Depart/Arrive/Show knows the drive
-// (and therefore the departure time) was guessed, not looked up. Fed by
-// staff_assignments.drive_estimated, set in autoCalcTimes from spanFor's
-// zipKnown (see the fix-round report: the whole point of this task was that
-// FM-E5EFPPQX's departure time was wrong with nothing on either screen saying
-// so). Shared by renderScheduleBlock (admin gig card) and
-// renderStaffScheduleBlock (staff portal) so the two screens can't disagree.
+// (and therefore the departure time) was guessed, not looked up. Shared by
+// renderScheduleBlock (admin gig card) and renderStaffScheduleBlock (staff
+// portal) so the two screens can't disagree.
 function driveEstimateNote(driveEstimated) {
   return driveEstimated
     ? ' <span style="font-weight:400;font-style:italic;opacity:.8">(estimated — no ZIP)</span>'
@@ -3295,6 +3312,10 @@ async function saveOverride(assignmentId, inputId, bookingId) {
 
 function renderScheduleBlock(a, bookingId) {
   const aid = a.id;
+  // allBookings already carries zip_known (bookings.js annotates it) — no
+  // extra request, same pattern as the pay-override block above using
+  // allStaff. This assignment query has no booking columns of its own.
+  const booking = (allBookings || []).find(x => String(x.id) === String(bookingId));
   const load   = a.load_minutes           ?? 30;
   const setup  = a.unload_minutes          ?? 45;
   const pack   = a.pack_out_minutes        ?? 20;
@@ -3327,7 +3348,7 @@ function renderScheduleBlock(a, bookingId) {
       <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:8px;font-size:.73rem">
         <span style="background:#ede9fe;color:#7c3aed;border-radius:6px;padding:2px 7px;font-weight:700">📦 Load ${toStr(toMins(schedStart))}</span>
         <span style="color:#9ca3af">→</span>
-        <span style="background:#dbeafe;color:#1d4ed8;border-radius:6px;padding:2px 7px;font-weight:700">🚗 Depart ${toStr(depart)}${driveEstimateNote(a.drive_estimated)}</span>
+        <span style="background:#dbeafe;color:#1d4ed8;border-radius:6px;padding:2px 7px;font-weight:700">🚗 Depart ${toStr(depart)}${driveEstimateNote(driveTimeIsEstimated(a, booking))}</span>
         <span style="color:#9ca3af">→</span>
         <span style="background:#fef3c7;color:#92400e;border-radius:6px;padding:2px 7px;font-weight:700">📍 Arrive ${toStr(arriveVenue)}</span>
         <span style="color:#9ca3af">→</span>
@@ -5231,7 +5252,7 @@ function renderStaffScheduleBlock(g) {
         <span style="background:#ede9fe;color:#7c3aed;border-radius:6px;padding:3px 8px;font-weight:700">📦 ${toStr(toMins(schedStart))}</span>
         <span style="color:#9ca3af;font-size:.65rem">Load</span>
         <span style="color:#9ca3af">→</span>
-        <span style="background:#dbeafe;color:#1d4ed8;border-radius:6px;padding:3px 8px;font-weight:700">🚗 ${toStr(depart)}${driveEstimateNote(g.drive_estimated)}</span>
+        <span style="background:#dbeafe;color:#1d4ed8;border-radius:6px;padding:3px 8px;font-weight:700">🚗 ${toStr(depart)}${driveEstimateNote(driveTimeIsEstimated(g, g))}</span>
         <span style="color:#9ca3af;font-size:.65rem">Depart</span>
         <span style="color:#9ca3af">→</span>
         <span style="background:#fef3c7;color:#92400e;border-radius:6px;padding:3px 8px;font-weight:700">📍 ${toStr(arriveVenue)}</span>

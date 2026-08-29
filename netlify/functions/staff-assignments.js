@@ -6,7 +6,7 @@ const { esc, logChange, ensureBookingChanges, fmtEventDate } = require('./_email
 const { sendTemplate } = require('./automations');
 const { sendSms, ensureSmsTables } = require('./_sms');
 const { isValidPayType, resolvePayType, assignmentRefusal } = require('./_pay');
-const { spanFor } = require('./_schedule');
+const { spanFor, getDriveMins } = require('./_schedule');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -103,10 +103,9 @@ async function autoCalcTimes(client, assignmentId, bookingId, forceRecalc = fals
         drive_minutes_each_way= COALESCE(drive_minutes_each_way, $5),
         total_minutes         = $6,
         schedule_start        = $7,
-        drive_estimated       = $8,
         updated_at            = NOW()
-      WHERE id = $9
-    `, [load, setup, pack, homeUn, drive, total, scheduleStart, !span.zipKnown, assignmentId]);
+      WHERE id = $8
+    `, [load, setup, pack, homeUn, drive, total, scheduleStart, assignmentId]);
 
     console.log(`autoCalcTimes: assignment ${assignmentId} → ${total} min total, start ${scheduleStart}`);
   } catch(e) {
@@ -210,12 +209,6 @@ async function ensureTables(client) {
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS pack_out_minutes INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS home_unload_minutes INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS drive_minutes_each_way INTEGER",
-    // Additive, nullable, no backfill: an existing row with NULL here
-    // reads as "unknown" — honest, since autoCalcTimes never ran for it
-    // with zipKnown available. Set from spanFor's zipKnown so the
-    // schedule UI can label a guessed drive/departure time instead of
-    // showing it identically to a known one.
-    "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS drive_estimated BOOLEAN",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS total_minutes INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS schedule_start TIME",
     // Guaranteed here too, not only by payroll.js's ensureTables — this file
@@ -395,6 +388,11 @@ exports.handler = async (event) => {
              ORDER BY b.event_date ASC`,
             [staffId]
           );
+          // zip_known: same one-line treatment as bookings.js's GET all/filtered
+          // — whether _schedule.js's ONE ZIP table recognises this gig's
+          // event_zip, so the staff portal can label a guessed departure time
+          // without ever shipping the ZIP table itself to the browser.
+          for (const g of myGigs) g.zip_known = getDriveMins(g.event_zip).zipKnown;
 
           const { rows: staffRow } = await client.query('SELECT skills FROM staff WHERE id=$1', [staffId]);
           const skills = staffRow[0]?.skills || [];

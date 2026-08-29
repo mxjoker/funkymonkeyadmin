@@ -57,38 +57,6 @@ test('autoCalcTimes: total is load + drive + setup + party + pack + drive + home
   assert.strictEqual(scheduleStart, '12:20');
 });
 
-test('autoCalcTimes: persists drive_estimated from spanFor\'s zipKnown — false for a known ZIP', async () => {
-  const updates = [];
-  const c = {
-    query: async (sql, params) => {
-      if (/FROM staff_assignments/i.test(sql)) return { rows: [{ id: 1, total_minutes: null }] };
-      if (/FROM bookings/i.test(sql)) return { rows: [{ id: 9, service_id: 'magic', event_time: '14:00', event_zip: '73102' }] };
-      if (/FROM service_time_templates/i.test(sql)) return { rows: [] };
-      if (/FROM services/i.test(sql)) return { rows: [{ duration_minutes: 60 }] };
-      if (/^\s*UPDATE staff_assignments/i.test(sql)) { updates.push(params); return { rows: [] }; }
-      return { rows: [] };
-    }
-  };
-  await autoCalcTimes(c, 1, 9);
-  assert.strictEqual(updates[0][7], false, 'a known ZIP is not an estimate');
-});
-
-test('autoCalcTimes: persists drive_estimated=true for a blank/unknown ZIP — the fix this round exists for', async () => {
-  const updates = [];
-  const c = {
-    query: async (sql, params) => {
-      if (/FROM staff_assignments/i.test(sql)) return { rows: [{ id: 1, total_minutes: null }] };
-      if (/FROM bookings/i.test(sql)) return { rows: [{ id: 9, service_id: 'magic', event_time: '14:00', event_zip: '' }] };
-      if (/FROM service_time_templates/i.test(sql)) return { rows: [] };
-      if (/FROM services/i.test(sql)) return { rows: [{ duration_minutes: 60 }] };
-      if (/^\s*UPDATE staff_assignments/i.test(sql)) { updates.push(params); return { rows: [] }; }
-      return { rows: [] };
-    }
-  };
-  await autoCalcTimes(c, 1, 9);
-  assert.strictEqual(updates[0][7], true, 'a blank ZIP must be flagged as an estimate, not silently guessed');
-});
-
 test('autoCalcTimes: no event_time means no schedule_start, not a guessed one', async () => {
   const updates = [];
   const c = {
