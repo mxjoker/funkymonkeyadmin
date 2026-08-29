@@ -7,6 +7,7 @@ const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems,
 const { sendSms } = require('./_sms');
 const { sendTemplate } = require('./automations');
 const { normaliseAddress } = require('./_address');
+const { getDriveMins } = require('./_schedule');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -279,7 +280,14 @@ exports.handler = async (event) => {
       );
       await ensureBookingItems(client);
       const itemMap = await getItemsForBookings(client, rows.map(r => r.id));
-      for (const r of rows) r.items = itemMap.get(r.id) || [];
+      // zip_known: whether _schedule.js's ONE ZIP table recognises this
+      // booking's event_zip. admin.html's dashboard uses it to flag an
+      // upcoming gig whose drive/departure time is a guess, without keeping
+      // its own copy of the ZIP table (see needsZipEstimate in admin.html).
+      for (const r of rows) {
+        r.items = itemMap.get(r.id) || [];
+        r.zip_known = getDriveMins(r.event_zip).zipKnown;
+      }
       return json(200, rows);
     });
   }

@@ -6,7 +6,7 @@ const { esc, logChange, ensureBookingChanges, fmtEventDate } = require('./_email
 const { sendTemplate } = require('./automations');
 const { sendSms, ensureSmsTables } = require('./_sms');
 const { isValidPayType, resolvePayType, assignmentRefusal } = require('./_pay');
-const { spanFor } = require('./_schedule');
+const { spanFor, getDriveMins } = require('./_schedule');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -283,10 +283,13 @@ exports.handler = async (event) => {
         const bookingId = params.booking_id;
         const allFlag   = params.all === 'true';
 
-        // ?all=true — lightweight fetch for calendar staff initials
+        // ?all=true — lightweight fetch for calendar staff initials. Also
+        // carries drive_minutes_each_way so admin.html's dashboard can tell
+        // a booking already has a pinned per-assignment drive figure apart
+        // from a known ZIP (see needsZipEstimate there).
         if (allFlag) {
           const { rows: assignments } = await client.query(
-            `SELECT sa.booking_id, sa.staff_id, sa.status,
+            `SELECT sa.booking_id, sa.staff_id, sa.status, sa.drive_minutes_each_way,
                     s.name as staff_name, s.preferred_name, s.color
              FROM staff_assignments sa
              JOIN staff s ON s.id = sa.staff_id
@@ -385,6 +388,11 @@ exports.handler = async (event) => {
              ORDER BY b.event_date ASC`,
             [staffId]
           );
+          // zip_known: same one-line treatment as bookings.js's GET all/filtered
+          // — whether _schedule.js's ONE ZIP table recognises this gig's
+          // event_zip, so the staff portal can label a guessed departure time
+          // without ever shipping the ZIP table itself to the browser.
+          for (const g of myGigs) g.zip_known = getDriveMins(g.event_zip).zipKnown;
 
           const { rows: staffRow } = await client.query('SELECT skills FROM staff WHERE id=$1', [staffId]);
           const skills = staffRow[0]?.skills || [];

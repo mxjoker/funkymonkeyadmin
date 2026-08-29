@@ -374,6 +374,17 @@ input,select,textarea{font-family:inherit}
         </div>
       </div>
 
+      <div id="zip-estimate-warning" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:16px 20px;margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:20px">📍</span>
+          <div>
+            <strong id="zip-estimate-count" style="color:#92400e"></strong>
+            <span style="color:#78350f"> — their drive time and departure time are estimates. </span>
+            <a href="#" onclick="showZipEstimateBookings();return false" style="color:#92400e;font-weight:600">View →</a>
+          </div>
+        </div>
+      </div>
+
       <div class="stats-grid">
         <div class="stat-card accent">
           <div class="s-label">Revenue This Month</div>
@@ -467,6 +478,10 @@ input,select,textarea{font-family:inherit}
             <label style="display:flex;align-items:center;cursor:pointer;user-select:none">
               <input type="checkbox" id="filter-hide-completed" onchange="renderBookingsTable()" style="margin-right:6px"/>
               <span>Hide Completed</span>
+            </label>
+            <label style="display:flex;align-items:center;cursor:pointer;user-select:none">
+              <input type="checkbox" id="filter-zip-estimate" onchange="renderBookingsTable()" style="margin-right:6px"/>
+              <span>Needs ZIP estimate</span>
             </label>
           </div>
         </div>
@@ -909,6 +924,7 @@ let allBookings = [];
 let allStaff    = [];
 let calStaffMap = {}; // booking_id → [{initials, color}]
 let calStaffMapError = null; // non-null when the fetch failed, so the calendar can say so
+let calDriveOverrideBookings = new Set(); // booking_id: some assigned staffer's drive_minutes_each_way is already pinned
 let allServiceSlots = []; // service_id slot requirements from staff_slots table
 let allRolePay = {}; // role_name -> 'hourly' | 'flat' | undefined (unset = use staff setting)
 let activeActionBadge = null; // 'review' | 'deposit' | null
@@ -1170,8 +1186,10 @@ async function loadCalStaffMap() {
     }
     calStaffMapError = null;
     calStaffMap = {};
+    calDriveOverrideBookings = new Set();
     (data.assignments || []).forEach(a => {
       if (a.status !== 'assigned') return;
+      if (a.drive_minutes_each_way != null) calDriveOverrideBookings.add(a.booking_id);
       if (!calStaffMap[a.booking_id]) calStaffMap[a.booking_id] = [];
       // Avoid duplicates (same staff, multiple roles)
       if (!calStaffMap[a.booking_id].find(x => x.staff_id === a.staff_id)) {
@@ -1251,10 +1269,29 @@ function showBookingsFiltered(status) {
   set('filter-search', '');
   set('filter-date-range', 'all');
   set('filter-deposit', '');
+  for (const id of ['filter-hide-past', 'filter-hide-completed', 'filter-zip-estimate']) {
+    const el = document.getElementById(id);
+    if (el) el.checked = false;
+  }
+  renderBookingsTable();
+}
+
+// Dashboard's "N upcoming gigs have no usable ZIP" banner link. Uses the
+// Needs ZIP estimate toggle rather than a status/date filter — needsZipEstimate
+// already excludes past events, so no other filter needs setting.
+function showZipEstimateBookings() {
+  showPage('bookings');
+  const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; };
+  set('filter-status', '');
+  set('filter-search', '');
+  set('filter-date-range', 'all');
+  set('filter-deposit', '');
   for (const id of ['filter-hide-past', 'filter-hide-completed']) {
     const el = document.getElementById(id);
     if (el) el.checked = false;
   }
+  const zipEl = document.getElementById('filter-zip-estimate');
+  if (zipEl) zipEl.checked = true;
   renderBookingsTable();
 }
 
@@ -1599,6 +1636,36 @@ function incompleteReasons(b) {
   return reasons;
 }
 
+// Whether an upcoming gig's drive time (and therefore schedule_start — when
+// Joe leaves home) is a guess rather than a known figure. zip_known is
+// computed server-side by bookings.js from _schedule.js's ONE ZIP table, so
+// this stays a decision rather than a second copy of that table — admin.html
+// is a static page with no access to server modules (see balanceLinkAmounts'
+// comment above for the same constraint on a different rate), and duplicating
+// a 67-entry lat/lng table a THIRD time is exactly the drift this task exists
+// to remove, not repeat.
+//
+// hasDriveOverride is true once ANY assigned staffer's row already carries a
+// persisted drive_minutes_each_way (an explicit override, or a prior run's
+// computed figure frozen by staff-assignments.js's IS NULL guard) — either
+// way the number is pinned, not being guessed live, so it doesn't count.
+//
+// Past events are somebody else's problem, same rule as incompleteReasons.
+function needsZipEstimate(b, hasDriveOverride, todayISO) {
+  if (!b.event_date || String(b.event_date).slice(0, 10) < todayISO) return false;
+  if (b.zip_known) return false;
+  return !hasDriveOverride;
+}
+
+// Bookings-list version, for the dashboard count and the "Needs ZIP" filter.
+// driveOverrideBookingIds is a Set (or array) of booking ids with a pinned
+// drive figure, built from the same ?all=true staff-assignments fetch the
+// calendar already loads (calDriveOverrideBookings) — no extra request.
+function zipEstimateBookings(bookings, driveOverrideBookingIds, todayISO = new Date().toISOString().slice(0, 10)) {
+  const overrideSet = driveOverrideBookingIds instanceof Set ? driveOverrideBookingIds : new Set(driveOverrideBookingIds || []);
+  return (bookings || []).filter(b => needsZipEstimate(b, overrideSet.has(b.id), todayISO));
+}
+
 function sortBookings(list, { key, dir }) {
   const col = BOOKING_COLUMNS.find(c => c.key === key) || CREATED_COL;
   const mul = dir === 'asc' ? 1 : -1;
@@ -1878,6 +1945,37 @@ function feedStatusLabel(f, now) {
   return { tone: 'ok', text: `${f.last_event_count || 0} events, synced ${hours === 0 ? 'within the hour' : `${hours}h ago`}` };
 }
 
+// Whether a rendered drive/departure figure is a guess rather than known.
+// Fix-round-2: this used to be a persisted staff_assignments.drive_estimated
+// column, set once by autoCalcTimes — but autoCalcTimes only writes when
+// total_minutes is still null, which is never true for an existing
+// assignment (no production caller passes forceRecalc), so the column would
+// have stuck at NULL forever on every gig it was meant for, including
+// FM-E5EFPPQX. Deriving it at render time instead means it reflects the ZIP
+// NOW: fill in the booking's missing ZIP and the qualifier disappears on its
+// own, no re-save required.
+//
+// A manual per-assignment override wins regardless of ZIP — a hand-entered
+// drive time is a real number, not a fabricated one, so it is never a guess.
+// booking.zip_known is computed server-side (bookings.js and, for the staff
+// portal, staff-assignments.js's ?staff_id= query) through the ONE ZIP table
+// in _schedule.js — this function never sees ZIPs or coordinates itself.
+function driveTimeIsEstimated(assignment, booking) {
+  if (assignment && assignment.drive_minutes_each_way != null) return false;
+  return !(booking && booking.zip_known);
+}
+
+// A small qualifier for the schedule timeline's Depart badge — not an alarm,
+// just enough that whoever is reading Load/Depart/Arrive/Show knows the drive
+// (and therefore the departure time) was guessed, not looked up. Shared by
+// renderScheduleBlock (admin gig card) and renderStaffScheduleBlock (staff
+// portal) so the two screens can't disagree.
+function driveEstimateNote(driveEstimated) {
+  return driveEstimated
+    ? ' <span style="font-weight:400;font-style:italic;opacity:.8">(estimated — no ZIP)</span>'
+    : '';
+}
+
 // ══ END PURE HELPERS ══
 
 // Default matches the old "Newest Inquiry" dropdown default, so the view the
@@ -1906,6 +2004,7 @@ function renderBookingsTable() {
   const depositFilter = document.getElementById('filter-deposit').value;
   const hidePast = document.getElementById('filter-hide-past').checked;
   const hideCompleted = document.getElementById('filter-hide-completed').checked;
+  const zipEstimateOnly = document.getElementById('filter-zip-estimate').checked;
 
   const today = new Date().toISOString().split('T')[0];
   const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
@@ -1954,6 +2053,9 @@ function renderBookingsTable() {
   }
   if (hideCompleted) {
     list = list.filter(b => b.status !== 'completed');
+  }
+  if (zipEstimateOnly) {
+    list = list.filter(b => needsZipEstimate(b, calDriveOverrideBookings.has(b.id), today));
   }
 
   sortBookings(list, bookingSort);
@@ -3210,6 +3312,10 @@ async function saveOverride(assignmentId, inputId, bookingId) {
 
 function renderScheduleBlock(a, bookingId) {
   const aid = a.id;
+  // allBookings already carries zip_known (bookings.js annotates it) — no
+  // extra request, same pattern as the pay-override block above using
+  // allStaff. This assignment query has no booking columns of its own.
+  const booking = (allBookings || []).find(x => String(x.id) === String(bookingId));
   const load   = a.load_minutes           ?? 30;
   const setup  = a.unload_minutes          ?? 45;
   const pack   = a.pack_out_minutes        ?? 20;
@@ -3242,7 +3348,7 @@ function renderScheduleBlock(a, bookingId) {
       <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:8px;font-size:.73rem">
         <span style="background:#ede9fe;color:#7c3aed;border-radius:6px;padding:2px 7px;font-weight:700">📦 Load ${toStr(toMins(schedStart))}</span>
         <span style="color:#9ca3af">→</span>
-        <span style="background:#dbeafe;color:#1d4ed8;border-radius:6px;padding:2px 7px;font-weight:700">🚗 Depart ${toStr(depart)}</span>
+        <span style="background:#dbeafe;color:#1d4ed8;border-radius:6px;padding:2px 7px;font-weight:700">🚗 Depart ${toStr(depart)}${driveEstimateNote(driveTimeIsEstimated(a, booking))}</span>
         <span style="color:#9ca3af">→</span>
         <span style="background:#fef3c7;color:#92400e;border-radius:6px;padding:2px 7px;font-weight:700">📍 Arrive ${toStr(arriveVenue)}</span>
         <span style="color:#9ca3af">→</span>
@@ -5146,7 +5252,7 @@ function renderStaffScheduleBlock(g) {
         <span style="background:#ede9fe;color:#7c3aed;border-radius:6px;padding:3px 8px;font-weight:700">📦 ${toStr(toMins(schedStart))}</span>
         <span style="color:#9ca3af;font-size:.65rem">Load</span>
         <span style="color:#9ca3af">→</span>
-        <span style="background:#dbeafe;color:#1d4ed8;border-radius:6px;padding:3px 8px;font-weight:700">🚗 ${toStr(depart)}</span>
+        <span style="background:#dbeafe;color:#1d4ed8;border-radius:6px;padding:3px 8px;font-weight:700">🚗 ${toStr(depart)}${driveEstimateNote(driveTimeIsEstimated(g, g))}</span>
         <span style="color:#9ca3af;font-size:.65rem">Depart</span>
         <span style="color:#9ca3af">→</span>
         <span style="background:#fef3c7;color:#92400e;border-radius:6px;padding:3px 8px;font-weight:700">📍 ${toStr(arriveVenue)}</span>
@@ -7888,6 +7994,24 @@ async function checkStaleWarnings() {
         el.style.display = 'block';
         document.getElementById('stale-review-count').textContent =
           `${stale.length} booking${stale.length !== 1 ? 's' : ''}`;
+      } else {
+        el.style.display = 'none';
+      }
+    }
+  } catch(e) {}
+
+  // zip_known comes from bookings.js (computed off _schedule.js's ZIP table);
+  // calDriveOverrideBookings comes from loadCalStaffMap's ?all=true fetch.
+  // Both are already loaded by init — see the report for why no extra
+  // request is needed here.
+  try {
+    const affected = zipEstimateBookings(allBookings, calDriveOverrideBookings);
+    const el = document.getElementById('zip-estimate-warning');
+    if (el) {
+      if (affected.length > 0) {
+        el.style.display = 'block';
+        document.getElementById('zip-estimate-count').textContent =
+          `${affected.length} upcoming gig${affected.length !== 1 ? 's' : ''} have no usable ZIP`;
       } else {
         el.style.display = 'none';
       }

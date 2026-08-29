@@ -4,8 +4,36 @@ const {
 } = require('./_auth');
 const { payableHours, mergeClockSpan } = require('./_timeclock');
 const { paymentForBooking } = require('./_pay');
+const { getDriveMins, DEFAULT_MINUTES } = require('./_schedule');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
+
+// Task step 2 (unify): payroll used to carry its own HOME_ZIP, zipCoords and
+// getDriveMins — a byte-for-byte second copy of _schedule.js's, agreeing on
+// every ZIP but NOT on the unload default (payroll said 15, _schedule.js and
+// admin.html's Gig Time Templates UI both said 45). Both the ZIP table and
+// the defaults now come from _schedule.js, so 45 is the value everywhere —
+// see test/payroll-span.test.js for the pin proving this is the only number
+// that moved.
+function computeAssignmentSpan(a, tmpl, party) {
+  const load    = a.load_minutes          ?? tmpl.load_minutes          ?? DEFAULT_MINUTES.load;
+  const unload  = a.unload_minutes         ?? tmpl.unload_minutes         ?? DEFAULT_MINUTES.unload;
+  const pack    = a.pack_out_minutes       ?? tmpl.pack_out_minutes       ?? DEFAULT_MINUTES.packOut;
+  const homeUn  = a.home_unload_minutes    ?? tmpl.home_unload_minutes    ?? DEFAULT_MINUTES.homeUnload;
+  const driveInfo = getDriveMins(a.event_zip);
+  const drive   = a.drive_minutes_each_way ?? driveInfo.minutes;
+  // A guess only when nothing pins the number down: no per-assignment
+  // override AND the ZIP isn't in the table. An override is a deliberate
+  // figure regardless of the ZIP; drive_minutes_each_way persisted from a
+  // PRIOR run (staff-assignments.js's IS NULL guard) counts the same way —
+  // it is no longer being computed live, so it isn't a guess either.
+  const driveIsGuess = a.drive_minutes_each_way == null && !driveInfo.zipKnown;
+
+  const totalMins = load + drive + unload + party + pack + drive + homeUn;
+  const rawHours = totalMins / 60;
+
+  return { load, unload, pack, homeUn, drive, party, totalMins, rawHours, driveIsGuess };
+}
 
 // Exported so payroll-scheduled.js can reuse the same table definitions.
 async function ensureTables(client) {
@@ -139,6 +167,13 @@ async function ensureTables(client) {
 // raw_hours/total_minutes are still the estimate; comparing p.hours against
 // p.raw_hours regardless of source let a gig where the clock beat the
 // estimate get stamped "(5h min applied)" when no floor applied at all.
+//
+// p.drive_is_guess (task step 3): the estimate path's total_minutes already
+// includes a fabricated 30-minute drive when the ZIP is blank or unknown —
+// that NUMBER doesn't change here, only whether the note admits it. A
+// measured or overridden payment never reads this field: the clock doesn't
+// care how the drive was guessed, and an override's amount has nothing to do
+// with the estimate at all.
 function paymentNote(p) {
   if (p.isOverride) {
     const roles = (p.roles_filled || []).join(', ');
@@ -148,7 +183,8 @@ function paymentNote(p) {
     const floorApplied = p.hours > p.measured_hours;
     return `Measured ${p.measured_hours}h clocked → ${p.hours}h paid${floorApplied ? ' (5h min applied)' : ''}`;
   }
-  return `Auto-generated: ${p.total_minutes} min raw (${p.drive_minutes} min drive ea.) → ${p.hours}h paid${p.hours > p.raw_hours ? ' (5h min applied)' : ''}`;
+  const driveNote = p.drive_is_guess ? ' [drive time estimated — ZIP not in table]' : '';
+  return `Auto-generated: ${p.total_minutes} min raw (${p.drive_minutes} min drive ea.)${driveNote} → ${p.hours}h paid${p.hours > p.raw_hours ? ' (5h min applied)' : ''}`;
 }
 
 // A consequence of the warning rule in _timeclock.js: it only warns when
@@ -165,6 +201,7 @@ function noClockDataSummary(count, total) {
 module.exports.ensureTables = ensureTables;
 module.exports.paymentNote = paymentNote;
 module.exports.noClockDataSummary = noClockDataSummary;
+module.exports.computeAssignmentSpan = computeAssignmentSpan;
 
 // Get the Sunday for a given date (week ending).
 // If the date IS a Sunday (day=0), returns that same date;
@@ -369,56 +406,6 @@ exports.handler = async (event) => {
           const durationMap = {};
           services.forEach(s => { durationMap[s.service_id] = s.duration_minutes || 60; });
 
-          const HOME_ZIP = '73118';
-          const zipCoords = {
-            '73099':{ lat:35.5176, lng:-97.7618 }, '73101':{ lat:35.4676, lng:-97.5164 },
-            '73102':{ lat:35.4714, lng:-97.5169 }, '73103':{ lat:35.4869, lng:-97.5245 },
-            '73104':{ lat:35.4781, lng:-97.5058 }, '73105':{ lat:35.4947, lng:-97.5112 },
-            '73106':{ lat:35.4875, lng:-97.5411 }, '73107':{ lat:35.4786, lng:-97.5631 },
-            '73108':{ lat:35.4531, lng:-97.5604 }, '73109':{ lat:35.4397, lng:-97.5245 },
-            '73110':{ lat:35.4631, lng:-97.4203 }, '73111':{ lat:35.5061, lng:-97.4913 },
-            '73112':{ lat:35.5008, lng:-97.5631 }, '73114':{ lat:35.5675, lng:-97.5245 },
-            '73115':{ lat:35.4275, lng:-97.4581 }, '73116':{ lat:35.5397, lng:-97.5631 },
-            '73117':{ lat:35.4841, lng:-97.4913 }, '73118':{ lat:35.5161, lng:-97.5411 },
-            '73119':{ lat:35.4231, lng:-97.5631 }, '73120':{ lat:35.5675, lng:-97.5831 },
-            '73121':{ lat:35.5008, lng:-97.4581 }, '73122':{ lat:35.5008, lng:-97.6031 },
-            '73127':{ lat:35.4786, lng:-97.6431 }, '73128':{ lat:35.4397, lng:-97.6431 },
-            '73129':{ lat:35.4231, lng:-97.4913 }, '73130':{ lat:35.4631, lng:-97.3803 },
-            '73131':{ lat:35.5397, lng:-97.4581 }, '73132':{ lat:35.5397, lng:-97.6231 },
-            '73134':{ lat:35.6097, lng:-97.5831 }, '73135':{ lat:35.3875, lng:-97.4581 },
-            '73139':{ lat:35.3875, lng:-97.5245 }, '73142':{ lat:35.6097, lng:-97.6231 },
-            '73149':{ lat:35.3875, lng:-97.4203 }, '73150':{ lat:35.4231, lng:-97.3803 },
-            '73159':{ lat:35.3875, lng:-97.6031 }, '73160':{ lat:35.3275, lng:-97.5245 },
-            '73162':{ lat:35.5675, lng:-97.6431 }, '73165':{ lat:35.3275, lng:-97.4203 },
-            '73169':{ lat:35.3875, lng:-97.6431 }, '73170':{ lat:35.3275, lng:-97.6031 },
-            '73179':{ lat:35.4397, lng:-97.6831 },
-            '73003':{ lat:35.6597, lng:-97.4781 }, '73007':{ lat:35.6097, lng:-97.4203 },
-            '73008':{ lat:35.5397, lng:-97.6831 }, '73013':{ lat:35.6397, lng:-97.5631 },
-            '73020':{ lat:35.4631, lng:-97.2803 }, '73025':{ lat:35.6597, lng:-97.7418 },
-            '73026':{ lat:35.2275, lng:-97.4413 }, '73034':{ lat:35.6597, lng:-97.3803 },
-            '73044':{ lat:35.8597, lng:-97.4581 }, '73049':{ lat:35.4631, lng:-97.1803 },
-            '73051':{ lat:35.1275, lng:-97.3803 }, '73054':{ lat:35.6097, lng:-97.2803 },
-            '73059':{ lat:35.3275, lng:-97.8031 }, '73064':{ lat:35.4097, lng:-97.7618 },
-            '73066':{ lat:35.5397, lng:-97.2803 }, '73069':{ lat:35.2275, lng:-97.2803 },
-            '73071':{ lat:35.2275, lng:-97.4413 }, '73072':{ lat:35.2275, lng:-97.4413 },
-            '73073':{ lat:36.1597, lng:-97.5831 }, '73074':{ lat:34.9275, lng:-97.4413 },
-            '73078':{ lat:35.5675, lng:-97.7818 }, '73080':{ lat:35.2275, lng:-97.6031 },
-            '73084':{ lat:35.5397, lng:-97.3803 }, '73089':{ lat:35.3275, lng:-97.7218 },
-            '73093':{ lat:35.2275, lng:-97.5631 }, '73097':{ lat:35.3875, lng:-97.7218 },
-          };
-
-          function getDriveMins(destZip) {
-            const home = zipCoords[HOME_ZIP];
-            const dest = zipCoords[(destZip||'').toString().substring(0,5)];
-            if (!home || !dest) return 30;
-            const R = 3958.8;
-            const dLat = (dest.lat - home.lat) * Math.PI / 180;
-            const dLng = (dest.lng - home.lng) * Math.PI / 180;
-            const a = Math.sin(dLat/2)**2 + Math.cos(home.lat*Math.PI/180)*Math.cos(dest.lat*Math.PI/180)*Math.sin(dLng/2)**2;
-            const miles = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return Math.max(10, Math.round((miles / 35) * 60)) + 15;
-          }
-
           const { rows: rolePayRows } = await client.query('SELECT role_name, pay_type FROM role_pay');
           const rolePayByRole = {};
           for (const r of rolePayRows) rolePayByRole[r.role_name] = r.pay_type;
@@ -457,15 +444,9 @@ exports.handler = async (event) => {
             );
 
             const tmpl = templateMap[a.service_id] || {};
-            const load    = a.load_minutes          ?? tmpl.load_minutes          ?? 30;
-            const unload  = a.unload_minutes         ?? tmpl.unload_minutes         ?? 15;
-            const pack    = a.pack_out_minutes       ?? tmpl.pack_out_minutes       ?? 20;
-            const homeUn  = a.home_unload_minutes    ?? tmpl.home_unload_minutes    ?? 15;
-            const drive   = a.drive_minutes_each_way ?? getDriveMins(a.event_zip);
-            const party   = durationMap[a.service_id] || 60;
-
-            const totalMins = load + drive + unload + party + pack + drive + homeUn;
-            const rawHours = totalMins / 60;
+            const party = durationMap[a.service_id] || 60;
+            const { load, unload, pack, homeUn, drive, totalMins, rawHours, driveIsGuess } =
+              computeAssignmentSpan(a, tmpl, party);
 
             // A person who filled two roles worked one continuous shift, and
             // each role's gig_logs row only stamps its own clock — picking one
@@ -535,6 +516,10 @@ exports.handler = async (event) => {
               clock_adjusted: clockSpan.clock_adjusted,
               amount,
               drive_minutes: drive,
+              // Read by paymentNote() to label an estimate built on a
+              // guessed drive — see computeAssignmentSpan's comment for what
+              // counts as a guess. The 30-minute number itself is unchanged.
+              drive_is_guess: driveIsGuess,
               total_minutes: totalMins,
             });
 
@@ -583,6 +568,9 @@ exports.handler = async (event) => {
                 clock_adjusted: p.clock_adjusted,
                 amount: p.amount !== null ? p.amount : 0,
                 already_recorded: !!p.existingId,
+                // So a reviewer sees the guess BEFORE approving the run, not
+                // only afterward in paymentNote()'s text on the saved row.
+                drive_is_guess: p.drive_is_guess,
               });
             }
 

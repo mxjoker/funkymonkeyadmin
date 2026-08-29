@@ -53,6 +53,12 @@ const ZIP_COORDS = {
 };
 const HOME_ZIP = '73118';
 
+// The four component defaults, in one place so payroll.js can import them
+// instead of carrying its own copy. It used to: unload defaulted to 15 there
+// and 45 here (and in admin.html's Gig Time Templates UI) — an outlier
+// nobody meant to create. 45 is the value everywhere now.
+const DEFAULT_MINUTES = { load: 30, unload: 45, packOut: 20, homeUnload: 15 };
+
 // The 30-minute fallback for an unknown ZIP is UNCHANGED and that is
 // deliberate: it flows into total_minutes and from there into payroll's
 // estimate path. Deciding what payroll should do with an unknown drive is
@@ -80,10 +86,10 @@ async function spanFor(client, booking, overrides = {}) {
   const drive = getDriveMins(booking.event_zip);
   if (!drive.zipKnown) unknowns.push(`drive time estimated — ZIP ${booking.event_zip || '(none)'} is not in the table`);
 
-  const load   = overrides.load_minutes           ?? tmpl?.load_minutes           ?? 30;
-  const setup  = overrides.unload_minutes         ?? tmpl?.unload_minutes         ?? 45;
-  const pack   = overrides.pack_out_minutes       ?? tmpl?.pack_out_minutes       ?? 20;
-  const homeUn = overrides.home_unload_minutes    ?? tmpl?.home_unload_minutes    ?? 15;
+  const load   = overrides.load_minutes           ?? tmpl?.load_minutes           ?? DEFAULT_MINUTES.load;
+  const setup  = overrides.unload_minutes         ?? tmpl?.unload_minutes         ?? DEFAULT_MINUTES.unload;
+  const pack   = overrides.pack_out_minutes       ?? tmpl?.pack_out_minutes       ?? DEFAULT_MINUTES.packOut;
+  const homeUn = overrides.home_unload_minutes    ?? tmpl?.home_unload_minutes    ?? DEFAULT_MINUTES.homeUnload;
   const driveM = overrides.drive_minutes_each_way ?? drive.minutes;
   const party  = svc?.duration_minutes ?? 60;
   if (!svc) unknowns.push('service duration unknown — assumed 60 minutes');
@@ -126,4 +132,4 @@ async function spanFor(client, booking, overrides = {}) {
   };
 }
 
-module.exports = { spanFor, getDriveMins, TZ };
+module.exports = { spanFor, getDriveMins, DEFAULT_MINUTES, TZ };

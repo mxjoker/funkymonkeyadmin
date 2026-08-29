@@ -83,3 +83,37 @@ test('a non-override payment is completely unaffected by the isOverride field ex
   });
   assert.strictEqual(note, 'Measured 6.5h clocked → 6.5h paid');
 });
+
+// Task step 3 (unify-drive-time): the drive figure inside total_minutes
+// doesn't change based on drive_is_guess — 30 stays 30 — only the note gets
+// to say it was fabricated, not measured or looked up in the ZIP table.
+test('an estimated payment built on a guessed drive time says so', () => {
+  const note = paymentNote({
+    hours_source: 'estimated', measured_hours: null, hours: 6.5,
+    raw_hours: 6.5, total_minutes: 390, drive_minutes: 30,
+    drive_is_guess: true,
+  });
+  assert.strictEqual(
+    note,
+    'Auto-generated: 390 min raw (30 min drive ea.) [drive time estimated — ZIP not in table] → 6.5h paid'
+  );
+});
+
+test('an estimated payment on a known ZIP says nothing about a guess', () => {
+  const note = paymentNote({
+    hours_source: 'estimated', measured_hours: null, hours: 6.5,
+    raw_hours: 6.5, total_minutes: 390, drive_minutes: 45,
+    drive_is_guess: false,
+  });
+  assert.doesNotMatch(note, /estimated — ZIP/);
+});
+
+// A measured payment ignores drive_is_guess entirely — the clock paid this
+// one, not the estimate, so what the drive guess would have been is moot.
+test('a measured payment never mentions drive_is_guess even when set', () => {
+  const note = paymentNote({
+    hours_source: 'measured', measured_hours: 6.5, hours: 6.5,
+    drive_is_guess: true,
+  });
+  assert.doesNotMatch(note, /drive time estimated/);
+});

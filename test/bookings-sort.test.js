@@ -15,7 +15,7 @@ function loadHelpers() {
   const ctx = {};
   vm.createContext(ctx);
   vm.runInContext(
-    HTML.slice(a, b) + '\nout = { BOOKING_COLUMNS, sortBookings, nextSort, incompleteReasons };',
+    HTML.slice(a, b) + '\nout = { BOOKING_COLUMNS, sortBookings, nextSort, incompleteReasons, needsZipEstimate, zipEstimateBookings, driveEstimateNote, driveTimeIsEstimated };',
     ctx
   );
   return ctx.out;
@@ -178,4 +178,116 @@ test('a $0 price counts as unpriced however it is expressed', () => {
     assert.ok(plain(incompleteReasons({ ...OK, total_price: v })).includes('not priced'),
       `total_price ${JSON.stringify(v)} should count as unpriced`);
   }
+});
+
+// ── needsZipEstimate / zipEstimateBookings ──────────────────────────────────
+// The dashboard's "N upcoming gigs have no usable ZIP" banner. zip_known is
+// computed server-side (bookings.js, from _schedule.js's ONE ZIP table) so
+// these helpers never carry their own copy of it — see the comment above
+// needsZipEstimate in admin.html for why that matters.
+const { needsZipEstimate, zipEstimateBookings } = loadHelpers();
+
+const TODAY = '2026-08-27';
+
+test('needsZipEstimate: an upcoming booking with an unknown/blank ZIP needs one', () => {
+  assert.strictEqual(
+    needsZipEstimate({ id: 1, event_date: '2026-09-01', zip_known: false }, false, TODAY),
+    true
+  );
+});
+
+test('needsZipEstimate: a known ZIP never needs one, whatever else is true', () => {
+  assert.strictEqual(
+    needsZipEstimate({ id: 1, event_date: '2026-09-01', zip_known: true }, false, TODAY),
+    false
+  );
+});
+
+test('needsZipEstimate: a per-assignment drive override already pins the number, ZIP or no ZIP', () => {
+  assert.strictEqual(
+    needsZipEstimate({ id: 1, event_date: '2026-09-01', zip_known: false }, true, TODAY),
+    false
+  );
+});
+
+test('needsZipEstimate: past events are not actionable', () => {
+  assert.strictEqual(
+    needsZipEstimate({ id: 1, event_date: '2026-01-01', zip_known: false }, false, TODAY),
+    false
+  );
+});
+
+test('needsZipEstimate: no event_date at all is not actionable either — nothing to depart FOR yet', () => {
+  assert.strictEqual(
+    needsZipEstimate({ id: 1, event_date: null, zip_known: false }, false, TODAY),
+    false
+  );
+});
+
+test('zipEstimateBookings: counts only the upcoming, unpinned, unknown-ZIP bookings', () => {
+  const bookings = [
+    { id: 1, event_date: '2026-09-01', zip_known: false }, // counts
+    { id: 2, event_date: '2026-09-01', zip_known: true },  // known ZIP
+    { id: 3, event_date: '2026-09-01', zip_known: false }, // overridden
+    { id: 4, event_date: '2026-01-01', zip_known: false }, // past
+    { id: 5, event_date: '2026-09-05', zip_known: false }, // counts
+  ];
+  const result = zipEstimateBookings(bookings, new Set([3]), TODAY);
+  assert.deepStrictEqual(plain(result).map(b => b.id), [1, 5]);
+});
+
+test('zipEstimateBookings: accepts a plain array of ids too, not just a Set', () => {
+  const bookings = [{ id: 7, event_date: '2026-09-01', zip_known: false }];
+  assert.strictEqual(zipEstimateBookings(bookings, [7], TODAY).length, 0);
+  assert.strictEqual(zipEstimateBookings(bookings, [], TODAY).length, 1);
+});
+
+// ── driveEstimateNote / driveTimeIsEstimated ────────────────────────────────
+// Fix round 1: the schedule timeline showed a guessed Depart time with no
+// indication, on both the admin gig card and the staff portal.
+// Fix round 2: driveTimeIsEstimated is now DERIVED at render time (booking's
+// zip_known + assignment's override), not read off a persisted column — a
+// stored flag never got set on an existing assignment (autoCalcTimes only
+// writes once, on creation) and would have gone stale the moment a missing
+// ZIP was filled in.
+const { driveEstimateNote, driveTimeIsEstimated } = loadHelpers();
+
+test('driveEstimateNote: a known drive time gets no qualifier', () => {
+  assert.strictEqual(driveEstimateNote(false), '');
+  assert.strictEqual(driveEstimateNote(null), '');
+  assert.strictEqual(driveEstimateNote(undefined), '');
+});
+
+test('driveEstimateNote: a guessed drive time says so', () => {
+  assert.match(driveEstimateNote(true), /estimated/);
+  assert.match(driveEstimateNote(true), /no ZIP/);
+});
+
+test('driveTimeIsEstimated: no override, unknown ZIP — estimated. This is FM-E5EFPPQX\'s exact shape.', () => {
+  assert.strictEqual(
+    driveTimeIsEstimated({ drive_minutes_each_way: null }, { zip_known: false }),
+    true
+  );
+});
+
+test('driveTimeIsEstimated: no override, known ZIP — not estimated', () => {
+  assert.strictEqual(
+    driveTimeIsEstimated({ drive_minutes_each_way: null }, { zip_known: true }),
+    false
+  );
+});
+
+test('driveTimeIsEstimated: an override wins regardless of ZIP — a hand-entered figure is real, not a guess', () => {
+  assert.strictEqual(
+    driveTimeIsEstimated({ drive_minutes_each_way: 40 }, { zip_known: false }),
+    false
+  );
+  assert.strictEqual(
+    driveTimeIsEstimated({ drive_minutes_each_way: 40 }, { zip_known: true }),
+    false
+  );
+});
+
+test('driveTimeIsEstimated: a missing booking (lookup failed) reads as estimated, not a crash', () => {
+  assert.strictEqual(driveTimeIsEstimated({ drive_minutes_each_way: null }, undefined), true);
 });
