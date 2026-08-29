@@ -283,10 +283,13 @@ exports.handler = async (event) => {
         const bookingId = params.booking_id;
         const allFlag   = params.all === 'true';
 
-        // ?all=true — lightweight fetch for calendar staff initials
+        // ?all=true — lightweight fetch for calendar staff initials. Also
+        // carries drive_minutes_each_way so admin.html's dashboard can tell
+        // a booking already has a pinned per-assignment drive figure apart
+        // from a known ZIP (see needsZipEstimate there).
         if (allFlag) {
           const { rows: assignments } = await client.query(
-            `SELECT sa.booking_id, sa.staff_id, sa.status,
+            `SELECT sa.booking_id, sa.staff_id, sa.status, sa.drive_minutes_each_way,
                     s.name as staff_name, s.preferred_name, s.color
              FROM staff_assignments sa
              JOIN staff s ON s.id = sa.staff_id
