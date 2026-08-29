@@ -175,8 +175,33 @@ exports.handler = async (event, context) => {
           }
         }
 
-        await ensureBookingItems(client);
-        booking.items = await getItems(client, booking.id);
+        // One camp, one invoice. A camp day's total_price is an internal
+        // allocation — the camp's price split across the days so monthly
+        // revenue lands in the right months — NOT a price anyone agreed to.
+        // Nobody was ever quoted $566.66 for the Tuesday. Invoicing a single
+        // day would bill a figure that exists only for accounting, so a day
+        // of a closed-out camp serves its CAMP's invoice instead.
+        //
+        // The guard lives here rather than in my-booking.html because every
+        // caller routes through this function: the client's own download
+        // button, the admin's, and any link either of them was ever sent.
+        if (booking.camp_id) {
+          const { rows: campRows } = await client.query('SELECT * FROM camps WHERE id = $1', [booking.camp_id]);
+          // Only once it is closed out. Before that the camp has no price at
+          // all, and the day's ordinary invoice is the honest answer.
+          if (campRows.length && campRows[0].closed_out_at) {
+            const { rows: campDays } = await client.query(
+              'SELECT event_date, status FROM bookings WHERE camp_id = $1 ORDER BY event_date', [booking.camp_id]);
+            booking = buildCampInvoiceBooking(campRows[0], campDays);
+          }
+        }
+
+        // Skipped for a camp: the synthetic booking carries its own single
+        // line item and has no id to look items up by.
+        if (booking.id) {
+          await ensureBookingItems(client);
+          booking.items = await getItems(client, booking.id);
+        }
 
       }
 

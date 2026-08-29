@@ -1816,6 +1816,46 @@ function campDateRangeLabel(days) {
   return `${a.d} ${a.m}–${b.d} ${b.m}`;
 }
 
+// Has a closed-out camp's day set changed since it was billed?
+//
+// The camp's price is rate x headcount — one number, agreed once. The days
+// only hold that number split up. Add a day, or cancel one, after close-out
+// and the split no longer adds back to the price: a cancelled day walks off
+// with its share (so revenue queries that exclude cancelled rows under-report
+// by exactly that share), and a new day joins at $0.
+//
+// Nothing recomputes on its own, deliberately — the fix is to press Close out
+// again, which is idempotent by design. This only has to NOTICE. Derived from
+// the camp and its days on every render, so it cannot itself go stale.
+//
+// Returns null when there is nothing to say: not closed out, or still square.
+function campNeedsReclose(camp, days) {
+  if (!camp || !camp.closed_out_at) return null;
+  const expected = Number(camp.rate_per_kid || 0) * Number(camp.headcount || 0);
+  const active = (days || []).filter(d => (d.status || '') !== 'cancelled');
+  if (!active.length) return null;
+  const allocated = active.reduce((s, d) => s + Number(d.total_price || 0), 0);
+  const orphaned = (days || []).filter(d => (d.status || '') === 'cancelled')
+    .reduce((s, d) => s + Number(d.total_price || 0), 0);
+
+  // The sum alone is not enough: ADDING a day leaves it untouched, because
+  // the existing days still hold the whole price and the newcomer holds $0.
+  // So check the shape too — every day should sit near an even share. The
+  // split puts the remainder on the last day, so a correct part is never more
+  // than one cent per day away from the average.
+  //
+  // This also catches a day whose quote was hand-edited after close-out,
+  // which is the other way the allocation drifts from the agreed price.
+  const share = expected / active.length;
+  const tolerance = active.length / 100 + 0.005;
+  const uneven = active.some(d => Math.abs(Number(d.total_price || 0) - share) > tolerance);
+
+  // Half a cent on the sums, same as balanceIsDerivable — NUMERIC/float
+  // round-tripping must not read as a changed day set.
+  if (Math.abs(allocated - expected) <= 0.005 && orphaned <= 0.005 && !uneven) return null;
+  return { expected, allocated, orphaned, day_count: active.length };
+}
+
 // Turns a flat, already-filtered booking list into display rows: an ordinary
 // booking (camp_id null, or pointing at a camp we don't know about) passes
 // through completely untouched — this is what keeps a camp-free bookings
@@ -2320,6 +2360,7 @@ function campRow(row) {
   // closed_out_at is the only marker of "billed" — a rate of 0 is legitimate,
   // and so is a camp total of $0, so neither can stand in for it.
   const closedOut = !!camp.closed_out_at;
+  const stale = campNeedsReclose(camp, row.days);
   return `<tr class="camp-summary-row" style="cursor:pointer;background:#f5f3ff" onclick="toggleCampRows(${row.camp_id})">
     <td colspan="8">
       <strong>🏕 ${esc(row.label)}</strong>
@@ -2332,6 +2373,8 @@ function campRow(row) {
           ? `💵 Closed out — ${camp.headcount} kid${camp.headcount === 1 ? '' : 's'} @ $${Number(camp.rate_per_kid || 0).toFixed(0)}`
           : '💵 Close out &amp; invoice'}
       </button>
+      ${stale ? `<span title="The camp is still ${camp.headcount} kids @ $${Number(camp.rate_per_kid||0).toFixed(2)} = $${stale.expected.toFixed(2)}. Its days now hold $${stale.allocated.toFixed(2)}${stale.orphaned > 0.005 ? `, with $${stale.orphaned.toFixed(2)} stranded on cancelled days` : ''}. Close out again to re-split."
+             style="margin-left:8px;color:#92400e;background:#fef3c7;padding:2px 8px;border-radius:4px;font-size:.75rem;font-weight:700">⚠️ Days changed — re-close to re-split</span>` : ''}
       <span class="text-muted" style="float:right">▾ tap to expand</span>
     </td>
   </tr>${row.days.map(b => bookingRow(b, true, `class="camp-day-row" data-camp-days="${row.camp_id}"`)).join('')}`;
