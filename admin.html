@@ -2158,7 +2158,12 @@ function upcomingGigRow(b) {
 // on the raw string.
 const REFERRAL_SOURCES = [
   'Google Search', 'Facebook', 'Instagram',
-  'Friend / Word of Mouth', 'Nextdoor', 'Repeat Customer', 'Other',
+  'Friend / Word of Mouth', 'Nextdoor', 'Repeat Customer',
+  // "Seen a Performance" is the highest-value lead there is and used to land
+  // in "Other". Promoter/Agency is a different commercial relationship, and
+  // people genuinely find vendors through an AI assistant now — if it is not
+  // an option you cannot tell whether it is growing.
+  'Seen a Performance', 'Promoter / Agency', 'ChatGPT / AI', 'Other',
 ];
 
 // The eight EVENT_TYPES labels from booking-form.html:514. The public form
