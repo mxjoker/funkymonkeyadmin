@@ -96,6 +96,25 @@ test('the balance branch refuses to bill while a deposit is unpaid', () => {
     'deposit_paid is not selected, so the guard can never see it');
 });
 
+// The mirror of the guard above. Minting a fresh deposit link once the
+// deposit is already paid, or once the balance is already settled, is the
+// other half of the two-live-links money bug (paymentEffect's deposit
+// branch in stripe-webhook.js assumes a deposit payment is the FIRST
+// payment ever made — see its comment). The webhook-side fix clamps the
+// damage from a link already in the wild; this stops new ones from being
+// minted at all.
+test('the deposit branch refuses to mint while the deposit is already paid', () => {
+  const src = read('create-stripe-link.js');
+  assert.match(src, /kind === 'deposit'\)[\s\S]{0,200}bookingRow\.deposit_paid === true/,
+    'the server-side deposit-already-paid guard is gone');
+});
+
+test('the deposit branch refuses to mint once the balance is already settled', () => {
+  const src = read('create-stripe-link.js');
+  assert.match(src, /kind === 'deposit'\)[\s\S]{0,300}bookingRow\.balance_due/,
+    'the settled-balance guard on deposit mode is gone');
+});
+
 test('both kinds carry the ids the webhook matches on', () => {
   for (const kind of ['deposit', 'balance']) {
     const p = buildSessionParams({ ...BASE, kind, amount: 100, fee: kind === 'balance' ? 5 : 0 });

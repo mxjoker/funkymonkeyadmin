@@ -374,6 +374,17 @@ input,select,textarea{font-family:inherit}
         </div>
       </div>
 
+      <div id="overpayment-warning" style="display:none;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:16px 20px;margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:20px">💸</span>
+          <div>
+            <strong id="overpayment-count" style="color:#991b1b"></strong>
+            <span style="color:#7f1d1d"> — a payment landed on a booking that was already settled and was NOT rebilled; these likely need a manual refund. </span>
+            <a href="#" onclick="showOverpaidBookings();return false" style="color:#991b1b;font-weight:600">View →</a>
+          </div>
+        </div>
+      </div>
+
       <div id="zip-estimate-warning" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:16px 20px;margin-bottom:20px">
         <div style="display:flex;align-items:center;gap:10px">
           <span style="font-size:20px">📍</span>
@@ -1276,6 +1287,17 @@ function showBookingsFiltered(status) {
   renderBookingsTable();
 }
 
+// Dashboard's overpayment-flag banner link. This should be a rare, near-
+// always-zero list (see overpaidBookings' comment), so it jumps straight to
+// the booking the same way openBooking is used everywhere else in this file,
+// rather than building a table filter for a flag most days has no matches.
+function showOverpaidBookings() {
+  const flagged = overpaidBookings(allBookings);
+  if (!flagged.length) return;
+  showPage('bookings');
+  openBooking(flagged[0].id);
+}
+
 // Dashboard's "N upcoming gigs have no usable ZIP" banner link. Uses the
 // Needs ZIP estimate toggle rather than a status/date filter — needsZipEstimate
 // already excludes past events, so no other filter needs setting.
@@ -1664,6 +1686,17 @@ function needsZipEstimate(b, hasDriveOverride, todayISO) {
 function zipEstimateBookings(bookings, driveOverrideBookingIds, todayISO = new Date().toISOString().slice(0, 10)) {
   const overrideSet = driveOverrideBookingIds instanceof Set ? driveOverrideBookingIds : new Set(driveOverrideBookingIds || []);
   return (bookings || []).filter(b => needsZipEstimate(b, overrideSet.has(b.id), todayISO));
+}
+
+// The overpayment-flag dashboard banner. stripe-webhook.js's paymentEffect
+// sets bookings.overpayment_amount whenever a payment would have raised
+// balance_due or regressed status off a settled booking — a stale deposit
+// link paid after the balance was already collected. The owner's decision
+// (see paymentEffect's comment) is flag-never-auto-refund: nothing here
+// moves money, it only surfaces which bookings need a human to look at
+// refund.js by hand.
+function overpaidBookings(bookings) {
+  return (bookings || []).filter(b => Number(b.overpayment_amount) > 0);
 }
 
 function sortBookings(list, { key, dir }) {
@@ -7994,6 +8027,23 @@ async function checkStaleWarnings() {
         el.style.display = 'block';
         document.getElementById('stale-review-count').textContent =
           `${stale.length} booking${stale.length !== 1 ? 's' : ''}`;
+      } else {
+        el.style.display = 'none';
+      }
+    }
+  } catch(e) {}
+
+  // overpayment_amount comes straight off allBookings — bookings.js's GET is
+  // a bare SELECT *, so no extra request or wiring was needed for it to show
+  // up here the moment stripe-webhook.js starts setting the column.
+  try {
+    const flagged = overpaidBookings(allBookings);
+    const el = document.getElementById('overpayment-warning');
+    if (el) {
+      if (flagged.length > 0) {
+        el.style.display = 'block';
+        document.getElementById('overpayment-count').textContent =
+          `${flagged.length} booking${flagged.length !== 1 ? 's' : ''} overpaid`;
       } else {
         el.style.display = 'none';
       }

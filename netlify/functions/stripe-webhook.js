@@ -109,18 +109,53 @@ function paymentEffect(booking, amountPaid, kind, meta) {
   const totalCents   = Math.round((parseFloat(b.total_price)  || 0) * 100);
   const mileageCents = Math.round((parseFloat(b.mileage_cost) || 0) * 100);
   const paidCents    = Math.round((Number(amountPaid) || 0) * 100);
-  return {
+  const recomputed = Math.max(0, totalCents + mileageCents - paidCents) / 100;
+
+  // THE INVARIANT: a payment can never increase what is owed. This branch
+  // recomputes balance_due from scratch (total + mileage - amountPaid),
+  // which is only correct when amountPaid is the one and only payment ever
+  // made against the booking. It is not, whenever a deposit link is paid
+  // after the balance was already settled elsewhere — Stripe links live 24h
+  // (create-stripe-link.js), so a stale one being paid late is a real,
+  // reachable window, not a hypothetical. Clamp to whichever is lower: the
+  // recompute can only ever reduce what was owed, never raise it. Mirrors
+  // the balance branch above, which computes relatively for the same reason.
+  const owed = Math.max(0, round2(Number(b.balance_due) || 0));
+  const wouldRaise = recomputed > owed + 0.005;
+  const balance_due = wouldRaise ? owed : round2(recomputed);
+
+  // Status may only move FORWARD out of PRE_PAYMENT, same rule as the
+  // balance branch's promotion above. It must never overwrite 'completed' or
+  // 'cancelled' — that is exactly how a settled booking got un-settled: the
+  // old code forced status to 'confirmed' unconditionally.
+  const wasPrePayment = PRE_PAYMENT.includes(b.status);
+  const status = wasPrePayment ? 'confirmed' : (b.status || 'confirmed');
+  // Would the old, unconditional 'confirmed' have demoted a real status?
+  const wouldRegress = !wasPrePayment && b.status != null && b.status !== 'confirmed';
+
+  const result = {
     kind: 'deposit',
     deposit_paid: true,
     deposit_amount: Number(amountPaid) || 0,
     payment_method: 'stripe',
-    status: 'confirmed',
-    balance_due: Math.max(0, totalCents + mileageCents - paidCents) / 100,
+    status,
+    balance_due,
     // A deposit carries no service fee. Present so the UPDATE can accumulate
     // effect.fee unconditionally.
     fee: 0,
     logAction: 'Deposit paid via Stripe',
   };
+
+  // Flag, never auto-refund (owner's call): a webhook that issues refunds on
+  // an edge case nobody modelled is worse than the bug it fixes. Either
+  // clamp firing is itself the signal — the payment did not do what a
+  // deposit payment normally does, and a human needs to look at it.
+  if (wouldRaise || wouldRegress) {
+    result.overpaymentFlagged = true;
+    result.overpaymentAmount = Number(amountPaid) || 0;
+  }
+
+  return result;
 }
 
 // Chooses the balance-receipt subject and framing-sentence tail. Pure and
@@ -193,6 +228,16 @@ exports.handler = async (event) => {
       // A record, never an input: it must not appear in any balance, total or
       // derivability calculation.
       await c.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS service_fee_collected NUMERIC(10,2) DEFAULT 0");
+      // Set by paymentEffect's deposit branch when a payment would have
+      // raised balance_due or regressed status — a stale deposit link paid
+      // after the booking was already settled. Never cleared automatically:
+      // this is a "look at me" flag for a manual refund (see the owner's
+      // decision in paymentEffect's comment), not a state machine, so it
+      // stays set until whoever resolves the refund clears it by hand.
+      // Nullable: null/0 means "nothing unexplained here", non-null is both
+      // the flag and the amount in one column — no separate boolean to drift
+      // out of sync with it.
+      await c.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS overpayment_amount NUMERIC(10,2)");
 
       // ── Checkout completed (deposit paid) ──────
       if (ev.type === "checkout.session.completed") {
@@ -277,12 +322,14 @@ exports.handler = async (event) => {
                  stripe_balance_session_id = CASE WHEN $2::boolean THEN stripe_balance_session_id ELSE $6 END,
                  stripe_balance_payment_intent_id = CASE WHEN $2::boolean THEN stripe_balance_payment_intent_id ELSE $7 END,
                  balance_due=$8,
-                 service_fee_collected = COALESCE(service_fee_collected, 0) + $9
+                 service_fee_collected = COALESCE(service_fee_collected, 0) + $9,
+                 overpayment_amount = CASE WHEN $11::boolean THEN $12 ELSE overpayment_amount END
              WHERE id=$10
              RETURNING *`,
             [effect.deposit_paid, isDeposit, effect.deposit_amount,
              effect.payment_method, effect.status, sessionId, paymentIntentId,
-             balanceDue, effect.fee, booking.id]
+             balanceDue, effect.fee, booking.id,
+             effect.overpaymentFlagged === true, effect.overpaymentAmount ?? null]
           );
           const b = updated.rows[0];
           await logChange(c, b.id, effect.logAction,
@@ -291,6 +338,15 @@ exports.handler = async (event) => {
                   ? `$${amountPaid.toFixed(2)} (balance $${effect.balance.toFixed(2)} + service fee $${effect.fee.toFixed(2)})`
                   : `$${amountPaid.toFixed(2)} (not itemised: ${effect.warning})`)
               : `$${amountPaid.toFixed(2)}`);
+
+          // Flag, never auto-refund: see paymentEffect's comment for why.
+          // This is a second, distinct changelog line from the one above —
+          // that one is "a deposit was paid"; this one is "and it shouldn't
+          // have been, because nothing was owed."
+          if (effect.overpaymentFlagged) {
+            await logChange(c, b.id, 'Unexpected deposit payment on a settled booking',
+              `$${effect.overpaymentAmount.toFixed(2)} — the balance was NOT reopened; this likely needs refunding.`);
+          }
 
 
           // Client email — a balance receipt is not a deposit confirmation.

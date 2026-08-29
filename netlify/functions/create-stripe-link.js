@@ -140,6 +140,24 @@ exports.handler = async (event) => {
     }
   }
 
+  // Mirror of the balance-mode guard above — the other half of the same
+  // money bug. A deposit link minted after the deposit is already paid, or
+  // after the balance is already settled, is exactly the "stale link" this
+  // whole fix exists for: paymentEffect's deposit branch (stripe-webhook.js)
+  // now clamps so it can't rebill or reopen the booking, but that clamp is a
+  // safety net for a link already in the wild, not a reason to keep minting
+  // new ones nothing should ever pay. A deposit_amount of 0 is the
+  // deliberate no-deposit booking (school, library); balance_due of 0 on a
+  // real (priced) booking means fully settled.
+  if (kind === 'deposit') {
+    if (bookingRow.deposit_paid === true) {
+      return json(400, { error: "This booking's deposit has already been paid — sending another deposit link would risk billing it twice." });
+    }
+    if (Number(bookingRow.total_price) > 0 && Number(bookingRow.balance_due) <= 0) {
+      return json(400, { error: "This booking is already settled in full — nothing left for a deposit link to collect." });
+    }
+  }
+
   try {
     // Create Stripe Checkout Session
     const params = buildSessionParams({
