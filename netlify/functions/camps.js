@@ -269,6 +269,12 @@ async function planCloseOut(client, campId, body) {
 // was never closed out (or the reverse) is worse than one that failed, since
 // nothing looks wrong until the invoice and the dashboard disagree.
 //
+// ponytail: no booking_items rows are written per day — the legacy columns
+// are set directly. Nothing recomputes from items unaided (booking.js only
+// rolls up when a non-empty items array is POSTed), so the only way a day
+// loses its share is an admin deliberately editing that day's quote. If that
+// starts happening, write one `service` item per day via replaceItems().
+//
 // ponytail: balance_due is deliberately NOT written. A camp is chased as one
 // invoice against the camp reference, so five per-day balances would mean
 // five balance links for one bill. If camps ever take payment per day, that
