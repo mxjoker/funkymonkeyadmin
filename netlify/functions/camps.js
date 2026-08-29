@@ -13,6 +13,7 @@
 
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
+const { generateReference } = require('./_reference');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -23,6 +24,11 @@ const cap5k  = (v) => String(v || '').trim().slice(0, 5000);
 // to it. ON DELETE SET NULL is load-bearing, not a default: deleting a camp
 // must ungroup its days back into ordinary bookings, never delete a week of
 // real work — see test/camps.test.js for the test that pins this.
+//
+// Phase 2 adds: reference (CAMP-, same generator and alphabet as a booking's
+// FM- — see _reference.js), and the three shared fields the camp finalise
+// form collects that Phase 1 had no column for (event_time, venue,
+// surface_type — a camp's day is one shared time, per the owner's ruling).
 async function ensureTables(client) {
   await client.query(`
     CREATE TABLE IF NOT EXISTS camps (
@@ -39,6 +45,10 @@ async function ensureTables(client) {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  await client.query(`ALTER TABLE camps ADD COLUMN IF NOT EXISTS reference VARCHAR(20) DEFAULT ''`);
+  await client.query(`ALTER TABLE camps ADD COLUMN IF NOT EXISTS event_time VARCHAR(10) DEFAULT ''`);
+  await client.query(`ALTER TABLE camps ADD COLUMN IF NOT EXISTS venue VARCHAR(255) DEFAULT ''`);
+  await client.query(`ALTER TABLE camps ADD COLUMN IF NOT EXISTS surface_type VARCHAR(64) DEFAULT ''`);
   try {
     // Guarded separately: in a brand new environment this can run before the
     // bookings table exists. IF NOT EXISTS already makes it safe to re-run —
@@ -47,6 +57,26 @@ async function ensureTables(client) {
       `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS camp_id INTEGER REFERENCES camps(id) ON DELETE SET NULL`
     );
   } catch (_) { /* bookings table not there yet — nothing to link to */ }
+
+  await backfillReferences(client);
+}
+
+// The MAC's 5-day camp (and any other camp created under Phase 1) predates
+// the reference column — this mints one for every camp that still has none,
+// so a camp created before Phase 2 shipped still gets a working finalise
+// link without a manual migration. Cheap and idempotent: a no-op once every
+// camp has one.
+async function backfillReferences(client) {
+  const { rows } = await client.query(`SELECT id FROM camps WHERE reference IS NULL OR reference = ''`);
+  for (const { id } of rows) {
+    let reference;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const candidate = generateReference('CAMP-');
+      const { rows: existing } = await client.query('SELECT 1 FROM camps WHERE reference=$1', [candidate]);
+      if (!existing.length) { reference = candidate; break; }
+    }
+    if (reference) await client.query('UPDATE camps SET reference=$1 WHERE id=$2', [reference, id]);
+  }
 }
 
 // Every camp with its day count and date range, computed from its actual
@@ -68,11 +98,24 @@ async function listCamps(client) {
 async function createCamp(client, body) {
   const label = cap255(body.label);
   if (!label) throw Object.assign(new Error('label is required'), { statusCode: 400 });
+
+  // Same scheme as a booking's FM- reference (_reference.js), CAMP- prefixed
+  // so the two are never confused in a support conversation. Retry-on-collision,
+  // same pattern as bookings.js:420 — there's no UNIQUE constraint backing this,
+  // just the same "check, then insert" loop.
+  let reference;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const candidate = generateReference('CAMP-');
+    const { rows: existing } = await client.query('SELECT 1 FROM camps WHERE reference=$1', [candidate]);
+    if (!existing.length) { reference = candidate; break; }
+  }
+  if (!reference) throw Object.assign(new Error('Could not generate unique reference'), { statusCode: 500 });
+
   const { rows } = await client.query(
     `INSERT INTO camps (
        label, client_name, client_email, client_phone,
-       organisation_name, event_location, event_zip, service_id, notes
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       organisation_name, event_location, event_zip, service_id, notes, reference
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      RETURNING *`,
     [
       label,
@@ -84,6 +127,7 @@ async function createCamp(client, body) {
       cap255(body.event_zip),
       cap255(body.service_id),
       cap5k(body.notes),
+      reference,
     ]
   );
   return rows[0];

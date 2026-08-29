@@ -342,7 +342,7 @@
         <div id="booking-details"></div>
       </div>
 
-      <div class="card">
+      <div class="card" id="documents-card">
         <div class="section-title">📥 Download Documents</div>
         <div class="download-grid">
           <a href="/docs/w9.pdf" download class="download-btn">
@@ -377,6 +377,13 @@
 
   <script>
     let currentBooking = null;
+    let currentCamp = null;
+
+    // A CAMP- reference (netlify/functions/_reference.js) is a whole camp,
+    // not one day — it looks up and saves through finalise-camp.js instead
+    // of finalise.js. Same page, different backend, so the client only ever
+    // sees one form either way.
+    function isCampRef(ref) { return /^CAMP-/i.test(String(ref || '').trim()); }
 
     async function lookupBooking() {
       const reference = document.getElementById('reference').value.trim().toUpperCase();
@@ -397,17 +404,35 @@
       btn.textContent = 'Looking up...';
 
       try {
-        const res = await fetch(`/api/finalise?reference=${encodeURIComponent(reference)}&email=${encodeURIComponent(email)}`);
+        const endpoint = isCampRef(reference) ? '/api/finalise-camp' : '/api/finalise';
+        const res = await fetch(`${endpoint}?reference=${encodeURIComponent(reference)}&email=${encodeURIComponent(email)}`);
         const data = await res.json();
 
-        if (!res.ok || !data.booking) {
+        if (!res.ok || (!data.booking && !data.camp && !data.redirect)) {
           errorEl.textContent = data.error || 'No booking found for that reference number and email. Please check and try again.';
           errorEl.style.display = 'block';
           return;
         }
 
+        // A day inside a camp — hand off to the camp's own link. replace()
+        // rather than a normal navigation, so the day's link never sits in
+        // history for the back button to return to.
+        if (data.redirect) {
+          const url = `/my-booking.html?ref=${encodeURIComponent(data.redirect.reference)}&email=${encodeURIComponent(data.redirect.email)}`;
+          location.replace(url);
+          return;
+        }
+
+        if (data.camp) {
+          currentCamp = data.camp;
+          currentBooking = null;
+          displayCamp(currentCamp);
+          return;
+        }
+
         // Success — server already verified the email matches
         currentBooking = data.booking;
+        currentCamp = null;
         displayBooking(currentBooking);
       } catch(e) {
         errorEl.textContent = 'Failed to look up booking. Please try again.';
@@ -435,6 +460,15 @@
       ['guests_of_honour', 'Other Guests of Honour', 'text'],
     ];
     const ALL_EDITABLE_KEYS = [...CLIENT_EDITABLE_FIELDS.map(f => f[0]), 'notes'];
+
+    // A camp's shared fields — CLIENT_EDITABLE_FIELDS minus guest_count
+    // (Phase 3's per-kid headcount, collected after the camp ends) and
+    // child_name/guests_of_honour (birthday-party fields, meaningless for a
+    // week of different families). Mirrors finalise-camp.js's CAMP_EDITABLE —
+    // same reason CLIENT_EDITABLE_FIELDS above mirrors CLIENT_EDITABLE.
+    const CAMP_EXCLUDED_KEYS = ['guest_count', 'child_name', 'guests_of_honour'];
+    const CAMP_EDITABLE_FIELDS = CLIENT_EDITABLE_FIELDS.filter(([key]) => !CAMP_EXCLUDED_KEYS.includes(key));
+    const CAMP_EDITABLE_KEYS = [...CAMP_EDITABLE_FIELDS.map(f => f[0]), 'notes'];
 
     // Mirrors addressLooksComplete() in netlify/functions/_address.js — this is
     // a static page with no shared import, the same reason the editable-field
@@ -519,6 +553,7 @@
     function displayBooking(booking) {
       document.getElementById('lookup-form').style.display = 'none';
       document.getElementById('result').style.display = 'block';
+      document.getElementById('documents-card').style.display = '';
 
       document.getElementById('result-reference').textContent = booking.reference;
 
@@ -637,13 +672,55 @@
       `;
     }
 
-    function buildUpdates() {
+    // A camp's finalise view. Deliberately narrower than displayBooking's:
+    // one shared time/address/venue/surface for the whole camp, no
+    // money/deposit section (still per-day, a later phase), and one contract
+    // state for every day instead of one per booking.
+    function displayCamp(camp) {
+      document.getElementById('lookup-form').style.display = 'none';
+      document.getElementById('result').style.display = 'block';
+      document.getElementById('result-reference').textContent = camp.reference;
+
+      // Invoice/COI requests are shaped around one booking reference — a
+      // camp has no per-day request target yet (Phase 3's problem, same as
+      // per-kid pricing). Hidden here rather than left to 404 on a click.
+      document.getElementById('documents-card').style.display = 'none';
+
+      const dayWord = camp.day_count === 1 ? 'day' : 'days';
+      const readOnlyHtml = `
+        <div class="detail-row">
+          <span class="detail-label">Camp</span>
+          <span class="detail-value">${esc(camp.label)}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Days</span>
+          <span class="detail-value">${camp.day_count} ${dayWord}${camp.dates && camp.dates.length ? ' — ' + camp.dates.map(formatDate).join(', ') : ''}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Contract</span>
+          <span class="detail-value">${camp.contract_signed ? '✅ Signed' : '⏳ Not yet signed'}</span>
+        </div>
+      `;
+
+      document.getElementById('booking-details').innerHTML = readOnlyHtml + `
+        <div class="section-title" style="margin-top:24px">✏️ Complete Your Details</div>
+        <p style="color:#A78BCA;margin-bottom:16px;font-size:.9rem">These apply to every day of your camp — anything marked <span style="color:#FFD600">needed</span> is still missing.</p>
+        ${CAMP_EDITABLE_FIELDS.map(([key, label, type]) => editableFieldHtml(key, label, camp[key], type)).join('')}
+        ${editableTextareaHtml('notes', 'Notes for Us', camp.notes)}
+        <button class="btn" id="save-btn" onclick="saveCamp()">Save My Details</button>
+      `;
+    }
+
+    // Shared by buildUpdates() (a day's own finalise form) and
+    // buildCampUpdates() (the whole-camp form) — same "only send what
+    // changed" rule either way.
+    function buildUpdatesFrom(keys, source) {
       const updates = {};
-      for (const key of ALL_EDITABLE_KEYS) {
+      for (const key of keys) {
         const el = document.getElementById(`f-${key}`);
         if (!el) continue;
         const newVal = el.value.trim();
-        const oldVal = String(currentBooking[key] ?? '').trim();
+        const oldVal = String(source[key] ?? '').trim();
         // Only send fields the client actually changed — an untouched empty
         // box must stay absent from the payload, not become an intentional blank.
         if (newVal === oldVal) continue;
@@ -656,6 +733,9 @@
       }
       return updates;
     }
+
+    function buildUpdates() { return buildUpdatesFrom(ALL_EDITABLE_KEYS, currentBooking); }
+    function buildCampUpdates() { return buildUpdatesFrom(CAMP_EDITABLE_KEYS, currentCamp); }
 
     // Checkout is minted when the button is pressed, never carried in the page.
     // A Stripe Checkout Session expires 24 hours after it is created — a stored
@@ -803,6 +883,85 @@
       }
     }
 
+    // The camp equivalent of saveBooking() — one save writes the shared
+    // fields to the camp AND every one of its days, in one transaction
+    // (finalise-camp.js). No 409/deposit_paid branch here: Phase 2 has no
+    // money at the camp level yet, that stays per-day until a later phase.
+    async function saveCamp() {
+      if (!currentCamp) return;
+      const btn = document.getElementById('save-btn');
+      const updates = buildCampUpdates();
+
+      // Same mandatory-address rule as a single booking's form (Joe,
+      // 2026-08-20) — the crew still needs somewhere to drive for every day.
+      const verdict = checkAddress();
+      if (!verdict.ok) {
+        const typed = (addressField()?.value || '').trim();
+        const insisted = verdict.reason !== 'missing' && addressOverride === typed;
+        if (!insisted) {
+          addressOverride = verdict.reason === 'missing' ? null : typed;
+          const el = addressField();
+          if (el) { el.focus(); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+          showNotice(verdict.reason === 'missing'
+            ? 'Please add the event address — we need it to get the crew to you.'
+            : verdict.message + ' Press Save again if that is really the address.');
+          return;
+        }
+      }
+
+      if (!Object.keys(updates).length) {
+        showNotice('Nothing changed to save.');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+
+      try {
+        const res = await fetch('/api/finalise-camp', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reference: currentCamp.reference,
+            email: document.getElementById('email').value.trim().toLowerCase(),
+            updates
+          })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          let msg = data.error || 'Failed to save. Please try again.';
+          if (data.rejected && data.rejected.length) msg += ` (could not save: ${data.rejected.join(', ')})`;
+          showNotice(msg, true);
+          return;
+        }
+
+        currentCamp = data.camp;
+
+        const notices = [];
+        if (data.emailChanged) {
+          // Same reason as saveBooking(): the email is half the auth key for
+          // the WHOLE camp — swap it in place so the client can keep saving
+          // without a reload, rather than the page 404ing on its own key.
+          document.getElementById('email').value = data.camp.client_email;
+          history.replaceState(null, '', `?ref=${encodeURIComponent(data.camp.reference)}&email=${encodeURIComponent(data.camp.client_email)}`);
+          notices.push(`Your email is now ${data.camp.client_email}. We've sent a new link there for next time.`);
+        }
+        if (data.rejected && data.rejected.length) {
+          notices.push(`We couldn't save: ${data.rejected.join(', ')}. Please check ${data.rejected.length > 1 ? 'those fields' : 'that field'} and try again.`);
+        }
+        if (notices.length) showNotice(notices.join(' '), !!(data.rejected && data.rejected.length));
+        else showNotice('Saved!');
+
+        displayCamp(currentCamp);
+      } catch (e) {
+        showNotice('Failed to save. Please try again.', true);
+      } finally {
+        const b = document.getElementById('save-btn');
+        if (b) { b.disabled = false; b.textContent = 'Save My Details'; }
+      }
+    }
+
     function resetForm() {
       document.getElementById('lookup-form').style.display = 'block';
       document.getElementById('result').style.display = 'none';
@@ -810,6 +969,7 @@
       document.getElementById('email').value = '';
       document.getElementById('page-notice').style.display = 'none';
       currentBooking = null;
+      currentCamp = null;
     }
 
     function formatDate(dateStr) {

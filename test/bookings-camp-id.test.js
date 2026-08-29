@@ -34,6 +34,8 @@ function fakeClient() {
       queries.push({ sql, params });
       if (/CREATE TABLE|ALTER TABLE/i.test(sql)) return { rows: [] };
       if (/^\s*SELECT 1 FROM bookings/i.test(sql)) return { rows: [] }; // reference is free
+      // camps.js's Phase 2 backfill — no camps in this fake, so nothing to do.
+      if (/^\s*SELECT id FROM camps WHERE reference/i.test(sql)) return { rows: [] };
       if (/^\s*INSERT INTO bookings/i.test(sql)) {
         return { rows: [{ id: 501, reference: 'FM-TESTCAMP', client_phone: '', deposit_amount: 0 }] };
       }
