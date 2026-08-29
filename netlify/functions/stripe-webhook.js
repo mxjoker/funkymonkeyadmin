@@ -109,7 +109,7 @@ function paymentEffect(booking, amountPaid, kind, meta) {
   const totalCents   = Math.round((parseFloat(b.total_price)  || 0) * 100);
   const mileageCents = Math.round((parseFloat(b.mileage_cost) || 0) * 100);
   const paidCents    = Math.round((Number(amountPaid) || 0) * 100);
-  const recomputed = Math.max(0, totalCents + mileageCents - paidCents) / 100;
+  const recomputed = round2(Math.max(0, totalCents + mileageCents - paidCents) / 100);
 
   // THE INVARIANT: a payment can never increase what is owed. This branch
   // recomputes balance_due from scratch (total + mileage - amountPaid),
@@ -120,14 +120,38 @@ function paymentEffect(booking, amountPaid, kind, meta) {
   // reachable window, not a hypothetical. Clamp to whichever is lower: the
   // recompute can only ever reduce what was owed, never raise it. Mirrors
   // the balance branch above, which computes relatively for the same reason.
-  const owed = Math.max(0, round2(Number(b.balance_due) || 0));
-  const wouldRaise = recomputed > owed + 0.005;
-  const balance_due = wouldRaise ? owed : round2(recomputed);
+  //
+  // The clamp needs a trustworthy ceiling to clamp TO. bookings.js defaults
+  // balance_due to 0 and create-bookings.js always computes it, so a
+  // present-but-non-numeric value is an already-corrupt row, not a normal
+  // case — `Number(b.balance_due) || 0` would silently read that as "$0
+  // owed", wiping whatever was actually owed AND (paired with the flag
+  // below) telling a human to refund a customer who may still owe the full
+  // recomputed amount. Missing entirely (undefined/null/'') is the ordinary
+  // "never priced yet" case and is fine to read as 0, same as before.
+  const balanceDueRaw = b.balance_due;
+  const balanceDueMissing = balanceDueRaw === undefined || balanceDueRaw === null || balanceDueRaw === '';
+  const balanceDueUnparseable = !balanceDueMissing && !Number.isFinite(Number(balanceDueRaw));
+
+  let balance_due, wouldRaise;
+  if (balanceDueUnparseable) {
+    // Can't apply an invariant against a number we don't have. Don't clamp
+    // in either direction — keep the recomputed figure so nothing is
+    // silently zeroed, and let the distinct log message below say why.
+    balance_due = recomputed;
+    wouldRaise = false;
+  } else {
+    const owed = Math.max(0, round2(Number(balanceDueRaw) || 0));
+    wouldRaise = recomputed > owed + 0.005;
+    balance_due = wouldRaise ? owed : recomputed;
+  }
 
   // Status may only move FORWARD out of PRE_PAYMENT, same rule as the
   // balance branch's promotion above. It must never overwrite 'completed' or
   // 'cancelled' — that is exactly how a settled booking got un-settled: the
-  // old code forced status to 'confirmed' unconditionally.
+  // old code forced status to 'confirmed' unconditionally. Independent of
+  // balance_due's parseability — a corrupt NUMERIC column says nothing
+  // about whether status should regress.
   const wasPrePayment = PRE_PAYMENT.includes(b.status);
   const status = wasPrePayment ? 'confirmed' : (b.status || 'confirmed');
   // Would the old, unconditional 'confirmed' have demoted a real status?
@@ -147,12 +171,18 @@ function paymentEffect(booking, amountPaid, kind, meta) {
   };
 
   // Flag, never auto-refund (owner's call): a webhook that issues refunds on
-  // an edge case nobody modelled is worse than the bug it fixes. Either
-  // clamp firing is itself the signal — the payment did not do what a
-  // deposit payment normally does, and a human needs to look at it.
+  // an edge case nobody modelled is worse than the bug it fixes. wouldRaise
+  // and wouldRegress are a genuine overpayment — the fix worked, and a human
+  // should look at refunding it. balanceDueUnparseable is a DIFFERENT
+  // problem — a corrupt row, not a confirmed overpayment — and must never
+  // be reported as one; the two need different actions from whoever reads
+  // the log (refund vs. fix the data), so they stay separate messages.
   if (wouldRaise || wouldRegress) {
     result.overpaymentFlagged = true;
     result.overpaymentAmount = Number(amountPaid) || 0;
+  }
+  if (balanceDueUnparseable) {
+    result.balanceDueUnparseable = true;
   }
 
   return result;
@@ -346,6 +376,14 @@ exports.handler = async (event) => {
           if (effect.overpaymentFlagged) {
             await logChange(c, b.id, 'Unexpected deposit payment on a settled booking',
               `$${effect.overpaymentAmount.toFixed(2)} — the balance was NOT reopened; this likely needs refunding.`);
+          }
+          // A DIFFERENT problem from the one above — a corrupt balance_due,
+          // not a confirmed overpayment. Keep it a separate message: this
+          // one needs someone to fix the row's data, not issue a refund.
+          if (effect.balanceDueUnparseable) {
+            await logChange(c, b.id, 'balance_due could not be verified',
+              `balance_due on this booking is not a number; the payment was applied ` +
+              `but the balance could not be verified — check the row.`);
           }
 
 

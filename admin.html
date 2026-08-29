@@ -494,6 +494,10 @@ input,select,textarea{font-family:inherit}
               <input type="checkbox" id="filter-zip-estimate" onchange="renderBookingsTable()" style="margin-right:6px"/>
               <span>Needs ZIP estimate</span>
             </label>
+            <label style="display:flex;align-items:center;cursor:pointer;user-select:none">
+              <input type="checkbox" id="filter-overpaid" onchange="renderBookingsTable()" style="margin-right:6px"/>
+              <span>Overpaid — needs refund review</span>
+            </label>
           </div>
         </div>
       </div>
@@ -1280,22 +1284,34 @@ function showBookingsFiltered(status) {
   set('filter-search', '');
   set('filter-date-range', 'all');
   set('filter-deposit', '');
-  for (const id of ['filter-hide-past', 'filter-hide-completed', 'filter-zip-estimate']) {
+  for (const id of ['filter-hide-past', 'filter-hide-completed', 'filter-zip-estimate', 'filter-overpaid']) {
     const el = document.getElementById(id);
     if (el) el.checked = false;
   }
   renderBookingsTable();
 }
 
-// Dashboard's overpayment-flag banner link. This should be a rare, near-
-// always-zero list (see overpaidBookings' comment), so it jumps straight to
-// the booking the same way openBooking is used everywhere else in this file,
-// rather than building a table filter for a flag most days has no matches.
+// Dashboard's overpayment-flag banner link. Was a single openBooking() jump
+// to flagged[0] — fine for one flagged booking, but a second one landing
+// before the first is cleared had no route to it anywhere in the UI (found
+// in review: overpayment_amount appeared only in the banner code, nowhere
+// filterable). Uses the Overpaid toggle instead, same pattern as
+// showZipEstimateBookings below, so the banner's count and what you land on
+// always agree, however many there are.
 function showOverpaidBookings() {
-  const flagged = overpaidBookings(allBookings);
-  if (!flagged.length) return;
   showPage('bookings');
-  openBooking(flagged[0].id);
+  const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; };
+  set('filter-status', '');
+  set('filter-search', '');
+  set('filter-date-range', 'all');
+  set('filter-deposit', '');
+  for (const id of ['filter-hide-past', 'filter-hide-completed', 'filter-zip-estimate']) {
+    const el = document.getElementById(id);
+    if (el) el.checked = false;
+  }
+  const overpaidEl = document.getElementById('filter-overpaid');
+  if (overpaidEl) overpaidEl.checked = true;
+  renderBookingsTable();
 }
 
 // Dashboard's "N upcoming gigs have no usable ZIP" banner link. Uses the
@@ -1308,7 +1324,7 @@ function showZipEstimateBookings() {
   set('filter-search', '');
   set('filter-date-range', 'all');
   set('filter-deposit', '');
-  for (const id of ['filter-hide-past', 'filter-hide-completed']) {
+  for (const id of ['filter-hide-past', 'filter-hide-completed', 'filter-overpaid']) {
     const el = document.getElementById(id);
     if (el) el.checked = false;
   }
@@ -2038,6 +2054,7 @@ function renderBookingsTable() {
   const hidePast = document.getElementById('filter-hide-past').checked;
   const hideCompleted = document.getElementById('filter-hide-completed').checked;
   const zipEstimateOnly = document.getElementById('filter-zip-estimate').checked;
+  const overpaidOnly = document.getElementById('filter-overpaid').checked;
 
   const today = new Date().toISOString().split('T')[0];
   const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
@@ -2089,6 +2106,9 @@ function renderBookingsTable() {
   }
   if (zipEstimateOnly) {
     list = list.filter(b => needsZipEstimate(b, calDriveOverrideBookings.has(b.id), today));
+  }
+  if (overpaidOnly) {
+    list = overpaidBookings(list);
   }
 
   sortBookings(list, bookingSort);

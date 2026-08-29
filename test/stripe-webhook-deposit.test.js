@@ -84,3 +84,53 @@ test('a cancelled booking is never revived by a stray deposit payment', () => {
   assert.strictEqual(effect.status, 'cancelled');
   assert.strictEqual(effect.overpaymentFlagged, true);
 });
+
+// ── Round 1 review findings ─────────────────────────────────────────────────
+// A corrupt (present but non-numeric) balance_due must not be silently read
+// as "$0 owed" — that both wipes a real debt AND, if it also set
+// overpaymentFlagged, would tell a human to refund a customer who may still
+// owe the full recomputed amount. Neither may happen: no clamp (since there
+// is no trustworthy ceiling to clamp to) and no overpayment claim — only a
+// distinct "could not verify" signal.
+test('a non-numeric balance_due is not treated as zero owed, and is not clamped', () => {
+  const corrupt = { id: 10, status: 'accepted', balance_due: 'not-a-number', total_price: 500, mileage_cost: 0 };
+  const effect = paymentEffect(corrupt, 100, 'deposit', null);
+  // The real recomputed remaining balance (500 - 100 = 400), not 0.
+  assert.strictEqual(effect.balance_due, 400);
+});
+
+test('a non-numeric balance_due is flagged as a DATA PROBLEM, never as an overpayment', () => {
+  // status: 'confirmed' (not PRE_PAYMENT, but already the target status) so
+  // this isolates the balance_due corruption from the separate
+  // status-regression signal tested just below.
+  const corrupt = { id: 11, status: 'confirmed', balance_due: 'garbage', total_price: 500, mileage_cost: 0 };
+  const effect = paymentEffect(corrupt, 100, 'deposit', null);
+  assert.strictEqual(effect.balanceDueUnparseable, true);
+  assert.strictEqual(effect.overpaymentFlagged, undefined,
+    'a corrupt row must never be reported as a confirmed overpayment — that tells a human to refund someone who may still owe money');
+});
+
+test('a non-numeric balance_due still gets the status-regression protection, independently', () => {
+  // balance_due's corruption says nothing about whether status should move —
+  // a completed booking must still not be demoted, and THAT is still a
+  // genuine overpayment signal (status regression), separate from the data
+  // problem on balance_due.
+  const corrupt = { id: 12, status: 'completed', balance_due: NaN, total_price: 500, mileage_cost: 0 };
+  const effect = paymentEffect(corrupt, 100, 'deposit', null);
+  assert.strictEqual(effect.status, 'completed');
+  assert.strictEqual(effect.balanceDueUnparseable, true);
+  assert.strictEqual(effect.overpaymentFlagged, true, 'status regression is still a real overpayment signal');
+});
+
+test('a missing (never-priced) balance_due is NOT treated as corrupt — same as before', () => {
+  // Missing is not corrupt: bookings.js's column DEFAULTs to 0 and
+  // create-bookings.js always sets it, so a real row is never actually
+  // undefined — this reads it as 0 owed, same as the DB default would, and
+  // therefore clamps like any other already-settled ($0 owed) booking.
+  for (const missing of [undefined, null, '']) {
+    const fresh = { id: 13, status: 'quoted', balance_due: missing, total_price: 500, mileage_cost: 0 };
+    const effect = paymentEffect(fresh, 100, 'deposit', null);
+    assert.strictEqual(effect.balanceDueUnparseable, undefined, `missing=${JSON.stringify(missing)} wrongly flagged as corrupt`);
+    assert.strictEqual(effect.balance_due, 0);
+  }
+});
