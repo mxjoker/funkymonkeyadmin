@@ -113,6 +113,13 @@
   to = "/.netlify/functions/revenue-targets"
   status = 200
 
+# More specific than /api/camps/:id, so it must come first — :id matches a
+# single segment and would otherwise never see the close-out suffix.
+[[redirects]]
+  from = "/api/camps/:id/close-out"
+  to = "/.netlify/functions/camps/:id/close-out"
+  status = 200
+
 [[redirects]]
   from = "/api/camps/:id"
   to = "/.netlify/functions/camps/:id"
