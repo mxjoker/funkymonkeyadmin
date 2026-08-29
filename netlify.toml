@@ -114,6 +114,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/camps/:id"
+  to = "/.netlify/functions/camps/:id"
+  status = 200
+
+[[redirects]]
+  from = "/api/camps"
+  to = "/.netlify/functions/camps"
+  status = 200
+
+[[redirects]]
   from = "/api/accept-quote"
   to = "/.netlify/functions/accept-quote"
   status = 200

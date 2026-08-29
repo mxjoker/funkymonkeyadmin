@@ -279,6 +279,11 @@ input,select,textarea{font-family:inherit}
 @media(max-width:768px){
   input,select,textarea{font-size:16px!important}
 }
+
+/* Camp day rows (Phase 1) — hidden by default under their camp's summary
+   row, revealed by toggling .show. See toggleCampRows/campRow. */
+.camp-day-row{display:none}
+.camp-day-row.show{display:table-row}
 </style>
 </head>
 <body>
@@ -349,6 +354,7 @@ input,select,textarea{font-family:inherit}
         <div style="display:flex;align-items:center;gap:12px">
           <span class="text-muted" id="dash-date"></span>
           <button class="btn btn-primary btn-sm" onclick="openBooking(null)" style="white-space:nowrap">+ Booking</button>
+          <button class="btn btn-outline btn-sm" onclick="openCampModal()" style="white-space:nowrap">+ Camp</button>
         </div>
       </div>
 
@@ -455,6 +461,7 @@ input,select,textarea{font-family:inherit}
           <!-- Row 1: Primary Filters -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
             <button class="btn btn-primary" onclick="openBooking(null)" style="white-space:nowrap">+ Booking</button>
+            <button class="btn btn-outline" onclick="openCampModal()" style="white-space:nowrap">+ Camp</button>
             <input type="text" id="filter-search" placeholder="🔍 Search name, ref, service..." oninput="renderBookingsTable()" style="flex:1;min-width:200px;max-width:300px"/>
             
             <select id="filter-status" onchange="renderBookingsTable()" style="min-width:140px">
@@ -520,6 +527,7 @@ input,select,textarea{font-family:inherit}
           <span class="cal-month-label" id="cal-month-label"></span>
           <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Next →</button>
           <button class="btn btn-primary btn-sm" onclick="openBooking(null)" style="white-space:nowrap">+ Booking</button>
+          <button class="btn btn-outline btn-sm" onclick="openCampModal()" style="white-space:nowrap">+ Camp</button>
         </div>
       </div>
       <div class="card" style="margin-bottom:16px">
@@ -957,6 +965,8 @@ function commsPreferenceFrom(emailId, smsId) {
 // STATE
 // ══════════════════════════════════════════════════
 let allBookings = [];
+let allCamps    = []; // { id, label, client_name, ..., day_count, start_date, end_date } — see camps.js
+let pendingCampSeed = null; // set by openBooking(null, seed) for a camp day; merged into the POST by saveBookingEdits, then cleared
 let allStaff    = [];
 let calStaffMap = {}; // booking_id → [{initials, color}]
 let calStaffMapError = null; // non-null when the fetch failed, so the calendar can say so
@@ -1156,9 +1166,14 @@ async function init() {
   //
   // The explicit renderCalendar() after the await is the actual fix — the
   // parallel load just stops it costing a second round trip.
-  await Promise.all([loadBookings(), loadStaffList(), loadServiceSlots(), loadRolePay(), loadCalStaffMap(), loadRevenueTargets()]);
+  await Promise.all([loadBookings(), loadCamps(), loadStaffList(), loadServiceSlots(), loadRolePay(), loadCalStaffMap(), loadRevenueTargets()]);
   renderCalendar();
   renderDashboard();
+  // loadCamps() races loadBookings() above — whichever finishes first already
+  // triggered a render via refreshAllViews() with allCamps possibly still
+  // empty. One more render here, now that both have definitely landed, is
+  // what actually groups a camp's days on first paint.
+  renderBookingsTable();
   showPage('dashboard');
   loadOtto(); // populates the nav badge so Otto's open items are visible from any page
 }
@@ -1263,6 +1278,18 @@ async function loadBookings() {
     allBookings = await res.json();
     refreshAllViews();
   } catch(e) { console.error('loadBookings:', e); }
+}
+
+// Camps — Phase 1. Empty on any environment with no camps yet, which is what
+// keeps the bookings list byte-identical to today: groupBookingsByCamp treats
+// an empty allCamps exactly like "no camps exist".
+async function loadCamps() {
+  try {
+    const res = await apiFetch('/api/camps');
+    if (!res.ok) return;
+    const data = await res.json();
+    allCamps = data.camps || [];
+  } catch (e) { console.error('loadCamps:', e); }
 }
 
 function refreshAllViews() {
@@ -1775,6 +1802,75 @@ function sortBookings(list, { key, dir }) {
   });
 }
 
+// "14–18 Jul" / "14 Jul" / "3 Jul–2 Aug" from a set of ISO event_date
+// strings. Deliberately not fmtDate/Date-based — this runs inside the pure
+// vm sandbox tests use, and a plain string split needs no timezone at all.
+function campDateRangeLabel(days) {
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const dates = (days || []).map(d => d && d.event_date).filter(Boolean).map(s => String(s).slice(0, 10)).sort();
+  if (!dates.length) return 'no dates';
+  const parse = (iso) => { const [y, m, d] = iso.split('-').map(Number); return { d, m: MONTHS[m - 1], y }; };
+  const a = parse(dates[0]), b = parse(dates[dates.length - 1]);
+  if (dates[0] === dates[dates.length - 1]) return `${a.d} ${a.m}`;
+  if (a.m === b.m && a.y === b.y) return `${a.d}–${b.d} ${a.m}`;
+  return `${a.d} ${a.m}–${b.d} ${b.m}`;
+}
+
+// Turns a flat, already-filtered booking list into display rows: an ordinary
+// booking (camp_id null, or pointing at a camp we don't know about) passes
+// through completely untouched — this is what keeps a camp-free bookings
+// list byte-identical to today. A booking whose camp_id matches a known camp
+// is pulled out and grouped into one row per camp instead.
+//
+// Filtering happens BEFORE this runs, on the flat list, exactly as it always
+// has — so a filter that matches only some of a camp's days groups only
+// those days (the camp is still shown, with just the matching days; a camp
+// with zero surviving days simply never gets a group). Nothing here decides
+// what a camp IS — that's explicit, at creation (camps.js) — this only
+// decides how already-grouped days are displayed.
+//
+// Every sortable column reads off the group's earliest day (after sorting
+// its own days ascending) — so sortBookings, completely unmodified, sorts a
+// camp exactly where its first day would have sorted alone. total_price is
+// the one exception: summed across the group, because "camp total" is a
+// more useful number in a collapsed row than "first day's price" — this is
+// a display sum of numbers the server already computed, not new billing
+// logic (see the spec's no-per-kid-rate-field rule).
+function groupBookingsByCamp(bookings, camps) {
+  const campsById = new Map((camps || []).filter(c => c && c.id != null).map(c => [c.id, c]));
+  const byCamp = new Map();
+  const rows = [];
+  for (const b of (bookings || [])) {
+    const cid = b && b.camp_id;
+    if (cid != null && campsById.has(cid)) {
+      if (!byCamp.has(cid)) byCamp.set(cid, []);
+      byCamp.get(cid).push(b);
+    } else {
+      rows.push(b);
+    }
+  }
+  for (const [cid, days] of byCamp) {
+    const camp = campsById.get(cid);
+    const sorted = [...days].sort((a, b) => (a.event_date || '').localeCompare(b.event_date || ''));
+    const first = sorted[0];
+    rows.push({
+      isCamp: true,
+      camp_id: cid,
+      label: camp.label,
+      days: sorted,
+      dateRangeLabel: campDateRangeLabel(sorted),
+      reference: first.reference || '',
+      client_name: first.client_name || '',
+      service_name: first.service_name || '',
+      event_date: first.event_date || '',
+      created_at: first.created_at || '',
+      total_price: sorted.reduce((s, d) => s + (Number(d.total_price) || 0), 0),
+      status: first.status || '',
+    });
+  }
+  return rows;
+}
+
 // What the deposit button will actually charge. `deposit_amount` is
 // authoritative and 0 is a legitimate value: schools and libraries are
 // deliberately no-deposit, and booking.js:349 already refuses to mint a link
@@ -2130,11 +2226,17 @@ function renderBookingsTable() {
   }
   
   if (search) {
-    list = list.filter(b =>
-      (b.client_name||'').toLowerCase().includes(search) ||
-      (b.reference||'').toLowerCase().includes(search) ||
-      (b.service_name||'').toLowerCase().includes(search)
-    );
+    // A camp's label lives only on the post-grouping synthetic row (built
+    // below), but users search by what they can see on that row — so a
+    // day matches search when ITS OWN camp's label does, even though the
+    // label itself isn't a column on the booking.
+    list = list.filter(b => {
+      const campLabel = b.camp_id ? (allCamps.find(c => c.id === b.camp_id) || {}).label : '';
+      return (b.client_name||'').toLowerCase().includes(search) ||
+        (b.reference||'').toLowerCase().includes(search) ||
+        (b.service_name||'').toLowerCase().includes(search) ||
+        (campLabel||'').toLowerCase().includes(search);
+    });
   }
   
   // Date range filter
@@ -2169,17 +2271,24 @@ function renderBookingsTable() {
     list = overpaidBookings(list);
   }
 
+  // Grouping happens AFTER every filter above, on whichever days survived —
+  // so a filter matching only some of a camp's days groups just those days
+  // (see groupBookingsByCamp's comment in the PURE HELPERS block). With no
+  // camps in allCamps (nothing created yet, or none of them matched), this
+  // returns `list` completely untouched.
+  list = groupBookingsByCamp(list, allCamps);
+
   sortBookings(list, bookingSort);
 
   // Render results
   renderBookingsHead();
   document.getElementById('bookings-tbody').innerHTML = list.length
-    ? list.map(b => bookingRow(b, true)).join('')
+    ? list.map(b => b.isCamp ? campRow(b) : bookingRow(b, true)).join('')
     : `<tr><td colspan="8" class="table-empty">No bookings match your filters</td></tr>`;
 }
 
-function bookingRow(b, showViewBtn = false) {
-  return `<tr style="cursor:pointer" onclick="openBooking('${b.id}')">
+function bookingRow(b, showViewBtn = false, extraAttrs = '') {
+  return `<tr style="cursor:pointer"${extraAttrs ? ' ' + extraAttrs : ''} onclick="openBooking('${b.id}')">
     <td><code style="font-size:.75rem;color:#7c3aed">${b.reference||'—'}</code></td>
     <td><div style="font-weight:600">${esc(b.client_name||'')}</div><div class="text-muted">${esc(b.client_email||'')}</div></td>
     <td>${esc(b.service_name||'—')}${b.is_custom_quote?'<span class="badge badge-custom" style="margin-left:5px">Quote</span>':''}</td>
@@ -2189,6 +2298,27 @@ function bookingRow(b, showViewBtn = false) {
     <td><span class="badge badge-${b.status||'review'}">${b.status||'review'}</span></td>
     ${showViewBtn?`<td><button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openBooking('${b.id}')">View</button></td>`:''}
   </tr>`;
+}
+
+// One collapsed row per camp — label, day count, date range. Its days are
+// rendered right below it with plain bookingRow() (so they stay real,
+// individually-openable bookings, unchanged from any other row) but start
+// hidden via the .camp-day-row CSS rule; toggleCampRows reveals them.
+function campRow(row) {
+  return `<tr class="camp-summary-row" style="cursor:pointer;background:#f5f3ff" onclick="toggleCampRows(${row.camp_id})">
+    <td colspan="8">
+      <strong>🏕 ${esc(row.label)}</strong>
+      <span class="text-muted"> · ${row.days.length} day${row.days.length===1?'':'s'} · ${esc(row.dateRangeLabel)}</span>
+      <span class="text-muted" style="float:right">▾ tap to expand</span>
+    </td>
+  </tr>${row.days.map(b => bookingRow(b, true, `class="camp-day-row" data-camp-days="${row.camp_id}"`)).join('')}`;
+}
+
+// Reveals/hides one camp's day rows, injected by campRow just below its
+// summary row. A CSS rule (.camp-day-row{display:none}) keeps them collapsed
+// by default; toggling the .show class is all this does.
+function toggleCampRows(campId) {
+  document.querySelectorAll(`tr[data-camp-days="${campId}"]`).forEach(tr => tr.classList.toggle('show'));
 }
 
 function upcomingGigRow(b) {
@@ -2567,8 +2697,30 @@ async function refreshConflictPanel(bookingId) {
 
 // id === null opens an empty modal for a new booking taken over the phone.
 // Saving it POSTs a draft; every other path is identical to editing.
+//
+// `seed` from addCampDay() carries camp_id plus the camp's client/venue/
+// service fields — pre-filled into the SAME .bk-edit inputs below, so they
+// read as already-saved (value === data-orig) and saveBookingEdits' dirty
+// diff would otherwise never send them for a record that doesn't exist yet.
+// pendingCampSeed is how camp_id and the plain client/venue fields still
+// reach the POST — see saveBookingEdits. service_id/name/price are
+// deliberately left out of it: they only exist in `seed` to give
+// legacyToItems(b) something to synthesize into the Quote Breakdown's first
+// item row below, and that row (via readItemRows) is what actually carries
+// the service into payload.items — saveBookingEdits explicitly deletes
+// payload.service_name/service_price because items are authoritative, and
+// pendingCampSeed must not put them back.
 function openBooking(id, seed) {
   const isNew = id === null || id === undefined;
+  pendingCampSeed = (isNew && seed && seed.camp_id) ? {
+    camp_id: seed.camp_id,
+    client_name: seed.client_name,
+    client_email: seed.client_email,
+    client_phone: seed.client_phone,
+    organisation_name: seed.organisation_name,
+    event_location: seed.event_location,
+    event_zip: seed.event_zip,
+  } : null;
   const b = isNew
     ? { id: 'new', status: 'draft', addons: [], ...(seed || {}) }
     : allBookings.find(x => String(x.id) === String(id));
@@ -2978,6 +3130,167 @@ function openBooking(id, seed) {
 
 function closeModal() {
   document.getElementById('booking-modal').classList.remove('open');
+}
+
+// ══════════════════════════════════════════════════
+// CAMPS (Phase 1) — name it, pick client/venue/service once, then add days.
+// Each day is an ordinary booking (see addCampDay -> openBooking(null, seed)
+// and saveBookingEdits' pendingCampSeed merge) — this section only ever
+// creates/edits/deletes the camp row itself, via /api/camps.
+// ══════════════════════════════════════════════════
+
+// Reuses the same #booking-modal overlay every other admin modal in this
+// file does (staff, payroll, …) — just a different modal-body. Not .bk-edit:
+// that class carries the booking-editor's dirty-diff semantics (data-f,
+// data-orig — see saveBookingEdits), which these plain camp-form fields have
+// no part in. FIELD_STYLE just borrows its look.
+const CAMP_FIELD_STYLE = 'width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:.875rem';
+function campField(label, id, value, type = 'text') {
+  return `<div class="detail-field"><label>${label}</label>
+    <input id="camp-f-${id}" type="${type}" value="${esc(value || '')}" style="${CAMP_FIELD_STYLE}"></div>`;
+}
+
+function campServiceOptionsHtml(selectedId) {
+  return `<option value="">— choose —</option>` +
+    (catServices || []).map(s =>
+      `<option value="${esc(s.service_id)}"${s.service_id === selectedId ? ' selected' : ''}>${esc(s.name)}</option>`
+    ).join('');
+}
+
+// camp === undefined/null creates a new camp; otherwise this is the
+// edit/add-days view for an existing one.
+function openCampModal(camp) {
+  const isNew = !camp;
+  document.getElementById('modal-title').textContent = isNew ? 'New Camp' : `Camp — ${camp.label}`;
+  document.getElementById('modal-body').innerHTML = `
+    <div class="detail-grid">
+      ${campField('Camp Name', 'label', camp && camp.label)}
+      ${campField('Client', 'client_name', camp && camp.client_name)}
+      ${campField('Organisation', 'organisation_name', camp && camp.organisation_name)}
+      ${campField('Phone', 'client_phone', camp && camp.client_phone, 'tel')}
+      ${campField('Email', 'client_email', camp && camp.client_email, 'email')}
+      ${campField('Venue / Address', 'event_location', camp && camp.event_location)}
+      ${campField('ZIP', 'event_zip', camp && camp.event_zip)}
+    </div>
+    <div class="detail-field" style="margin:10px 0">
+      <label>Service</label>
+      <select id="camp-f-service_id" style="${CAMP_FIELD_STYLE};max-width:320px">${campServiceOptionsHtml(camp && camp.service_id)}</select>
+    </div>
+    <div class="detail-field" style="margin:10px 0">
+      <label>Notes</label>
+      <textarea id="camp-f-notes" rows="2" style="${CAMP_FIELD_STYLE}">${esc((camp && camp.notes) || '')}</textarea>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin:6px 0 18px">
+      <button class="btn btn-primary btn-sm" onclick="saveCamp(${isNew ? 'null' : camp.id})">${isNew ? 'Create Camp' : 'Save'}</button>
+    </div>
+    ${isNew ? '' : campDaysSectionHtml(camp)}
+  `;
+  // Catalogue data only loads when the admin visits the Catalogue tab or
+  // opens a booking (see ensureCatalogueLoaded's comment) — a camp opened
+  // first thing in a session would otherwise offer an empty Service picker.
+  if (!catServices.length) {
+    loadCatalogue().then(() => {
+      const sel = document.getElementById('camp-f-service_id');
+      if (sel) sel.innerHTML = campServiceOptionsHtml(camp && camp.service_id);
+    });
+  }
+  document.getElementById('booking-modal').classList.add('open');
+}
+
+function campDaysSectionHtml(camp) {
+  const days = allBookings.filter(b => b.camp_id === camp.id)
+    .sort((a, b) => (a.event_date || '').localeCompare(b.event_date || ''));
+  return `
+    <div style="border-top:1px solid #e5e7eb;padding-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:.875rem">Days (${days.length})</strong>
+        <button class="btn btn-outline btn-sm" onclick="addCampDay(${camp.id})">+ Day</button>
+      </div>
+      ${days.length ? days.map(b => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f3f4f6;cursor:pointer"
+             onclick="closeModal();openBooking('${b.id}')">
+          <span>${fmtDate(b.event_date)}${b.event_time ? ' · ' + fmtTime(b.event_time) : ''}</span>
+          <span class="badge badge-${b.status||'review'}">${b.status||'review'}</span>
+        </div>`).join('') : '<div class="text-muted" style="font-size:.85rem">No days yet.</div>'}
+      <button class="btn btn-outline btn-sm" style="margin-top:12px" onclick="deleteCamp(${camp.id})">Delete Camp (its days stay as ordinary bookings)</button>
+    </div>`;
+}
+
+// Each day is created through the exact same path as any admin-entered
+// booking — openBooking(null, seed) + Save Details — just pre-filled from
+// the camp. This is the "reuse the existing booking-creation path" the spec
+// calls for: nothing new is written here for actually creating the day.
+function addCampDay(campId) {
+  const camp = allCamps.find(c => c.id === campId);
+  if (!camp) return;
+  const svc = (catServices || []).find(s => s.service_id === camp.service_id);
+  closeModal();
+  openBooking(null, {
+    camp_id: camp.id,
+    client_name: camp.client_name,
+    client_email: camp.client_email,
+    client_phone: camp.client_phone,
+    organisation_name: camp.organisation_name,
+    event_location: camp.event_location,
+    event_zip: camp.event_zip,
+    service_id: camp.service_id || '',
+    service_name: svc ? svc.name : '',
+    service_price: svc ? Number(svc.price) : 0,
+  });
+}
+
+async function saveCamp(id) {
+  const val = (f) => (document.getElementById('camp-f-' + f) || {}).value || '';
+  const body = {
+    label: val('label').trim(),
+    client_name: val('client_name').trim(),
+    client_email: val('client_email').trim(),
+    client_phone: val('client_phone').trim(),
+    organisation_name: val('organisation_name').trim(),
+    event_location: val('event_location').trim(),
+    event_zip: val('event_zip').trim(),
+    service_id: val('service_id'),
+    notes: val('notes').trim(),
+  };
+  if (!body.label) { alert('Camp name is required.'); return; }
+  try {
+    const res = id
+      ? await apiFetch('/api/camps/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      : await apiFetch('/api/camps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Request failed');
+    }
+    const data = await res.json();
+    const camp = data.camp;
+    const i = allCamps.findIndex(c => c.id === camp.id);
+    if (i > -1) allCamps[i] = camp; else allCamps.unshift(camp);
+    renderBookingsTable();
+    // Re-render in edit mode — a brand new camp now shows its (empty)
+    // days section and "+ Day" button, without a second click.
+    openCampModal(camp);
+  } catch (e) {
+    alert('Failed to save camp: ' + e.message);
+  }
+}
+
+async function deleteCamp(campId) {
+  if (!confirm('Delete this camp? Its days stay as ordinary bookings — nothing is deleted but the camp itself.')) return;
+  try {
+    const res = await apiFetch('/api/camps/' + campId, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Request failed');
+    }
+    allCamps = allCamps.filter(c => c.id !== campId);
+    // ON DELETE SET NULL already did this server-side; mirror it locally so
+    // the list regroups correctly before the next full reload.
+    allBookings.forEach(b => { if (b.camp_id === campId) b.camp_id = null; });
+    closeModal();
+    renderBookingsTable();
+  } catch (e) {
+    alert('Failed to delete camp: ' + e.message);
+  }
 }
 
 // ══════════════════════════════════════════════════
@@ -3821,6 +4134,12 @@ async function saveBookingEdits(id) {
   try {
     if (id === 'new') {
       payload.status = 'draft';
+      // A camp day's client/venue/service fields came in pre-filled (see
+      // openBooking's comment) and so never showed up as "changed" above —
+      // force them into the payload here, then forget them: they're only
+      // ever relevant to the one save this modal makes.
+      if (pendingCampSeed) Object.assign(payload, pendingCampSeed);
+      pendingCampSeed = null;
       const res = await apiFetch('/api/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4587,8 +4906,13 @@ function renderOneMonth(year, month, gridId, labelId) {
       const staffBadges = (calStaffMap[b.id] || []).map(s =>
         `<span title="${esc(s.initials)}" style="flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:${s.color};color:#fff;font-size:9px;font-weight:800;border:1.5px solid #fff;margin-left:2px">${esc(s.initials)}</span>`
       ).join('');
-      return `<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${esc(b.client_name)} — ${esc(b.service_name)}">
-        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.service_name||b.client_name)}</span>
+      // A camp day stays its own tile — it's a day actually worked, same as
+      // any other — it just also carries the camp's name, so "which camp is
+      // this" doesn't require opening the booking.
+      const camp = b.camp_id ? allCamps.find(c => c.id === b.camp_id) : null;
+      const label = camp ? `🏕 ${camp.label}` : (b.service_name || b.client_name);
+      return `<div class="cal-evt ${b.status||''}" onclick="openBooking('${b.id}')" title="${esc(b.client_name)} — ${esc(b.service_name)}${camp ? ' — ' + esc(camp.label) : ''}">
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</span>
         ${staffBadges}
       </div>`;
     }).join('');
