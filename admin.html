@@ -401,6 +401,7 @@ input,select,textarea{font-family:inherit}
           <div class="s-label">Revenue This Month</div>
           <div class="s-val" id="st-mtd-rev">—</div>
           <div class="s-sub" id="st-mtd-rev-sub"></div>
+          <div class="s-sub" id="st-mtd-rev-target" style="display:none"></div>
         </div>
         <div class="stat-card blue">
           <div class="s-label">Avg Price / Event</div>
@@ -666,6 +667,26 @@ input,select,textarea{font-family:inherit}
         </div>
         <p class="text-muted" style="padding:12px 20px 0;margin:0">Personal calendars checked hourly for clashes with gigs. The address is a credential — once saved it is never shown again, only replaced.</p>
         <div id="calendar-feeds-body"><div style="text-align:center;padding:32px;color:#9ca3af">Loading…</div></div>
+      </div>
+
+      <div class="card" style="margin-top:24px">
+        <div class="card-hdr">
+          <h2>🎯 Revenue Targets</h2>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="rt-year" class="form-control" style="width:auto;padding:6px 10px" onchange="loadRevenueTargetsUI()"></select>
+            <button class="btn btn-primary btn-sm" onclick="saveRevenueTargets()">Save</button>
+          </div>
+        </div>
+        <p class="text-muted" style="padding:12px 20px 0;margin:0">A monthly gross goal — the same total_price the Revenue This Month card sums. The dashboard shows progress once a month has a target; a month left blank shows nothing.</p>
+        <div style="padding:16px 20px">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px">
+            <label class="form-label" style="margin:0">Spread annual total evenly</label>
+            <input type="number" id="rt-annual" placeholder="e.g. 50000" min="0" style="width:140px;padding:6px 10px;border:1.5px solid #e5e7eb;border-radius:7px">
+            <button class="btn btn-outline btn-sm" onclick="spreadRevenueTargets()">Spread evenly</button>
+          </div>
+          <div id="rt-months" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"></div>
+          <div style="margin-top:14px;font-weight:700">Annual total: <span id="rt-total">$0</span></div>
+        </div>
       </div>
     </div>
 
@@ -1135,11 +1156,25 @@ async function init() {
   //
   // The explicit renderCalendar() after the await is the actual fix — the
   // parallel load just stops it costing a second round trip.
-  await Promise.all([loadBookings(), loadStaffList(), loadServiceSlots(), loadRolePay(), loadCalStaffMap()]);
+  await Promise.all([loadBookings(), loadStaffList(), loadServiceSlots(), loadRolePay(), loadCalStaffMap(), loadRevenueTargets()]);
   renderCalendar();
   renderDashboard();
   showPage('dashboard');
   loadOtto(); // populates the nav badge so Otto's open items are visible from any page
+}
+
+// Current year's targets, keyed by month (1-12) -> amount. Read by
+// renderDashboard's Revenue This Month card; see targetProgress in the
+// PURE HELPERS block for the percentage math.
+let revenueTargets = {};
+
+async function loadRevenueTargets() {
+  try {
+    const res = await apiFetch('/api/revenue-targets?year=' + new Date().getFullYear());
+    const data = await res.json();
+    revenueTargets = {};
+    (data.targets || []).forEach(t => { revenueTargets[t.month] = Number(t.amount) || 0; });
+  } catch (e) { console.error('loadRevenueTargets:', e); }
 }
 
 async function loadStaffList() {
@@ -1263,7 +1298,7 @@ function showPage(name) {
   if (name === 'staff') { renderStaff(); }
   if (name === 'leads') loadLeads();
   if (name === 'otto') loadOtto();
-  if (name === 'catalogue') { loadCatalogue(); loadCalendarFeeds(); }
+  if (name === 'catalogue') { loadCatalogue(); loadCalendarFeeds(); loadRevenueTargetsUI(); }
   if (name === 'automations') loadAutomations();
   if (name === 'payroll') loadPayroll();
   if (name === 'dashboard') checkStaleWarnings();
@@ -1539,6 +1574,18 @@ function renderDashboard() {
   const ytdStr = 'YTD: $' + ytdRev.toLocaleString('en-US',{maximumFractionDigits:0});
   const mRevChange = pctChange(mtdRev, priorRev);
   document.getElementById('st-mtd-rev-sub').textContent = mRevChange ? `${ytdStr} · ${mRevChange}` : ytdStr;
+
+  const monthTarget = revenueTargets[thisMonth + 1] || 0;
+  const pct = targetProgress(mtdRev, monthTarget);
+  const targetEl = document.getElementById('st-mtd-rev-target');
+  if (pct !== null) {
+    const monthName = now.toLocaleDateString('en-US', { month: 'long' });
+    targetEl.textContent = `${pct}% of ${monthName} target ($${monthTarget.toLocaleString('en-US',{maximumFractionDigits:0})})`;
+    targetEl.style.display = '';
+  } else {
+    targetEl.textContent = '';
+    targetEl.style.display = 'none';
+  }
 
   document.getElementById('st-avg').textContent = avg > 0 ? '$' + avg.toLocaleString('en-US',{maximumFractionDigits:0}) : '—';
 
@@ -2023,6 +2070,17 @@ function driveEstimateNote(driveEstimated) {
   return driveEstimated
     ? ' <span style="font-weight:400;font-style:italic;opacity:.8">(estimated — no ZIP)</span>'
     : '';
+}
+
+// Percent of the current month's revenue target that mtdRev has reached.
+// Returns null when there is no target (null/0/undefined) — the dashboard
+// renders nothing in that case rather than nudging the owner to set one; an
+// empty state is correct here, not a prompt. Not clamped at 100 — beating a
+// goal is information the owner wants to see, not an overflow to hide.
+function targetProgress(mtdRev, target) {
+  const t = Number(target) || 0;
+  if (t <= 0) return null;
+  return Math.round((Number(mtdRev) || 0) / t * 100);
 }
 
 // ══ END PURE HELPERS ══
@@ -6654,6 +6712,82 @@ async function refreshCalendarFeeds() {
     renderCalendarFeeds();
   } catch (e) { alert('Refresh failed: ' + e.message); }
   btn.disabled = false; btn.textContent = '↻ Refresh Now';
+}
+
+// ══════════════════════════════════════════════════
+// REVENUE TARGETS (Catalogue page settings card)
+// ══════════════════════════════════════════════════
+let revenueTargetsUIYear = new Date().getFullYear();
+
+async function loadRevenueTargetsUI() {
+  const sel = document.getElementById('rt-year');
+  if (!sel.options.length) {
+    const cur = new Date().getFullYear();
+    sel.innerHTML = [cur - 1, cur, cur + 1]
+      .map(y => `<option value="${y}">${y}</option>`).join('');
+    sel.value = revenueTargetsUIYear;
+  }
+  revenueTargetsUIYear = Number(sel.value) || revenueTargetsUIYear;
+
+  const body = document.getElementById('rt-months');
+  body.innerHTML = '<div style="grid-column:1/-1;color:#9ca3af">Loading…</div>';
+  try {
+    const res = await apiFetch('/api/revenue-targets?year=' + revenueTargetsUIYear);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    renderRevenueTargetsUI(data.targets || []);
+  } catch (e) {
+    body.innerHTML = `<p style="grid-column:1/-1;color:#dc2626">Could not load targets: ${esc(e.message)}</p>`;
+  }
+}
+
+function renderRevenueTargetsUI(targets) {
+  const body = document.getElementById('rt-months');
+  body.innerHTML = targets.map(t => {
+    const name = new Date(2000, t.month - 1, 1).toLocaleDateString('en-US', { month: 'long' });
+    return `<div>
+      <label class="form-label" style="font-size:.75rem">${name}</label>
+      <input type="number" class="rt-month-input" data-month="${t.month}" value="${t.amount || ''}" min="0" step="1"
+        placeholder="—" style="width:100%;padding:6px 10px;border:1.5px solid #e5e7eb;border-radius:7px"
+        oninput="updateRevenueTargetsTotal()">
+    </div>`;
+  }).join('');
+  updateRevenueTargetsTotal();
+}
+
+function updateRevenueTargetsTotal() {
+  const total = [...document.querySelectorAll('.rt-month-input')]
+    .reduce((s, el) => s + (Number(el.value) || 0), 0);
+  document.getElementById('rt-total').textContent = '$' + total.toLocaleString('en-US', { maximumFractionDigits: 0 });
+}
+
+// Starting point, not a lock — a flat 1/12 split per month the owner can then
+// hand-adjust for a slow January or a busy prom season.
+function spreadRevenueTargets() {
+  const annual = Number(document.getElementById('rt-annual').value) || 0;
+  if (!annual) return;
+  const each = Math.round(annual / 12);
+  document.querySelectorAll('.rt-month-input').forEach(el => { el.value = each; });
+  updateRevenueTargetsTotal();
+}
+
+async function saveRevenueTargets() {
+  const targets = [...document.querySelectorAll('.rt-month-input')].map(el => ({
+    month: Number(el.dataset.month), amount: Number(el.value) || 0
+  }));
+  try {
+    const res = await apiFetch('/api/revenue-targets', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ year: revenueTargetsUIYear, targets }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    renderRevenueTargetsUI(data.targets || []);
+    // The current month's target may have just changed — refresh the
+    // dashboard's progress line so it doesn't wait for a reload.
+    await loadRevenueTargets();
+    renderDashboard();
+  } catch (e) { alert('Could not save targets: ' + e.message); }
 }
 
 // ══════════════════════════════════════════════════

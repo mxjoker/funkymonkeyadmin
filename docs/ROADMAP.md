@@ -80,6 +80,14 @@ Three repos, three deploy stories, several integrations that grew separately.
       remains is admin UI and tier-separated reporting.
 - [ ] `admin.html` is ~300 KB in one file
 - [ ] Repo and deploy cleanup — `docs/archive/` holds dead handoff documents
+- [ ] **A margin target, deliberately not folded into Revenue Targets
+      (added 2026-08-29).** Revenue Targets measures gross — the same
+      `total_price` the dashboard's Revenue This Month card already sums, so
+      the two numbers agree. A future "money tab" could carry a **margin**
+      target (revenue after labour) as its own stat card with its own goal.
+      It stays separate because margin moves with pay rates and staffing, not
+      with selling, and labour isn't knowable until a gig is actually worked —
+      pay comes from the clock via `payableHours`, not from a quote.
 
 ## Phase 4 — PPM cutover (COMPLETE, executed 2026-08-10/11)
 
