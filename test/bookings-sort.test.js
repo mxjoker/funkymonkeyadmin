@@ -15,7 +15,7 @@ function loadHelpers() {
   const ctx = {};
   vm.createContext(ctx);
   vm.runInContext(
-    HTML.slice(a, b) + '\nout = { BOOKING_COLUMNS, sortBookings, nextSort, incompleteReasons, needsZipEstimate, zipEstimateBookings };',
+    HTML.slice(a, b) + '\nout = { BOOKING_COLUMNS, sortBookings, nextSort, incompleteReasons, needsZipEstimate, zipEstimateBookings, driveEstimateNote };',
     ctx
   );
   return ctx.out;
@@ -240,4 +240,21 @@ test('zipEstimateBookings: accepts a plain array of ids too, not just a Set', ()
   const bookings = [{ id: 7, event_date: '2026-09-01', zip_known: false }];
   assert.strictEqual(zipEstimateBookings(bookings, [7], TODAY).length, 0);
   assert.strictEqual(zipEstimateBookings(bookings, [], TODAY).length, 1);
+});
+
+// ── driveEstimateNote ────────────────────────────────────────────────────────
+// Fix round 1: the schedule timeline showed a guessed Depart time with no
+// indication, on both the admin gig card and the staff portal. This is the
+// qualifier both renderers append to the Depart badge.
+const { driveEstimateNote } = loadHelpers();
+
+test('driveEstimateNote: a known drive time gets no qualifier', () => {
+  assert.strictEqual(driveEstimateNote(false), '');
+  assert.strictEqual(driveEstimateNote(null), '');
+  assert.strictEqual(driveEstimateNote(undefined), '');
+});
+
+test('driveEstimateNote: a guessed drive time says so', () => {
+  assert.match(driveEstimateNote(true), /estimated/);
+  assert.match(driveEstimateNote(true), /no ZIP/);
 });

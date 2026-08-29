@@ -568,6 +568,9 @@ exports.handler = async (event) => {
                 clock_adjusted: p.clock_adjusted,
                 amount: p.amount !== null ? p.amount : 0,
                 already_recorded: !!p.existingId,
+                // So a reviewer sees the guess BEFORE approving the run, not
+                // only afterward in paymentNote()'s text on the saved row.
+                drive_is_guess: p.drive_is_guess,
               });
             }
 

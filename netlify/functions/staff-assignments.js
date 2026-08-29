@@ -103,9 +103,10 @@ async function autoCalcTimes(client, assignmentId, bookingId, forceRecalc = fals
         drive_minutes_each_way= COALESCE(drive_minutes_each_way, $5),
         total_minutes         = $6,
         schedule_start        = $7,
+        drive_estimated       = $8,
         updated_at            = NOW()
-      WHERE id = $8
-    `, [load, setup, pack, homeUn, drive, total, scheduleStart, assignmentId]);
+      WHERE id = $9
+    `, [load, setup, pack, homeUn, drive, total, scheduleStart, !span.zipKnown, assignmentId]);
 
     console.log(`autoCalcTimes: assignment ${assignmentId} → ${total} min total, start ${scheduleStart}`);
   } catch(e) {
@@ -209,6 +210,12 @@ async function ensureTables(client) {
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS pack_out_minutes INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS home_unload_minutes INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS drive_minutes_each_way INTEGER",
+    // Additive, nullable, no backfill: an existing row with NULL here
+    // reads as "unknown" — honest, since autoCalcTimes never ran for it
+    // with zipKnown available. Set from spanFor's zipKnown so the
+    // schedule UI can label a guessed drive/departure time instead of
+    // showing it identically to a known one.
+    "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS drive_estimated BOOLEAN",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS total_minutes INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS schedule_start TIME",
     // Guaranteed here too, not only by payroll.js's ensureTables — this file
