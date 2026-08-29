@@ -109,6 +109,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/revenue-targets"
+  to = "/.netlify/functions/revenue-targets"
+  status = 200
+
+[[redirects]]
   from = "/api/accept-quote"
   to = "/.netlify/functions/accept-quote"
   status = 200
