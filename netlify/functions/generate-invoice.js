@@ -44,6 +44,51 @@ function buildInvoiceLines(booking) {
   ];
 }
 
+// A closed-out camp, shaped like a booking so the whole PDF below — bill-to,
+// line items, totals, notes — runs unchanged. Phase 3 of camps: one invoice
+// for the week, one line reading "20 kids @ $85.00", never five per-day PDFs
+// the client has to add up themselves.
+//
+// A second PDF path would be a second set of numbers to keep in sync with
+// this one; buildInvoiceLines() only ever reads `.items`, so synthesising a
+// single `service` item is the whole of the integration.
+function buildCampInvoiceBooking(camp, days) {
+  const active = (days || []).filter(d => (d.status || '') !== 'cancelled');
+  const dates = active.map(d => d.event_date).filter(Boolean).sort();
+  const rate = Number(camp.rate_per_kid || 0);
+  const headcount = Number(camp.headcount || 0);
+  // Rounded in cents for the same reason splitAcrossDays is: 20 x 84.95 is
+  // 1698.9999999999998 in float, and that prints as $1699.00 but sums wrong.
+  const total = Math.round(rate * headcount * 100) / 100;
+  return {
+    reference: camp.reference,
+    created_at: camp.closed_out_at || camp.created_at,
+    event_date: dates[0] || null,
+    client_name: camp.client_name,
+    client_email: camp.client_email,
+    client_phone: camp.client_phone,
+    event_type: camp.label,
+    event_location: camp.event_location,
+    event_zip: camp.event_zip,
+    event_time: camp.event_time,
+    guest_count: headcount,
+    notes: camp.notes,
+    // The camp is billed as one thing, so there is no deposit and the whole
+    // amount is outstanding — the days' own deposit fields are untouched by
+    // close-out and mean nothing at camp level.
+    total_price: total,
+    deposit_amount: 0,
+    deposit_paid: false,
+    balance_due: total,
+    items: [{
+      name: `${camp.label} — ${active.length} day${active.length === 1 ? '' : 's'}`,
+      price: rate,
+      quantity: headcount,
+      kind: 'service',
+    }],
+  };
+}
+
 // What the discount lines add up to. The invoice prints a Subtotal above the
 // Total only when this is non-zero — without it the discount line and the
 // Total do not visibly reconcile on the page.
@@ -74,40 +119,66 @@ exports.handler = async (event, context) => {
 
   try {
     return await withClient(async (client) => {
-      // Fetch booking — handle both numeric ID and reference string
-      let bookingRes;
-      const isNumeric = /^\d+$/.test(bookingId);
-
-      if (isNumeric) {
-        bookingRes = await client.query(
-          'SELECT * FROM bookings WHERE id = $1',
-          [parseInt(bookingId)]
-        );
+      // A CAMP- reference invoices the whole week off the camps table rather
+      // than a single booking. Same URL, same access rule, same PDF below —
+      // only where the numbers come from differs.
+      let booking;
+      if (/^CAMP-/i.test(bookingId)) {
+        const campRes = await client.query('SELECT * FROM camps WHERE reference = $1', [bookingId.toUpperCase()]);
+        if (!campRes.rows.length) {
+          return { statusCode: 404, headers: pdfHeaders, body: JSON.stringify({ error: 'Camp not found' }) };
+        }
+        const camp = campRes.rows[0];
+        if (!adminAuth && (!emailParam || (camp.client_email || '').toLowerCase() !== emailParam)) {
+          return { statusCode: 404, headers: pdfHeaders, body: JSON.stringify({ error: 'Not found' }) };
+        }
+        // Invoicing a camp nobody has closed out would print $0.00 and read
+        // as a bill for nothing — say what is missing instead.
+        if (!camp.closed_out_at) {
+          return { statusCode: 400, headers: pdfHeaders,
+                   body: JSON.stringify({ error: 'This camp has not been closed out yet — set the rate and headcount first.' }) };
+        }
+        const dayRes = await client.query(
+          'SELECT event_date, status FROM bookings WHERE camp_id = $1 ORDER BY event_date', [camp.id]);
+        booking = buildCampInvoiceBooking(camp, dayRes.rows);
       } else {
-        bookingRes = await client.query(
-          'SELECT * FROM bookings WHERE reference = $1',
-          [bookingId.toUpperCase()]
-        );
-      }
 
-      if (bookingRes.rows.length === 0) {
-        return { statusCode: 404, headers: pdfHeaders, body: JSON.stringify({ error: 'Booking not found' }) };
-      }
+        // Fetch booking — handle both numeric ID and reference string
+        let bookingRes;
+        const isNumeric = /^\d+$/.test(bookingId);
 
-      const booking = bookingRes.rows[0];
-
-      // Access control: public requires matching email; admin bypasses
-      if (!adminAuth) {
-        if (!emailParam) {
-          return { statusCode: 404, headers: pdfHeaders, body: JSON.stringify({ error: 'Not found' }) };
+        if (isNumeric) {
+          bookingRes = await client.query(
+            'SELECT * FROM bookings WHERE id = $1',
+            [parseInt(bookingId)]
+          );
+        } else {
+          bookingRes = await client.query(
+            'SELECT * FROM bookings WHERE reference = $1',
+            [bookingId.toUpperCase()]
+          );
         }
-        if ((booking.client_email || '').toLowerCase() !== emailParam) {
-          return { statusCode: 404, headers: pdfHeaders, body: JSON.stringify({ error: 'Not found' }) };
-        }
-      }
 
-      await ensureBookingItems(client);
-      booking.items = await getItems(client, booking.id);
+        if (bookingRes.rows.length === 0) {
+          return { statusCode: 404, headers: pdfHeaders, body: JSON.stringify({ error: 'Booking not found' }) };
+        }
+
+        booking = bookingRes.rows[0];
+
+        // Access control: public requires matching email; admin bypasses
+        if (!adminAuth) {
+          if (!emailParam) {
+            return { statusCode: 404, headers: pdfHeaders, body: JSON.stringify({ error: 'Not found' }) };
+          }
+          if ((booking.client_email || '').toLowerCase() !== emailParam) {
+            return { statusCode: 404, headers: pdfHeaders, body: JSON.stringify({ error: 'Not found' }) };
+          }
+        }
+
+        await ensureBookingItems(client);
+        booking.items = await getItems(client, booking.id);
+
+      }
 
       // Create PDF
       const pdfDoc = await PDFDocument.create();
@@ -365,3 +436,4 @@ function wrapText(text, maxChars) {
 
 module.exports.buildInvoiceLines = buildInvoiceLines;
 module.exports.invoiceDiscountTotal = invoiceDiscountTotal;
+module.exports.buildCampInvoiceBooking = buildCampInvoiceBooking;
