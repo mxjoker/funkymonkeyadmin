@@ -1,4 +1,3 @@
-const crypto = require('crypto');
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
 const { notifyMatchingStaff } = require('./staff-assignments');
@@ -9,6 +8,7 @@ const { sendTemplate } = require('./automations');
 const { normaliseAddress } = require('./_address');
 const { getDriveMins } = require('./_schedule');
 const { ensureTables: ensureCampTables } = require('./camps');
+const { generateReference } = require('./_reference');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -181,16 +181,6 @@ async function ensureTable(client) {
     })().catch(e => { schemaReady = null; throw e; });
   }
   return schemaReady;
-}
-
-// Generates FM- + 8 chars of crypto-random base32 (no ambiguous chars I/O/1/0)
-// ~40 bits of randomness. Caller retries on UNIQUE violation.
-function generateReference() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 chars, no I/O/1/0
-  let r = 'FM-';
-  const bytes = crypto.randomBytes(8);
-  for (let i = 0; i < 8; i++) r += chars[bytes[i] % 32];
-  return r;
 }
 
 exports.handler = async (event) => {

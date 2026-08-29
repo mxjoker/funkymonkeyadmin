@@ -261,6 +261,19 @@ exports.handler = async (event) => {
           if (!r.rows.length) return json(404, { error: "Not found" });
           updated = r.rows[0];
         }
+
+        // Camps (Phase 2): one contract for the whole camp. Toggling
+        // contract_signed on any one day must set every day sharing its
+        // camp_id to the same value — admin.html's Confirmation panel
+        // reads this back as one state for the camp, not five identical
+        // toggles the admin would otherwise have to click separately.
+        if ((u.contract_signed !== undefined || u.contractSigned !== undefined) && updated.camp_id) {
+          await c.query(
+            `UPDATE bookings SET contract_signed=$1, updated_at=NOW() WHERE camp_id=$2 AND id<>$3`,
+            [updated.contract_signed, updated.camp_id, updated.id]
+          );
+        }
+
         let stripeLink = null;
 
         // total_price / mileage_cost / deposit_amount feed balance_due

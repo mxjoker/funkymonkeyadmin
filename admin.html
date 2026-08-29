@@ -2304,14 +2304,44 @@ function bookingRow(b, showViewBtn = false, extraAttrs = '') {
 // rendered right below it with plain bookingRow() (so they stay real,
 // individually-openable bookings, unchanged from any other row) but start
 // hidden via the .camp-day-row CSS rule; toggleCampRows reveals them.
+// One contract state for the whole camp, not five identical "Mark Contract
+// Signed" buttons the admin would otherwise see once per day. booking.js
+// cascades contract_signed to every day the moment any one of them is
+// toggled (see its PATCH handler), so reading row.days[0] is exactly as
+// current as reading all five — this only decides how to LABEL that shared
+// state, never which day owns the truth.
+function campContractSigned(row) {
+  return row.days.length > 0 && row.days.every(d => d.contract_signed);
+}
+
 function campRow(row) {
+  const signed = campContractSigned(row);
   return `<tr class="camp-summary-row" style="cursor:pointer;background:#f5f3ff" onclick="toggleCampRows(${row.camp_id})">
     <td colspan="8">
       <strong>🏕 ${esc(row.label)}</strong>
       <span class="text-muted"> · ${row.days.length} day${row.days.length===1?'':'s'} · ${esc(row.dateRangeLabel)}</span>
+      <button class="btn btn-outline btn-sm" style="margin-left:12px" onclick="event.stopPropagation();toggleCampContract(${row.camp_id})">
+        ${signed ? '📝 Contract Signed ✓ (whole camp)' : '📝 Mark Contract Signed (whole camp)'}
+      </button>
       <span class="text-muted" style="float:right">▾ tap to expand</span>
     </td>
   </tr>${row.days.map(b => bookingRow(b, true, `class="camp-day-row" data-camp-days="${row.camp_id}"`)).join('')}`;
+}
+
+// Toggles contract_signed for a whole camp from its one collapsed row,
+// instead of opening all five days and clicking the same button five times.
+// The server (booking.js) cascades the write to every day sharing camp_id
+// in the same PATCH — this mirrors that in the client's own cache so the
+// row repaints correctly without waiting on a full reload.
+async function toggleCampContract(campId) {
+  const days = allBookings.filter(b => b.camp_id === campId);
+  if (!days.length) return;
+  const newVal = !days.every(d => d.contract_signed);
+  try {
+    await patch(days[0].id, { contract_signed: newVal });
+    days.forEach(d => { d.contract_signed = newVal; });
+    renderBookingsTable();
+  } catch (e) { alert('Failed to update contract: ' + e.message); }
 }
 
 // Reveals/hides one camp's day rows, injected by campRow just below its

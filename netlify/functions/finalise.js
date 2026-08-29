@@ -75,6 +75,19 @@ async function authenticate(c, reference, email) {
   return rows[0];
 }
 
+// A day inside a camp (Phase 2) shares one finalise form with its whole
+// camp — its own link must hand off to the camp's, or a client who finishes
+// Monday's form reasonably believes the whole week is done. Returns null
+// (never throws) when the booking's camp_id doesn't resolve to a real camp —
+// ON DELETE SET NULL means that shouldn't happen, but a stale value here
+// must fall through to this day's own finalise view rather than 500.
+async function campRedirectFor(c, campId) {
+  if (!campId) return null;
+  const { rows } = await c.query('SELECT reference, client_email FROM camps WHERE id = $1', [campId]);
+  if (!rows.length || !rows[0].reference) return null;
+  return { reference: rows[0].reference, email: rows[0].client_email };
+}
+
 exports.handler = async (event) => {
   const pre = preflight(event);
   if (pre) return pre;
@@ -85,6 +98,12 @@ exports.handler = async (event) => {
     return withClient(async (c) => {
       const booking = await authenticate(c, qs.reference, qs.email);
       if (!booking) return json(404, { error: 'Booking not found' });
+      // This day belongs to a camp — hand off to the camp's own finalise
+      // form rather than showing this day's alone. See campRedirectFor.
+      if (booking.camp_id) {
+        const redirect = await campRedirectFor(c, booking.camp_id);
+        if (redirect) return json(200, { redirect });
+      }
       // Read-only line items so the client can see what the total is made of
       // before hitting "Accept This Quote" — CLIENT_EDITABLE gains nothing here.
       await ensureBookingItems(c);
@@ -216,6 +235,14 @@ exports.handler = async (event) => {
 
       const booking = await authenticate(c, reference, email);
       if (!booking) return json(404, { error: 'Booking not found' });
+
+      // Same hand-off as the GET above — a camp day's edits must go through
+      // the camp's own finalise form so every day stays in lockstep (see
+      // finalise-camp.js), not through this per-day endpoint.
+      if (booking.camp_id) {
+        const redirect = await campRedirectFor(c, booking.camp_id);
+        if (redirect) return json(200, { redirect });
+      }
 
       // A booking already paid for is finished being finalised. Editing it here
       // would change details the crew may already be working from.
@@ -395,3 +422,4 @@ module.exports.handler = exports.handler;
 module.exports.buildFinaliseResponse = buildFinaliseResponse;
 module.exports.FINALISE_FIELDS = FINALISE_FIELDS;
 module.exports.emailMatches = emailMatches;
+module.exports.campRedirectFor = campRedirectFor;

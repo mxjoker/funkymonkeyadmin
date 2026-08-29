@@ -134,6 +134,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/finalise-camp"
+  to = "/.netlify/functions/finalise-camp"
+  status = 200
+
+[[redirects]]
   from = "/api/refund"
   to = "/.netlify/functions/refund"
   status = 200

@@ -20,6 +20,18 @@ function fakeClient(bookingRows = []) {
 
       if (/CREATE TABLE IF NOT EXISTS camps/i.test(sql)) return { rows: [] };
       if (/ALTER TABLE bookings/i.test(sql)) return { rows: [] };
+      if (/^\s*ALTER TABLE camps/i.test(sql)) return { rows: [] };
+
+      // Reference minting (createCamp, and ensureTables' backfill for camps
+      // created before Phase 2). No UNIQUE constraint in this fake, same as
+      // the real schema — just a check-then-insert loop.
+      if (/^\s*SELECT 1 FROM camps WHERE reference/i.test(sql)) {
+        const [ref] = params;
+        return { rows: camps.some(c => c.reference === ref) ? [{ '?column?': 1 }] : [] };
+      }
+      if (/^\s*SELECT id FROM camps WHERE reference/i.test(sql)) {
+        return { rows: camps.filter(c => !c.reference).map(c => ({ id: c.id })) };
+      }
 
       if (/^\s*SELECT c\.\*/is.test(sql)) {
         // listCamps: one row per camp, day_count/start/end derived from
@@ -41,16 +53,18 @@ function fakeClient(bookingRows = []) {
 
       if (/^\s*INSERT INTO camps/i.test(sql)) {
         const [label, client_name, client_email, client_phone,
-          organisation_name, event_location, event_zip, service_id, notes] = params;
+          organisation_name, event_location, event_zip, service_id, notes, reference] = params;
         const row = {
           id: nextId++, label, client_name, client_email, client_phone,
-          organisation_name, event_location, event_zip, service_id, notes,
+          organisation_name, event_location, event_zip, service_id, notes, reference,
           created_at: new Date().toISOString(),
         };
         camps.push(row);
         return { rows: [row] };
       }
 
+      // Also covers backfillReferences' `UPDATE camps SET reference=$1 WHERE id=$2` —
+      // same generic column-name extraction as any other camps UPDATE.
       if (/^\s*UPDATE camps/i.test(sql)) {
         const id = params[params.length - 1];
         const row = camps.find(c => c.id === id);
@@ -117,6 +131,25 @@ test('createCamp stores the client/venue/service fields days will inherit', asyn
   assert.strictEqual(camp.client_name, 'Jane Doe');
   assert.strictEqual(camp.service_id, 'svc-foam');
   assert.ok(camp.id);
+});
+
+// Phase 2: a camp's reference is minted the same way a booking's is, just
+// CAMP- prefixed so support never confuses the two.
+test('createCamp mints a CAMP- reference, same alphabet as a booking\'s', async () => {
+  const client = fakeClient();
+  const camp = await createCamp(client, { label: 'MAC Summer Camp' });
+  assert.match(camp.reference, /^CAMP-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/);
+});
+
+// A camp created under Phase 1 has no reference column value yet — ensureTables
+// must backfill it so a pre-existing camp gets a working finalise link without
+// a manual migration.
+test('ensureTables backfills a reference for a camp that has none', async () => {
+  const client = fakeClient();
+  const camp = await createCamp(client, { label: 'Pre-Phase-2 Camp' });
+  camp.reference = ''; // simulate a row that predates the reference column
+  await ensureTables(client);
+  assert.match(camp.reference, /^CAMP-/);
 });
 
 test('listCamps reports day count and date range from its actual bookings', async () => {
