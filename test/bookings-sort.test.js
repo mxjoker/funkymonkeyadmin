@@ -358,6 +358,54 @@ test('total_price on a camp row is the sum of its days, not just the first', () 
   assert.strictEqual(rows[0].total_price, 300 * 5);
 });
 
+// Divergent per-day total/status, on purpose — MAC_DAYS above shares 300 and
+// 'confirmed' across every day, which can't tell "summed total" apart from
+// "first day's total repeated", or "earliest day's status" apart from
+// "whichever day sorts first in the source array" (DIVERGENT_CAMP_DAYS is
+// deliberately NOT in event_date order in the array literal). These two
+// pin the actual rule: total is the SUM across days; status is the
+// EARLIEST day's, by event_date — not source order, not min/max/alpha.
+const DIVERGENT_CAMP_DAYS = [
+  { id: 300, reference: 'FM-D2', camp_id: 2, event_date: '2026-07-16', total_price: 700, status: 'confirmed' },
+  { id: 301, reference: 'FM-D1', camp_id: 2, event_date: '2026-07-14', total_price: 100, status: 'accepted' }, // earliest day, listed second
+  { id: 302, reference: 'FM-D3', camp_id: 2, event_date: '2026-07-18', total_price: 700, status: 'review' },
+];
+const DIVERGENT_CAMPS = [{ id: 2, label: 'Divergent Camp' }];
+
+test('a camp row sorts by its SUMMED total — total is the one column that is not "earliest day"', () => {
+  const others = [
+    { id: 1, reference: 'LOW', event_date: '2026-01-01', total_price: 1000 },
+    { id: 2, reference: 'HIGH', event_date: '2026-01-02', total_price: 2000 },
+  ];
+  const rows = groupBookingsByCamp([...DIVERGENT_CAMP_DAYS, ...others], DIVERGENT_CAMPS);
+  const camp = rows.find(r => r.isCamp);
+  // 700 + 100 + 700, not 100 (the earliest day alone) and not 700 (the
+  // first day in source order).
+  assert.strictEqual(camp.total_price, 1500);
+  const ascending = sortBookings([...rows], { key: 'total', dir: 'asc' }).map(r => r.isCamp ? 'CAMP' : r.reference);
+  assert.deepStrictEqual(plain(ascending), ['LOW', 'CAMP', 'HIGH']);
+  const descending = sortBookings([...rows], { key: 'total', dir: 'desc' }).map(r => r.isCamp ? 'CAMP' : r.reference);
+  assert.deepStrictEqual(plain(descending), ['HIGH', 'CAMP', 'LOW']);
+});
+
+test("a camp row sorts by its earliest day's status, which is what the code does", () => {
+  const rows = groupBookingsByCamp(DIVERGENT_CAMP_DAYS, DIVERGENT_CAMPS);
+  const camp = rows.find(r => r.isCamp);
+  // 14 Jul (earliest) is 'accepted' — not 'confirmed' (16 Jul, listed FIRST
+  // in the source array) and not 'review' (18 Jul, the LAST day).
+  assert.strictEqual(camp.status, 'accepted');
+
+  const others = [
+    { id: 1, reference: 'BEFORE', event_date: '2026-01-01', status: 'aaaa' },
+    { id: 2, reference: 'AFTER', event_date: '2026-01-02', status: 'zzzz' },
+  ];
+  const ordered = sortBookings([...rows, ...others], { key: 'status', dir: 'asc' })
+    .map(r => r.isCamp ? 'CAMP' : r.reference);
+  // 'aaaa' < 'accepted' < 'zzzz' alphabetically — proves the sort actually
+  // used the camp's .status field, not just left it in place.
+  assert.deepStrictEqual(plain(ordered), ['BEFORE', 'CAMP', 'AFTER']);
+});
+
 // The filter-then-group contract: renderBookingsTable filters the flat list
 // FIRST, then groups the survivors — so a filter matching only some of a
 // camp's days must show the camp with just those days, never the whole camp

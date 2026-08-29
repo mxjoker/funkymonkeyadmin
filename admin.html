@@ -2226,11 +2226,17 @@ function renderBookingsTable() {
   }
   
   if (search) {
-    list = list.filter(b =>
-      (b.client_name||'').toLowerCase().includes(search) ||
-      (b.reference||'').toLowerCase().includes(search) ||
-      (b.service_name||'').toLowerCase().includes(search)
-    );
+    // A camp's label lives only on the post-grouping synthetic row (built
+    // below), but users search by what they can see on that row — so a
+    // day matches search when ITS OWN camp's label does, even though the
+    // label itself isn't a column on the booking.
+    list = list.filter(b => {
+      const campLabel = b.camp_id ? (allCamps.find(c => c.id === b.camp_id) || {}).label : '';
+      return (b.client_name||'').toLowerCase().includes(search) ||
+        (b.reference||'').toLowerCase().includes(search) ||
+        (b.service_name||'').toLowerCase().includes(search) ||
+        (campLabel||'').toLowerCase().includes(search);
+    });
   }
   
   // Date range filter
@@ -2282,7 +2288,7 @@ function renderBookingsTable() {
 }
 
 function bookingRow(b, showViewBtn = false, extraAttrs = '') {
-  return `<tr style="cursor:pointer" ${extraAttrs} onclick="openBooking('${b.id}')">
+  return `<tr style="cursor:pointer"${extraAttrs ? ' ' + extraAttrs : ''} onclick="openBooking('${b.id}')">
     <td><code style="font-size:.75rem;color:#7c3aed">${b.reference||'—'}</code></td>
     <td><div style="font-weight:600">${esc(b.client_name||'')}</div><div class="text-muted">${esc(b.client_email||'')}</div></td>
     <td>${esc(b.service_name||'—')}${b.is_custom_quote?'<span class="badge badge-custom" style="margin-left:5px">Quote</span>':''}</td>
