@@ -458,6 +458,32 @@ const TEMPLATES = [
         <a href="{{admin_link}}" style="background-color:#FF6B00;color:#0F0A1E;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:900;font-size:14px">View in Dashboard →</a>
       </div>`,
     body_sms: ''
+  },
+  {
+    // extra: changed_what, zip_case, camp_dates, day_count
+    //
+    // A camp's own version of 'zip_changed_alert'. It needs its own wording
+    // rather than reusing that one, because that template's closing line —
+    // "The total is unchanged at ${{total_price}}, mileage was not
+    // recalculated" — is false twice over for a camp: a camp is priced per
+    // kid with no mileage in it at all, and its total_price is $0 until it is
+    // closed out. An alert to ourselves has to be accurate to be worth having.
+    //
+    // The stake is also higher than one gig: moving a camp moves every day of
+    // it, so the drive changes for a whole week at once.
+    template_key: 'camp_moved_alert',
+    extras: ['changed_what', 'zip_case', 'camp_dates', 'day_count'],
+    name: 'Client moved a camp — alert to us',
+    trigger_event: 'system', recipient: 'admin', sort_order: 46,
+    subject: '⚠ Camp venue changed — {{reference}}',
+    body_html: `<h2>The client moved a whole camp</h2>
+      <p><strong>{{client_name}}</strong> changed {{changed_what}} on <strong>{{reference}}</strong> while finalising the camp's details.</p>
+      <p><strong>Camp:</strong> {{service_name}} · {{camp_dates}} · {{day_count}}</p>
+      {{zip_case}}
+      <p><strong>Address:</strong> {{event_location}}</p>
+      <p>A camp is priced per kid, so this does not change what they owe — but it moves <em>every day</em> of the camp, so check the drive is still workable before it runs.</p>
+      <a href="{{admin_link}}" style="background:#7c3aed;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">Open in Admin</a>`,
+    body_sms: ''
   }
 ];
 

@@ -30,7 +30,7 @@ function fakeCampClient(campsSeed, bookingsSeed, opts = {}) {
         const row = camps.find(c => c.reference === params[0]);
         return { rows: row ? [row] : [] };
       }
-      if (/^\s*SELECT event_date, contract_signed FROM bookings WHERE camp_id = \$1/i.test(sql)) {
+      if (/^\s*SELECT id, event_date, contract_signed FROM bookings WHERE camp_id = \$1/i.test(sql)) {
         return { rows: bookings.filter(b => b.camp_id === params[0]) };
       }
       if (/^\s*UPDATE camps SET/i.test(sql)) {
@@ -65,12 +65,25 @@ function loadFinaliseCampHandler(client) {
     '../netlify/functions/finalise.js',
     '../netlify/functions/_db.js',
     '../netlify/functions/_auth.js',
+    '../netlify/functions/automations.js',
+    '../netlify/functions/_email.js',
   ];
   for (const m of mods) delete require.cache[require.resolve(m)];
   const dbMod = require('../netlify/functions/_db.js');
   dbMod.withClient = async (fn) => fn(client);
   const auth = require('../netlify/functions/_auth.js');
   auth.preflight = () => null;
+  // Phase 4 sends mail after the commit. finalise-camp destructures these at
+  // load time, so they must be stubbed BEFORE it is required. Captured on the
+  // client so a test can assert what went out — see test/camp-emails.test.js
+  // for the sends themselves; here they only have to not reach a network.
+  const automations = require('../netlify/functions/automations.js');
+  automations.sendTemplate = async (_c, booking, key, _link, opts = {}) => {
+    (client.sent = client.sent || []).push({ key, to: opts.to || booking.client_email, extra: opts.extra });
+    return { sent: true };
+  };
+  const email = require('../netlify/functions/_email.js');
+  email.logChange = async () => {};
   return require('../netlify/functions/finalise-camp.js');
 }
 

@@ -23,8 +23,10 @@
 const { withClient } = require('./_db');
 const { CORS, preflight } = require('./_auth');
 const { normaliseAddress } = require('./_address');
-const { sanitiseClientEdit, CLIENT_EDITABLE } = require('./_finalise');
+const { sanitiseClientEdit, CLIENT_EDITABLE, zipChanged, describeFieldChange } = require('./_finalise');
 const { emailMatches } = require('./finalise');
+const { sendTemplate } = require('./automations');
+const { logChange, esc, fmtEventDate } = require('./_email');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -62,12 +64,161 @@ function buildCampView(camp, days) {
   return out;
 }
 
+// `id` is here for Phase 4's anchor (see campAsBooking) — buildCampView
+// ignores it.
 async function daysFor(c, campId) {
   const { rows } = await c.query(
-    'SELECT event_date, contract_signed FROM bookings WHERE camp_id = $1 ORDER BY event_date',
+    'SELECT id, event_date, contract_signed FROM bookings WHERE camp_id = $1 ORDER BY event_date',
     [campId]
   );
   return rows;
+}
+
+// ── Phase 4: telling people what happened ─────────────────────────────────
+//
+// Until this, a client could fill in the whole camp form and hear nothing
+// back, and a camp could be moved to a different town without anyone being
+// told. A single booking's finalise has sent both since August; the camp path
+// sent neither. Everything here mirrors finalise.js rather than inventing a
+// second scheme, and reuses three of its four templates unchanged.
+
+// A camp shaped like a booking, so render() and sendTemplate() work on it
+// untouched — the same trick generate-invoice.js uses for the camp invoice.
+//
+// `id` is the camp's FIRST DAY, not the camp. email_log.booking_id and
+// booking_changes.booking_id are both INTEGER NOT NULL pointing at bookings,
+// and the first day is the anchor row groupBookingsByCamp already uses for
+// every sortable column. Without it these emails would send and appear in no
+// log at all. A camp with no days has no anchor and logs nothing —
+// sendTemplate already handles a booking with no id.
+function campAsBooking(camp, days) {
+  const dated = (days || []).filter(d => d.event_date)
+    .sort((a, b) => String(a.event_date).localeCompare(String(b.event_date)));
+  const anchor = dated[0] || (days || [])[0];
+  return {
+    ...camp,
+    id: anchor ? anchor.id : undefined,
+    event_date: dated.length ? dated[0].event_date : null,
+    // What the admin alert prints as the camp's name.
+    service_name: camp.label || '',
+    // Explicit, so render() and sendTemplate's SMS branch cannot read a stray
+    // truthy value off a camp row: a camp takes no deposit, and SMS consent is
+    // a question asked of a booking, never of a camp.
+    deposit_amount: 0,
+    sms_consent: false,
+  };
+}
+
+function campDatesLabel(days) {
+  const dates = (days || []).map(d => d.event_date).filter(Boolean)
+    .map(d => String(d)).sort();
+  if (!dates.length) return 'no dates yet';
+  const fmt = (d) => fmtEventDate(d, { weekday: undefined, month: 'short', day: 'numeric' });
+  return dates[0] === dates[dates.length - 1]
+    ? fmt(dates[0])
+    : `${fmt(dates[0])} – ${fmt(dates[dates.length - 1])}`;
+}
+
+// Runs AFTER the commit. The save is what matters; no failure here may undo a
+// client's edit or 500 their page, so every send is caught on its own — but
+// loudly, because a silent one means a camp moved and nobody knows.
+async function notifyCampSaved(c, { camp, updatedCamp, days, keys, emailChanged, addrConflict }) {
+  const forEmail = campAsBooking(updatedCamp, days);
+
+  // Reused for the client's receipt below. client_email is left out: a change
+  // to it is already the subject of the two emails the email-change flow
+  // sends, and a third mention would be noise. Same rule as finalise.js.
+  const changesForEmail = [];
+  for (const k of keys) {
+    if (String(camp[k] ?? '') === String(updatedCamp[k] ?? '')) continue;
+    if (forEmail.id) {
+      await logChange(c, forEmail.id, 'Client finalised camp details',
+        `${camp.reference}: ${k}: "${camp[k] ?? ''}" → "${updatedCamp[k] ?? ''}"`);
+    }
+    if (k !== 'client_email') changesForEmail.push(describeFieldChange(k, camp[k], updatedCamp[k]));
+  }
+
+  // ── The camp moved ────────────────────────────────────────────────────
+  // Two ways it can happen, same as a booking: the client edited event_zip
+  // directly, or edited only the address to one whose embedded ZIP disagrees
+  // with the stored ZIP. Either one moved the camp; only watching the first
+  // left the address-only path silent.
+  const zip = zipChanged(camp, updatedCamp);
+  if (zip.changed || addrConflict) {
+    const detailParts = [];
+    if (zip.changed) detailParts.push(`${zip.from} → ${zip.to}`);
+    if (addrConflict) detailParts.push(`event_zip ${zip.changed ? `now ${updatedCamp.event_zip}` : `unchanged (${updatedCamp.event_zip})`} but ${addrConflict}`);
+    if (forEmail.id) {
+      await logChange(c, forEmail.id, 'Camp moved by client — every day affected',
+        `${camp.reference}: ${detailParts.join('; ')}`);
+    }
+
+    const caseParts = [];
+    if (zip.changed) caseParts.push(`<p><strong>Quoted from:</strong> ${esc(zip.from)}<br/><strong>Now:</strong> ${esc(zip.to)}</p>`);
+    if (addrConflict) caseParts.push(zip.changed
+      ? `<p>The address they entered also names a different ZIP than the one just saved: <strong>${esc(addrConflict)}</strong>.</p>`
+      : `<p>The ZIP on file (<strong>${esc(updatedCamp.event_zip)}</strong>) was not changed, but the address they entered now names a different ZIP: <strong>${esc(addrConflict)}</strong>.</p>`);
+
+    const changedWhat = zip.changed && addrConflict ? 'the ZIP and address' : zip.changed ? 'the ZIP' : 'the address';
+    try {
+      const r = await sendTemplate(c, forEmail, 'camp_moved_alert', null, {
+        extra: {
+          changed_what: changedWhat,
+          zip_case: caseParts.join(''),
+          camp_dates: campDatesLabel(days),
+          day_count: `${days.length} day${days.length === 1 ? '' : 's'}`,
+        },
+      });
+      if (!r.sent) console.error('finalise-camp: move alert not sent —', r.error);
+    } catch (e) {
+      console.error('finalise-camp: move alert FAILED for', camp.reference, '|', e.message);
+    }
+  }
+
+  // ── Their email changed, so the link they hold is dead ────────────────
+  // Auth is a reference plus an email, so anyone forwarded a camp link could
+  // change the contact address and quietly take over a whole WEEK of
+  // bookings. The notice to the previous address is the only control this
+  // flow has, so it is sent first and never skipped by a later failure.
+  if (emailChanged) {
+    if (camp.client_email) {
+      try {
+        const r = await sendTemplate(c, forEmail, 'contact_email_changed', null, { to: camp.client_email });
+        if (!r.sent) console.error('finalise-camp: old-address notice not sent —', r.error);
+      } catch (e) {
+        console.error('finalise-camp: old-address notice FAILED for', camp.reference, '|', e.message);
+      }
+    }
+    // finaliseLinkFor() builds my-booking.html?ref=…&email=…, and that page
+    // already routes a CAMP- reference to /api/finalise-camp itself — so
+    // {{finalise_link}} resolves correctly here with no camp-specific code.
+    const changesHtml = changesForEmail.length
+      ? `<p style="margin-top:16px">They also updated:</p><ul>${changesForEmail.map(l => `<li>${l}</li>`).join('')}</ul>`
+      : '';
+    try {
+      const r = await sendTemplate(c, forEmail, 'finalise_link_reissued', null,
+        { extra: { change_block: changesHtml } });
+      if (!r.sent) console.error('finalise-camp: link re-issue not sent —', r.error);
+    } catch (e) {
+      console.error('finalise-camp: link re-issue FAILED for', camp.reference, '|', e.message);
+    }
+    return;
+  }
+
+  // ── Per-save receipt ──────────────────────────────────────────────────
+  // Reuses the booking template as-is: its wording is about a reference and a
+  // list of changes, and {{reference}} reading CAMP-… makes it plain enough
+  // what was updated. Only the move alert needed camp-specific copy, because
+  // that one talks about price and mileage.
+  if (changesForEmail.length) {
+    try {
+      const r = await sendTemplate(c, forEmail, 'booking_updated_receipt', null,
+        { extra: { change_list: changesForEmail.map(l => `<li>${l}</li>`).join('') } });
+      if (!r.sent) console.error('finalise-camp: change receipt not sent —', r.error);
+    } catch (e) {
+      console.error('finalise-camp: change receipt FAILED for', camp.reference, '|', e.message);
+    }
+  }
 }
 
 exports.handler = async (event) => {
@@ -109,11 +260,20 @@ exports.handler = async (event) => {
 
       // Keep the ZIP out of the address line, same as finalise.js and every
       // other writer.
+      let addrConflict = null;
       if (fields.event_location !== undefined || fields.event_zip !== undefined) {
         const addr = normaliseAddress(
           fields.event_location !== undefined ? fields.event_location : camp.event_location,
           fields.event_zip !== undefined ? fields.event_zip : camp.event_zip
         );
+        // Same second signal finalise.js watches: the client can move the camp
+        // by editing only the address, to one whose embedded ZIP disagrees
+        // with the stored event_zip. normaliseAddress keeps the stored ZIP in
+        // that case, so zipChanged() stays false and the camp has still moved.
+        if (addr.conflict) {
+          addrConflict = addr.conflict;
+          console.error('finalise-camp: address/ZIP disagree on', camp.reference, '|', addr.conflict);
+        }
         if (fields.event_location !== undefined) fields.event_location = addr.location;
         if (fields.event_zip !== undefined) fields.event_zip = addr.zip;
       }
@@ -145,6 +305,14 @@ exports.handler = async (event) => {
         await c.query('COMMIT');
 
         const days = await daysFor(c, camp.id);
+
+        // Everything below is after the COMMIT on purpose, exactly as
+        // finalise.js does it: the save is what matters, and no email failure
+        // may undo a client's edit or 500 their page. Each send is caught
+        // individually and reported loudly — a silent one means a camp moved
+        // and nobody knows.
+        await notifyCampSaved(c, { camp, updatedCamp, days, keys, emailChanged, addrConflict });
+
         return json(200, { success: true, camp: buildCampView(updatedCamp, days), rejected, emailChanged });
       } catch (e) {
         await c.query('ROLLBACK');
