@@ -483,6 +483,18 @@ async function triggerStatusChange(client, booking, newStatus, stripeLink) {
 }
 
 // ── Trigger: scheduled (days_before/after) ───────────────────────────────────
+// How many days back a rule will still pick up a send it owed. The daily cron
+// is the only thing that fires these, and a run that dies takes the whole day's
+// mail with it — on 2026-09-02 a failed run cost one client her pre-event
+// reminder and it could never be recovered, because each rule matched exactly
+// one calendar day. The window makes a missed run self-heal on the next one.
+//
+// Safe to widen only because of the `NOT IN (… email_log …)` guard below, which
+// already made a re-run idempotent; the window just gives it something to do.
+// Two days covers a missed run plus the one after it without letting a rule
+// reach back into history it was never meant to touch.
+const CATCHUP_DAYS = 2;
+
 // Called by a scheduled function or manually via POST action:'run_scheduled'
 async function runScheduledAutomations(client) {
   const today = new Date();
@@ -501,13 +513,16 @@ async function runScheduledAutomations(client) {
     const dateStr = targetDate.toISOString().split('T')[0];
 
     const { rows: bookings } = await client.query(
+      // GREATEST pins the floor at today: a late pre-event reminder is worth
+      // sending, one that lands after the event is not.
       `SELECT * FROM bookings
        WHERE status IN ('confirmed','quoted','accepted')
-         AND event_date::date = $1::date
+         AND event_date::date BETWEEN GREATEST(CURRENT_DATE, $1::date - $3::int) AND $1::date
          AND id NOT IN (
-           SELECT booking_id FROM email_log WHERE rule_id=$2 AND status='sent'
+           SELECT booking_id FROM email_log
+           WHERE rule_id=$2 AND status='sent' AND booking_id IS NOT NULL
          )`,
-      [dateStr, rule.id]
+      [dateStr, rule.id, CATCHUP_DAYS]
     );
     for (const booking of bookings) {
       if (await sendAutomationMessage(client, rule, booking, null)) sent++;
@@ -528,11 +543,12 @@ async function runScheduledAutomations(client) {
     const { rows: bookings } = await client.query(
       `SELECT * FROM bookings
        WHERE status IN ('confirmed','completed')
-         AND event_date::date = $1::date
+         AND event_date::date BETWEEN $1::date - $3::int AND $1::date
          AND id NOT IN (
-           SELECT booking_id FROM email_log WHERE rule_id=$2 AND status='sent'
+           SELECT booking_id FROM email_log
+           WHERE rule_id=$2 AND status='sent' AND booking_id IS NOT NULL
          )`,
-      [dateStr, rule.id]
+      [dateStr, rule.id, CATCHUP_DAYS]
     );
     for (const booking of bookings) {
       if (await sendAutomationMessage(client, rule, booking, null)) sent++;
@@ -551,11 +567,12 @@ async function runScheduledAutomations(client) {
     const { rows: bookings } = await client.query(
       `SELECT * FROM bookings
        WHERE status = $1
-         AND created_at::date = (CURRENT_DATE - $2::int)
+         AND created_at::date BETWEEN (CURRENT_DATE - $2::int - $4::int) AND (CURRENT_DATE - $2::int)
          AND id NOT IN (
-           SELECT booking_id FROM email_log WHERE rule_id=$3 AND status='sent'
+           SELECT booking_id FROM email_log
+           WHERE rule_id=$3 AND status='sent' AND booking_id IS NOT NULL
          )`,
-      [rule.trigger_status, rule.trigger_days, rule.id]
+      [rule.trigger_status, rule.trigger_days, rule.id, CATCHUP_DAYS]
     );
     for (const booking of bookings) {
       if (await sendAutomationMessage(client, rule, booking, null)) sent++;
