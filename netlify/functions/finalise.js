@@ -11,7 +11,7 @@ const { withClient } = require('./_db');
 const { CORS, preflight } = require('./_auth');
 const { esc, logChange, ensureBookingChanges, ensureEmailLog, finaliseLinkFor } = require('./_email');
 const { normaliseAddress } = require('./_address');
-const { sanitiseClientEdit, zipChanged, describeFieldChange } = require('./_finalise');
+const { sanitiseClientEdit, zipChanged, describeFieldChange, CLIENT_EDITABLE } = require('./_finalise');
 const { ensureBookingItems, getItems, balanceCharge } = require('./_items');
 const { buildSessionParams } = require('./create-stripe-link');
 const { sendTemplate } = require('./automations');
@@ -30,6 +30,10 @@ const FINALISE_FIELDS = [
   'guest_count', 'child_name', 'guests_of_honour', 'notes',
   'total_price', 'deposit_amount', 'balance_due', 'deposit_paid',
   'stripe_payment_link',
+  // So the page can render the consent box ticked for someone who already
+  // agreed. Without it the box reads unchecked for everyone, which tells a
+  // client who did consent that we have no record of it.
+  'sms_consent',
 ];
 
 // Money fields must read as a number even when NULL in the DB — the old
@@ -43,7 +47,7 @@ function buildFinaliseResponse(row) {
   const out = {};
   for (const f of FINALISE_FIELDS) {
     if (MONEY_FIELDS.includes(f)) out[f] = Number(row[f] ?? 0);
-    else if (f === 'deposit_paid') out[f] = row[f] === true;
+    else if (f === 'deposit_paid' || f === 'sms_consent') out[f] = row[f] === true;
     else out[f] = row[f] ?? '';
   }
   // An absent link must read as absent so the page can say "we'll send this
@@ -284,7 +288,12 @@ exports.handler = async (event) => {
       // out — a change to it is already covered by the two emails the
       // email-change flow below sends, and a third mention would be noise.
       const changesForEmail = [];
-      for (const k of keys) {
+      // sanitiseClientEdit adds sms_consent_at and sms_consent_text alongside
+      // sms_consent — they belong in the UPDATE above but not in a receipt or a
+      // changelog line, where they would surface to a client as a raw column
+      // name and a paragraph of consent boilerplate. The whitelist is the
+      // definition of "a field the client edited", so filter to it.
+      for (const k of keys.filter(k => CLIENT_EDITABLE.includes(k))) {
         if (String(booking[k] ?? '') !== String(updated[k] ?? '')) {
           await logChange(c, booking.id, 'Client finalised details', `${k}: "${booking[k] ?? ''}" → "${updated[k] ?? ''}"`);
           if (k !== 'client_email') changesForEmail.push(describeFieldChange(k, booking[k], updated[k]));

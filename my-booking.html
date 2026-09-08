@@ -459,7 +459,7 @@
       ['child_name', "Birthday Child's Name", 'text'],
       ['guests_of_honour', 'Other Guests of Honour', 'text'],
     ];
-    const ALL_EDITABLE_KEYS = [...CLIENT_EDITABLE_FIELDS.map(f => f[0]), 'notes'];
+    const ALL_EDITABLE_KEYS = [...CLIENT_EDITABLE_FIELDS.map(f => f[0]), 'notes', 'sms_consent'];
 
     // A camp's shared fields — CLIENT_EDITABLE_FIELDS minus guest_count
     // (Phase 3's per-kid headcount, collected after the camp ends) and
@@ -526,6 +526,30 @@
           <label for="f-${key}">${esc(label)}${isAddress ? ' <span style="color:#FFD600">· required</span>' : ''}</label>
           <input type="${type}" id="f-${key}" value="${esc(v)}" placeholder="${esc(placeholder)}"${isAddress ? ' oninput="checkAddress()"' : ''}>
           ${isAddress ? '<div id="address-note" style="display:none;margin-top:6px;font-size:13px;color:#fbbf24"></div>' : ''}
+        </div>`;
+    }
+
+    // Express written consent for SMS, same four disclosures the public booking
+    // form carries (message type, frequency, rates, opt-out) and the same rules:
+    // the box starts unchecked unless they have already agreed, it is never
+    // required, and consent is never a condition of anything. The wording here
+    // must stay in step with SMS_CONSENT_TEXT in netlify/functions/_sms.js —
+    // that constant is what gets STORED as the thing they agreed to.
+    //
+    // Unlike the public form this one is also a withdrawal: a client who agreed
+    // at booking can untick it here and the server clears the record.
+    function smsConsentHtml(checked) {
+      return `
+        <div class="form-group">
+          <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-weight:400;margin:0;background:rgba(124,58,237,.12);border:1px solid rgba(168,85,247,.25);border-radius:10px;padding:14px 16px">
+            <input type="checkbox" id="f-sms_consent" ${checked ? 'checked' : ''} style="margin-top:3px;width:18px;height:18px;flex-shrink:0;cursor:pointer">
+            <span style="font-size:.86rem;color:#fff;line-height:1.55">
+              <strong>Yes, send me text messages about my booking</strong> at the number above.<br>
+              <span style="font-size:.78rem;color:#A78BCA">
+                You'll get booking confirmations, deposit and payment links, a reminder before your event, and a review request afterwards — around 2–5 messages per booking. Msg &amp; data rates may apply. Reply STOP to cancel, HELP for help. Consent is not a condition of booking.
+              </span>
+            </span>
+          </label>
         </div>`;
     }
 
@@ -638,6 +662,7 @@
         <p style="color:#A78BCA;margin-bottom:16px;font-size:.9rem">Anything marked <span style="color:#FFD600">needed</span> is still missing — fill in what you can.</p>
         ${CLIENT_EDITABLE_FIELDS.map(([key, label, type]) => editableFieldHtml(key, label, booking[key], type)).join('')}
         ${editableTextareaHtml('notes', 'Notes for Us', booking.notes)}
+        ${smsConsentHtml(booking.sms_consent === true)}
         <button class="btn" id="save-btn" onclick="saveBooking()">Save My Details</button>
 
         ${booking.status === 'quoted' ? `
@@ -719,6 +744,16 @@
       for (const key of keys) {
         const el = document.getElementById(`f-${key}`);
         if (!el) continue;
+        // A checkbox's .value is the string "on" whether or not it is ticked, so
+        // the generic path below would compare "on" to "false" and post "on" as
+        // a consent record. Read .checked, and send a real boolean — the server
+        // takes nothing else as consent.
+        if (el.type === 'checkbox') {
+          const now = el.checked;
+          if (now === (source[key] === true)) continue;
+          updates[key] = now;
+          continue;
+        }
         const newVal = el.value.trim();
         const oldVal = String(source[key] ?? '').trim();
         // Only send fields the client actually changed — an untouched empty

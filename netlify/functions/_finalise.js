@@ -8,6 +8,7 @@
 // shape this codebase has eighteen documented instances of.
 
 const { esc } = require('./_email');
+const { SMS_CONSENT_TEXT } = require('./_sms');
 
 // Deliberately excludes every field that carries money (total_price,
 // deposit_amount, balance_due, service_price, mileage_cost, items), workflow
@@ -18,6 +19,12 @@ const CLIENT_EDITABLE = Object.freeze([
   'client_name', 'client_phone', 'client_email',
   'event_time', 'event_location', 'event_zip', 'venue', 'surface_type',
   'guest_count', 'child_name', 'guests_of_honour', 'notes',
+  // Consent to be texted, which a client may give OR withdraw here. The public
+  // booking form has collected this since 2026-08-16, but only bookings taken
+  // through that form could ever answer — a booking Joe entered by hand or
+  // imported had no way to say yes, which is most of the book. Every booking
+  // passes through this page, so this is where the answer can actually be got.
+  'sms_consent',
 ]);
 
 // Two editable fields have types that matter.
@@ -73,6 +80,25 @@ function sanitiseClientEdit(body) {
       fields[k] = n;
       continue;
     }
+    if (k === 'sms_consent') {
+      // Strict booleans only, exactly as bookings.js:313 treats the same field.
+      // This is the record that says a person affirmatively agreed to be texted,
+      // so it must never be produced by a truthy accident — "false", "0" and ""
+      // are all truthy-adjacent strings a form could plausibly send.
+      if (v !== true && v !== false) { rejected.push(k); continue; }
+      fields[k] = v;
+      // The flag alone is not a consent record. A carrier audit asks WHEN and
+      // to WHAT, so the timestamp and the exact wording are written with it,
+      // here rather than at the call site — the two writers of this field would
+      // otherwise each need their own copy of the rule to keep in step.
+      //
+      // Withdrawal clears both: keeping a stale "agreed at 10:04 to these
+      // words" beside sms_consent=false would misrepresent someone who has
+      // since said no.
+      fields.sms_consent_at = v ? new Date() : null;
+      fields.sms_consent_text = v ? SMS_CONSENT_TEXT : '';
+      continue;
+    }
     if (k === 'client_email') {
       const e = String(v || '').trim().toLowerCase();
       if (!EMAIL_SHAPE.test(e)) { rejected.push(k); continue; }
@@ -120,6 +146,7 @@ const FIELD_LABELS = Object.freeze({
   child_name: "birthday child's name",
   guests_of_honour: 'guest of honour',
   notes: 'notes',
+  sms_consent: 'text message updates',
 });
 
 // One line of the client's per-save receipt. Values are shown for short
@@ -130,6 +157,11 @@ const FIELD_LABELS = Object.freeze({
 function describeFieldChange(key, oldVal, newVal) {
   const label = FIELD_LABELS[key] || key;
   if (key === 'notes') return `${label} updated`;
+  // A boolean must not reach a client as "false" -> "true". They ticked a box;
+  // the receipt should say what the box now says.
+  if (typeof oldVal === 'boolean' || typeof newVal === 'boolean') {
+    return `${label}: ${newVal === true ? 'yes, text me' : 'no texts'}`;
+  }
   const from = oldVal === '' || oldVal == null ? '(blank)' : String(oldVal);
   const to   = newVal === '' || newVal == null ? '(blank)' : String(newVal);
   return `${label}: "${esc(from)}" → "${esc(to)}"`;

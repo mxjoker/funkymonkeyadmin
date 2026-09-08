@@ -99,10 +99,14 @@ const DAYS = [
 
 test('CAMP_EDITABLE is CLIENT_EDITABLE minus the per-kid/birthday fields', () => {
   const { CAMP_EDITABLE } = require('../netlify/functions/finalise-camp.js');
+  // sms_consent joins the three for a different reason: the camp finalise form
+  // does not ask for it, and a consent record quoting wording the organiser was
+  // never shown is worse than no consent record.
+  const excluded = ['guest_count', 'child_name', 'guests_of_honour', 'sms_consent'];
   assert.deepStrictEqual([...CAMP_EDITABLE].sort(), [...CLIENT_EDITABLE].filter(
-    f => !['guest_count', 'child_name', 'guests_of_honour'].includes(f)
+    f => !excluded.includes(f)
   ).sort());
-  for (const f of ['guest_count', 'child_name', 'guests_of_honour']) {
+  for (const f of excluded) {
     assert.ok(!CAMP_EDITABLE.includes(f), `${f} must not be camp-editable`);
   }
 });

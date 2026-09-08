@@ -3,7 +3,7 @@ const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_au
 const { notifyMatchingStaff } = require('./staff-assignments');
 const { normaliseBrand } = require('./_brand');
 const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems, getItemsForBookings } = require('./_items');
-const { sendSms } = require('./_sms');
+const { sendSms, SMS_CONSENT_TEXT } = require('./_sms');
 const { sendTemplate } = require('./automations');
 const { normaliseAddress } = require('./_address');
 const { getDriveMins } = require('./_schedule');
@@ -17,7 +17,6 @@ const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stri
 // question is never "did a box get ticked" but "what did they agree to". If the
 // form's wording changes, change it here in the same commit — a consent record
 // that quotes wording nobody ever saw is worse than no record.
-const SMS_CONSENT_TEXT = "Yes, send me text messages about my booking at the number above. You'll get booking confirmations, deposit and payment links, a reminder before your event, and a review request afterwards — around 2-5 messages per booking. Msg & data rates may apply. Reply STOP to cancel, HELP for help. Consent is not a condition of booking.";
 
 // The opt-in confirmation, sent once, immediately after a customer ticks the
 // consent box. Declared verbatim on the A2P 10DLC campaign, so the registered

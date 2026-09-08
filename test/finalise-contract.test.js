@@ -8,7 +8,7 @@ test('the client-editable whitelist is exactly these fields', () => {
   assert.deepStrictEqual([...CLIENT_EDITABLE].sort(), [
     'child_name', 'client_email', 'client_name', 'client_phone',
     'event_location', 'event_time', 'event_zip', 'guest_count',
-    'guests_of_honour', 'notes', 'surface_type', 'venue',
+    'guests_of_honour', 'notes', 'sms_consent', 'surface_type', 'venue',
   ]);
 });
 
@@ -230,4 +230,74 @@ test('describeFieldChange escapes HTML in the values', () => {
   const out = describeFieldChange('venue', '<b>old</b>', '<script>bad</script>');
   assert.ok(!out.includes('<script>'));
   assert.match(out, /&lt;script&gt;/);
+});
+
+// ── SMS consent, added 2026-09-08 ────────────────────────────────────────────
+// Every booking passes through the finalise page, so it is the only place a
+// phone-ordered or imported booking can ever be asked. The record it writes is
+// what a carrier audit inspects, so it is held to the same standard as the
+// public booking form's.
+
+test('consent is only ever a real boolean, never a truthy string', () => {
+  // A form that posts "false", "on" or "0" must not create a consent record.
+  for (const v of ['true', 'false', 'on', '1', '0', 1, 0, null, {}, []]) {
+    const r = sanitiseClientEdit({ sms_consent: v });
+    assert.deepStrictEqual(r.fields, {}, `${JSON.stringify(v)} must not be consent`);
+    assert.deepStrictEqual(r.rejected, ['sms_consent']);
+  }
+});
+
+test('agreeing records when, and to exactly what wording', () => {
+  const { SMS_CONSENT_TEXT } = require('../netlify/functions/_sms.js');
+  const r = sanitiseClientEdit({ sms_consent: true });
+  assert.strictEqual(r.fields.sms_consent, true);
+  assert.ok(r.fields.sms_consent_at instanceof Date, 'a consent with no timestamp is not evidence');
+  assert.strictEqual(r.fields.sms_consent_text, SMS_CONSENT_TEXT);
+  // One copy of the wording, shared with the public form's writer.
+  assert.match(r.fields.sms_consent_text, /Reply STOP to cancel/);
+  assert.match(r.fields.sms_consent_text, /not a condition of booking/);
+});
+
+test('withdrawing clears the record rather than leaving a stale one', () => {
+  const r = sanitiseClientEdit({ sms_consent: false });
+  assert.strictEqual(r.fields.sms_consent, false);
+  assert.strictEqual(r.fields.sms_consent_at, null,
+    'keeping "agreed at 10:04" beside a No misrepresents someone who said no');
+  assert.strictEqual(r.fields.sms_consent_text, '');
+  assert.deepStrictEqual(r.rejected, []);
+});
+
+test('the consent columns are written but never shown to the client as columns', () => {
+  // sms_consent_at and sms_consent_text ride along in `fields` so the generic
+  // UPDATE writes them. finalise.js filters the receipt to CLIENT_EDITABLE so
+  // they cannot reach a client email as a raw column name.
+  const r = sanitiseClientEdit({ sms_consent: true });
+  for (const k of ['sms_consent_at', 'sms_consent_text']) {
+    assert.ok(k in r.fields, `${k} must be written`);
+    assert.ok(!CLIENT_EDITABLE.includes(k), `${k} must not be client-writable`);
+  }
+});
+
+test('a consent change reads as words in the receipt, not true and false', () => {
+  assert.strictEqual(describeFieldChange('sms_consent', false, true),
+    'text message updates: yes, text me');
+  assert.strictEqual(describeFieldChange('sms_consent', true, false),
+    'text message updates: no texts');
+});
+
+test('the finalise page and the stored wording say the same thing', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { SMS_CONSENT_TEXT } = require('../netlify/functions/_sms.js');
+  const html = fs.readFileSync(path.join(__dirname, '../my-booking.html'), 'utf8');
+  // Storing words we never showed is the failure this guards: the record must
+  // describe what was actually on screen beside the box.
+  for (const phrase of ['Reply STOP to cancel', 'Consent is not a condition of booking',
+                        'Msg &amp; data rates may apply']) {
+    const plain = phrase.replace('&amp;', '&');
+    assert.ok(html.includes(phrase), `the page must show "${plain}"`);
+    assert.ok(SMS_CONSENT_TEXT.includes(plain), `the stored record must contain "${plain}"`);
+  }
+  assert.ok(!html.includes('required') || !/f-sms_consent[^>]*required/.test(html),
+    'consent must never be a required field');
 });
