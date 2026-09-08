@@ -122,6 +122,41 @@ async function unstaffedAlerts(client, now) {
   return sent;
 }
 
+// ── Heartbeat ────────────────────────────────────────────────────────────────
+// The stamp that proves this run happened. Until it existed the only trace a
+// run left was the mail it sent, so a run that died was indistinguishable from
+// a quiet day with nothing due — which is how 2026-09-02 cost a client her
+// reminder and stayed invisible until someone audited the database by hand.
+//
+// Deliberately NOT an alert of its own: whoever reads this stamp is a different
+// job, because a dead run cannot notice that it is dead. calendar-sync runs
+// hourly and does the reading.
+// Created here too: this function reaches admin_settings without going through
+// _auth or calendar.js, so on a cold database the table need not exist yet.
+async function recordRun(client) {
+  await client.query(`CREATE TABLE IF NOT EXISTS admin_settings (
+    key VARCHAR(64) PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  await client.query(
+    `INSERT INTO admin_settings (key, value, updated_at)
+     VALUES ('last_automation_run', NOW()::text, NOW())
+     ON CONFLICT (key) DO UPDATE SET value=NOW()::text, updated_at=NOW()`
+  );
+}
+
+// A dead man's switch for the case the heartbeat cannot cover: Netlify never
+// invoking anything at all, which takes the hourly reader down with this job.
+// Inert until HEALTHCHECK_URL is set, so it costs nothing until it is wanted.
+async function pingHealthcheck() {
+  const url = process.env.HEALTHCHECK_URL;
+  if (!url) return;
+  try {
+    await fetch(url, { method: 'POST' });
+  } catch (e) {
+    // A monitoring ping must never be the reason a run reports failure.
+    console.error('healthcheck ping failed:', e.message);
+  }
+}
+
 exports.handler = async () => {
   const startedAt = new Date().toISOString();
   const now = new Date();
@@ -138,16 +173,30 @@ exports.handler = async () => {
       // Each of the three jobs is guarded independently — one failing query
       // must not cost the others their run, and a scheduled function that
       // fails quietly is how the original problem stayed invisible for months.
-      const held = await flushHeldSms(client, now).catch(e => { console.error('flushHeldSms FAILED:', e.message); return { sent: 0, expired: 0, optedOut: 0, blocked: 0 }; });
-      const sent = await runScheduledAutomations(client).catch(e => { console.error('runScheduledAutomations FAILED:', e.message); return 0; });
-      const dayOf = await staffDayOfReminders(client, now).catch(e => { console.error('staffDayOfReminders FAILED:', e.message); return 0; });
-      const alerts = await unstaffedAlerts(client, now).catch(e => { console.error('unstaffedAlerts FAILED:', e.message); return 0; });
-      const followUps = await sendDueScheduledEmails(client, now).catch(e => { console.error('sendDueScheduledEmails FAILED:', e.message); return 0; });
-      return { held, sent, dayOf, alerts, followUps };
+      //
+      // Each guard also names itself in `failures`. Swallowing an exception is
+      // right for the other jobs' sake and wrong for anyone's knowledge of it:
+      // a run that limped is not a run that worked, and only a clean one earns
+      // the heartbeat below.
+      const failures = [];
+      const guard = (name, fallback) => (e) => { console.error(`${name} FAILED:`, e.message); failures.push(name); return fallback; };
+
+      const held = await flushHeldSms(client, now).catch(guard('flushHeldSms', { sent: 0, expired: 0, optedOut: 0, blocked: 0 }));
+      const sent = await runScheduledAutomations(client).catch(guard('runScheduledAutomations', 0));
+      const dayOf = await staffDayOfReminders(client, now).catch(guard('staffDayOfReminders', 0));
+      const alerts = await unstaffedAlerts(client, now).catch(guard('unstaffedAlerts', 0));
+      const followUps = await sendDueScheduledEmails(client, now).catch(guard('sendDueScheduledEmails', 0));
+
+      // Only a clean run stamps the heartbeat, so the hourly reader alerts on a
+      // run that blew up as well as on one that never happened.
+      if (!failures.length) await recordRun(client);
+      return { held, sent, dayOf, alerts, followUps, failures };
     });
 
-    console.log(`Scheduled automations complete — ${result.sent} rule message(s), ${result.held.sent} held SMS flushed, ${result.held.expired} expired, ${result.held.optedOut} opted out, ${result.held.blocked} blocked (no Twilio creds), ${result.dayOf} day-of reminder(s), ${result.alerts} unstaffed alert(s), ${result.followUps} scheduled follow-up(s)`);
-    return { statusCode: 200, body: JSON.stringify({ ok: true, ...result, startedAt }) };
+    if (!result.failures.length) await pingHealthcheck();
+
+    console.log(`Scheduled automations complete — ${result.sent} rule message(s), ${result.held.sent} held SMS flushed, ${result.held.expired} expired, ${result.held.optedOut} opted out, ${result.held.blocked} blocked (no Twilio creds), ${result.dayOf} day-of reminder(s), ${result.alerts} unstaffed alert(s), ${result.followUps} scheduled follow-up(s)${result.failures.length ? ` — ${result.failures.length} job(s) FAILED: ${result.failures.join(', ')}` : ''}`);
+    return { statusCode: 200, body: JSON.stringify({ ok: !result.failures.length, ...result, startedAt }) };
   } catch (e) {
     console.error('Scheduled automations FAILED:', e.message);
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: e.message, startedAt }) };
@@ -156,3 +205,4 @@ exports.handler = async () => {
 
 module.exports.staffDayOfReminders = staffDayOfReminders;
 module.exports.unstaffedAlerts = unstaffedAlerts;
+module.exports.recordRun = recordRun;

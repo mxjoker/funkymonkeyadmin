@@ -11,6 +11,7 @@
 const { withClient } = require('./_db');
 const { parseIcs } = require('./_ics');
 const { ensureCalendarTables } = require('./calendar-feeds');
+const { ensureSmsTables, sendSms } = require('./_sms');
 
 const TZ = 'America/Chicago';
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -133,9 +134,60 @@ async function syncAllFeeds(client, now = new Date(), fetchImpl = fetch) {
   return { synced, failed };
 }
 
+// ── Watching the daily automations run ───────────────────────────────────────
+// This job is here only because it is the one that runs hourly. A dead run
+// cannot report itself, so something else has to notice the silence, and the
+// alternative — a second scheduled function whose only purpose is to look —
+// is a whole cron to maintain for one query.
+//
+// The signal is the heartbeat's age, NOT whether any mail went out. Over the
+// 30 days to 2026-09-06 the automations sent nothing at all on 12 of them and
+// only one was a fault, so alerting on a quiet day would have cried wolf
+// eleven times and taught everyone to ignore it.
+//
+// 25 hours, not 24: the run is daily, so a 24h threshold would trip on ordinary
+// minute-to-minute drift between one run and the next.
+const STALE_AFTER_HOURS = 25;
+
+async function checkAutomationsHeartbeat(client, now = new Date()) {
+  const notify = process.env.NOTIFY_SMS;
+  if (!notify) return { alerted: false, reason: 'NOTIFY_SMS unset' };
+
+  await ensureSmsTables(client);
+  const { rows } = await client.query(
+    "SELECT updated_at FROM admin_settings WHERE key='last_automation_run'");
+
+  // No stamp at all means the heartbeat has never been written — true on the
+  // first deploy, before the next 14:00 run. Staying quiet until there is
+  // something to compare against beats a guaranteed alert on release day.
+  if (!rows.length || !rows[0].updated_at) return { alerted: false, reason: 'no heartbeat yet' };
+
+  const ageHours = (now - new Date(rows[0].updated_at)) / 3600000;
+  if (ageHours < STALE_AFTER_HOURS) return { alerted: false, ageHours };
+
+  // Once a day while it stays broken, not once an hour. Same per-day dedupe the
+  // unstaffed alert uses, for the same reason.
+  const { rows: already } = await client.query(
+    `SELECT 1 FROM sms_log
+     WHERE trigger_label='Automations stalled' AND created_at::date = CURRENT_DATE LIMIT 1`);
+  if (already.length) return { alerted: false, reason: 'already alerted today', ageHours };
+
+  await sendSms(client, notify,
+    `Automations have not run for ${Math.floor(ageHours)}h. Client reminders are not going out. Check the Netlify function log.`,
+    { trigger_label: 'Automations stalled', now });
+  return { alerted: true, ageHours };
+}
+
 exports.handler = async () => {
   try {
-    const result = await withClient((client) => syncAllFeeds(client, new Date()));
+    const result = await withClient(async (client) => {
+      const synced = await syncAllFeeds(client, new Date());
+      // Guarded: the watchdog must never be the reason the sync reports failure.
+      const heartbeat = await checkAutomationsHeartbeat(client, new Date())
+        .catch(e => { console.error('checkAutomationsHeartbeat FAILED:', e.message); return { alerted: false }; });
+      if (heartbeat.alerted) console.error(`calendar-sync: automations stalled ${Math.floor(heartbeat.ageHours)}h — alert sent`);
+      return { ...synced, heartbeat };
+    });
     return { statusCode: 200, body: JSON.stringify(result) };
   } catch (e) {
     // Every per-feed path redacts before returning, so nothing here should
@@ -151,3 +203,5 @@ exports.handler = async () => {
 module.exports.windowFor = windowFor;
 module.exports.syncFeed = syncFeed;
 module.exports.syncAllFeeds = syncAllFeeds;
+module.exports.checkAutomationsHeartbeat = checkAutomationsHeartbeat;
+module.exports.STALE_AFTER_HOURS = STALE_AFTER_HOURS;
