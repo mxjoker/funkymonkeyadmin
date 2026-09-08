@@ -17,7 +17,7 @@ function loadHelpers() {
   // timeRange calls fmtTime, which lives just above the block.
   const fmtTime = HTML.slice(HTML.indexOf('function fmtTime(t)'), HTML.indexOf('// ══ PURE TIME HELPERS'));
   vm.runInContext(fmtTime + HTML.slice(a, b) +
-    '\nout = { addMinutes, timeRange, fmtDuration, clockedHoursLabel, reportButtonVisible };', ctx);
+    '\nout = { addMinutes, timeRange, fmtDuration, clockedHoursLabel, reportButtonVisible, onSiteTime };', ctx);
   return ctx.out;
 }
 
