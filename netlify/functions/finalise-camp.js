@@ -30,7 +30,13 @@ const { logChange, esc, fmtEventDate } = require('./_email');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
-const CAMP_EXCLUDED = new Set(['guest_count', 'child_name', 'guests_of_honour']);
+// sms_consent is excluded for a different reason than the other three: those
+// are meaningless for a camp, this one is simply not ASKED for on the camp
+// finalise form. Accepting it anyway would let a crafted request store a
+// consent record quoting wording the organiser was never shown, which is the
+// one thing a consent record must never be. Ask on that form first, then
+// remove it from here.
+const CAMP_EXCLUDED = new Set(['guest_count', 'child_name', 'guests_of_honour', 'sms_consent']);
 const CAMP_EDITABLE = Object.freeze(CLIENT_EDITABLE.filter(f => !CAMP_EXCLUDED.has(f)));
 
 // Shared auth, same shape as finalise.js's. Returns the camp row or null;

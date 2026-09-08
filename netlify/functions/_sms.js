@@ -398,4 +398,12 @@ async function flushHeldSms(client, now = new Date()) {
   return { sent, expired, optedOut, blocked: 0 };
 }
 
-module.exports = { normalisePhone, isQuietHours, renderSms, ensureSmsTables, isOptedOut, logSms, sendSms, toGsm7, smsSegments, flushHeldSms };
+// The exact words a client agreed to, stored on the booking beside the flag.
+// This is the evidentiary record a carrier audit asks for, so it lives in ONE
+// place: bookings.js (the public form) and _finalise.js (the finalise form)
+// both write it, and two copies would drift the moment the wording is tuned.
+// Changing this text changes what we claim people consented to — it must match
+// the words actually shown beside the checkbox on every form that collects it.
+const SMS_CONSENT_TEXT = "Yes, send me text messages about my booking at the number above. You'll get booking confirmations, deposit and payment links, a reminder before your event, and a review request afterwards — around 2-5 messages per booking. Msg & data rates may apply. Reply STOP to cancel, HELP for help. Consent is not a condition of booking.";
+
+module.exports = { SMS_CONSENT_TEXT, normalisePhone, isQuietHours, renderSms, ensureSmsTables, isOptedOut, logSms, sendSms, toGsm7, smsSegments, flushHeldSms };
