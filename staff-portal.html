@@ -496,6 +496,7 @@ async function loadPortal() {
     el.innerHTML = '';
     renderGigs(data.myGigs || [], data.openGigs || []);
     renderEarnings(currentWeekTotal, lastPaymentAmount, lastPaymentDate, payrollRuns || []);
+    renderMyDocs();
   } catch(e) {
     el.innerHTML = '<div style="text-align:center;padding:48px;color:#f87171">Failed to load. Try refreshing.</div>';
   }
@@ -595,6 +596,44 @@ function renderGigs(myGigs, openGigs) {
   
   // Append gigs to existing content (earnings is already there)
   el.innerHTML += html;
+}
+
+// What this person still owes Joe. Fetched separately from the gig payload so a
+// documents outage can never blank the gig list — the thing they actually open
+// the portal for.
+//
+// Nothing is uploaded here. The instruction is "email it to Joe", because that
+// is where the documents already go and his inbox is the record (owner's call,
+// 2026-09-10). A mailto gets them out of the portal and into a composed message
+// with the right subject, which is as close to one-tap as email gets.
+async function renderMyDocs() {
+  let mine = [];
+  try {
+    const res = await apiFetch('/api/staff-docs');
+    mine = (await res.json()).mine || [];
+  } catch (e) {
+    console.error('renderMyDocs:', e);
+    return;
+  }
+  const owed = mine.filter(d => d.status === 'outstanding');
+  if (!owed.length) return;   // nothing to nag about, so say nothing
+
+  const subject = encodeURIComponent('My employment documents');
+  const body = encodeURIComponent('Hi Joe,\n\nAttached:\n' + owed.map(d => '- ' + d.label).join('\n') + '\n\nThanks!');
+  const el = document.getElementById('portal-content');
+  el.innerHTML += sectionHeader('📄 Paperwork We Still Need', '#f59e0b') + `
+    <div style="background:#1a1035;border:1px solid rgba(245,158,11,.3);border-left:4px solid #f59e0b;border-radius:12px;padding:16px;margin-bottom:14px">
+      <div style="font-size:.82rem;color:#a78bca;margin-bottom:12px">Email these to Joe and he'll tick them off.</div>
+      ${owed.map(d => `
+        <div style="padding:8px 0;border-top:1px solid rgba(168,85,247,.12)">
+          <div style="font-weight:700;color:#fff;font-size:.88rem">${esc(d.label)}</div>
+          ${d.instructions ? `<div style="font-size:.78rem;color:#a78bca;margin-top:3px">${esc(d.instructions)}</div>` : ''}
+          ${d.link_url ? `<a href="${esc(d.link_url)}" target="_blank" rel="noopener" style="font-size:.78rem;color:#c084fc;font-weight:700;text-decoration:underline">Open the form →</a>` : ''}
+        </div>`).join('')}
+      <a href="mailto:Joe.Coover@gmail.com?subject=${subject}&body=${body}"
+         style="display:inline-block;margin-top:14px;background:#7c3aed;color:#fff;font-weight:700;
+                padding:9px 16px;border-radius:8px;text-decoration:none;font-size:.85rem">Email them to Joe</a>
+    </div>`;
 }
 
 function sectionHeader(label, color) {

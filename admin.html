@@ -578,6 +578,8 @@ input,select,textarea{font-family:inherit}
         <button class="btn btn-primary btn-sm" onclick="openAddStaff()">+ Add Staff</button>
       </div>
       <div class="staff-grid" id="staff-grid"></div>
+      <div id="staff-archived" style="margin-top:28px"></div>
+      <div id="staff-docs" style="margin-top:32px"></div>
     </div>
 
     <!-- ══ STAFF PORTAL (staff login view) ══ -->
@@ -5218,6 +5220,12 @@ function parseSkills(raw) {
 async function renderStaff() {
   const grid = document.getElementById('staff-grid');
   grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af">Loading…</div>';
+  // Independent of the active roster and started before it, so the archive
+  // still renders on the paths where this function returns early — an empty
+  // roster or a failed load. Archiving the last active person must not be what
+  // hides the button that undoes it.
+  renderArchivedStaff();
+  renderStaffDocs();
   try {
     const res = await apiFetch('/api/staff');
     allStaff = await res.json();
@@ -5294,6 +5302,143 @@ async function addSkill(id, skillName) {
   if (skills.find(sk => sk.name === skillName)) return;
   skills.push({ name: skillName, exclusive: EXCLUSIVE_TAGS.has(skillName) });
   await patchStaff(id, { skills });
+  renderStaff();
+}
+
+// ── Employment documents ─────────────────────────────────────────────────────
+// A checklist, not a filing cabinet. Staff email their paperwork to Joe and he
+// ticks it off here; nothing is uploaded and nothing is stored but the fact
+// that it arrived (owner's call, 2026-09-10).
+//
+// Absence of a row means outstanding, so a new hire correctly owes everything
+// on day one without anybody backfilling them.
+let staffDocsCache = null;
+
+async function renderStaffDocs() {
+  const box = document.getElementById('staff-docs');
+  if (!box) return;
+  try {
+    const res = await apiFetch('/api/staff-docs');
+    staffDocsCache = await res.json();
+  } catch (e) {
+    console.error('renderStaffDocs:', e);
+    box.innerHTML = '';
+    return;
+  }
+  const { types = [], staff = [], docs = [] } = staffDocsCache || {};
+  const live = types.filter(t => t.active);
+  if (!live.length || !staff.length) { box.innerHTML = ''; return; }
+
+  const statusOf = (staffId, typeId) => {
+    const d = docs.find(x => x.staff_id === staffId && x.doc_type_id === typeId);
+    return d ? d.status : 'outstanding';
+  };
+  const cell = (staffId, t) => {
+    const st = statusOf(staffId, t.id);
+    const look = st === 'received' ? ['#059669', '#ecfdf5', '✓']
+               : st === 'waived'   ? ['#6b7280', '#f3f4f6', '–']
+               : ['#dc2626', '#fef2f2', '✗'];
+    return `<td style="text-align:center;padding:6px">
+      <button onclick="cycleStaffDoc(${staffId},${t.id})" title="${esc(t.label)} — ${st}. Click to change."
+        style="cursor:pointer;border:1px solid ${look[0]}33;background:${look[1]};color:${look[0]};
+               font-weight:800;border-radius:6px;width:34px;height:28px">${look[2]}</button></td>`;
+  };
+
+  const outstanding = staff.reduce((n, p) =>
+    n + live.filter(t => statusOf(p.id, t.id) === 'outstanding').length, 0);
+
+  box.innerHTML = `
+    <details ${outstanding ? 'open' : ''}>
+      <summary style="cursor:pointer;font-weight:700;padding:8px 0">
+        Employment documents ${outstanding
+          ? `<span style="color:#dc2626">— ${outstanding} outstanding</span>`
+          : '<span style="color:#059669">— all collected</span>'}
+      </summary>
+      <p style="color:#6b7280;font-size:.82rem;margin:6px 0 12px">
+        Staff email these to you. Click a box to mark it received, again to waive it, again to reset.
+      </p>
+      <div style="overflow-x:auto">
+        <table style="border-collapse:collapse;font-size:.82rem;min-width:100%">
+          <thead><tr>
+            <th style="text-align:left;padding:6px 10px;color:#6b7280;font-weight:700">Staff</th>
+            ${live.map(t => `<th style="padding:6px;color:#6b7280;font-weight:700;font-size:.74rem">${esc(t.label)}</th>`).join('')}
+          </tr></thead>
+          <tbody>
+            ${staff.map(p => `<tr style="border-top:1px solid #f3f4f6">
+              <td style="padding:6px 10px;font-weight:600">${esc(p.preferred_name || p.name)}</td>
+              ${live.map(t => cell(p.id, t)).join('')}
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </details>`;
+}
+
+// received -> waived -> outstanding -> received. One control, because the three
+// states are mutually exclusive and a dropdown per cell would be unusable at
+// this size.
+const DOC_CYCLE = { outstanding: 'received', received: 'waived', waived: 'outstanding' };
+
+async function cycleStaffDoc(staffId, typeId) {
+  const docs = (staffDocsCache && staffDocsCache.docs) || [];
+  const cur = docs.find(x => x.staff_id === staffId && x.doc_type_id === typeId);
+  const next = DOC_CYCLE[cur ? cur.status : 'outstanding'] || 'received';
+  await apiFetch('/api/staff-docs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'mark', staff_id: staffId, doc_type_id: typeId, status: next }),
+  });
+  renderStaffDocs();
+}
+
+// ── Archived staff ───────────────────────────────────────────────────────────
+// Archiving is a soft delete that has always worked (DELETE /api/staff/:id sets
+// active=FALSE and keeps every row), but until now nothing could SEE the result:
+// both staff GET routes filtered active=TRUE, so an archived person vanished
+// with no way back and no way to check what was kept. Three people were already
+// in that state.
+//
+// Fetched separately from allStaff and deliberately NOT merged into it. That
+// global feeds the assignment picker, the SMS recipient lists and payroll, all
+// of which read it as "people who can work" — an archived person appearing in
+// any of them is the bug this whole feature is supposed to prevent.
+async function renderArchivedStaff() {
+  const box = document.getElementById('staff-archived');
+  if (!box) return;
+  let archived = [];
+  try {
+    const res = await apiFetch('/api/staff?archived=1');
+    archived = await res.json();
+  } catch (e) {
+    console.error('renderArchivedStaff:', e);
+    box.innerHTML = '';
+    return;
+  }
+  if (!archived.length) { box.innerHTML = ''; return; }
+
+  box.innerHTML = `
+    <details>
+      <summary style="cursor:pointer;font-weight:700;color:#6b7280;padding:8px 0">
+        Archived (${archived.length}) — history kept, not on the roster
+      </summary>
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+        ${archived.map(s => `
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px">
+            <div>
+              <div style="font-weight:700;color:#374151">${esc(s.preferred_name || s.name)}</div>
+              <div style="font-size:.78rem;color:#9ca3af">${esc(s.role || '')}${s.email ? ' · ' + esc(s.email) : ''}</div>
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="restoreStaff(${s.id})">Restore</button>
+          </div>`).join('')}
+      </div>
+    </details>`;
+}
+
+// PUT already accepted `active` (adminColMap), so restoring needs no new route
+// — only a way to reach it.
+async function restoreStaff(id) {
+  if (!confirm('Put this person back on the active roster?')) return;
+  await patchStaff(id, { active: true });
   renderStaff();
 }
 

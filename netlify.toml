@@ -44,6 +44,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/staff-docs"
+  to = "/.netlify/functions/staff-docs"
+  status = 200
+
+[[redirects]]
   from = "/api/staff-assignments"
   to = "/.netlify/functions/staff-assignments"
   status = 200
