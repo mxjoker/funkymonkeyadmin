@@ -147,8 +147,13 @@ exports.handler = async (event) => {
     return withClient(async (client) => {
       await ensureTable(client);
       const cols = auth.role === 'admin' ? SAFE_COLS + ADMIN_EXTRA_COLS : SAFE_COLS;
+      // An admin may open an archived person's record — reviewing what you
+      // kept is the entire point of archiving rather than deleting. A staff
+      // caller still cannot: archiving somebody ends their access, and letting
+      // them read their own row afterwards would quietly undo that.
+      const activeOnly = auth.role === 'admin' ? '' : ' AND active=TRUE';
       const { rows } = await client.query(
-        `SELECT ${cols} FROM staff WHERE id=$1 AND active=TRUE`,
+        `SELECT ${cols} FROM staff WHERE id=$1${activeOnly}`,
         [pathId]
       );
       if (!rows.length) return json(404, { error: 'Not found' });
@@ -166,13 +171,23 @@ exports.handler = async (event) => {
     const auth = await requireAuth(event);
     if (!auth) return unauthorized();
 
+    // ?archived=1 returns ONLY archived people, and only to an admin. A flag
+    // that WIDENED this list would have been the smaller diff and the wrong
+    // one: every caller of GET /api/staff — the assignment picker, the SMS
+    // recipient lists, payroll, the calendar map — trusts it to mean "people
+    // who can work". Archiving somebody must remove them from all of those,
+    // so the default contract stays exactly as it was and the archive is a
+    // separate question you have to ask for.
+    const archivedOnly = event.queryStringParameters?.archived === '1';
+    if (archivedOnly && auth.role !== 'admin') return forbidden();
+
     return withClient(async (client) => {
       await ensureTable(client);
       // Admin gets has_access_code so they know which staff need codes generated.
       // Staff role never gets pin/access_code_hash or this derived flag.
       const cols = auth.role === 'admin' ? SAFE_COLS + ADMIN_EXTRA_COLS : SAFE_COLS;
       const { rows } = await client.query(
-        `SELECT ${cols} FROM staff WHERE active=TRUE ORDER BY sort_order, id`
+        `SELECT ${cols} FROM staff WHERE active=${archivedOnly ? 'FALSE' : 'TRUE'} ORDER BY sort_order, id`
       );
       // Strip admin_notes for staff callers
       const out = auth.role === 'staff'
