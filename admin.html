@@ -2428,6 +2428,16 @@ function upcomingGigRow(b) {
 // Same seven options the customer picks from at booking-form.html:286. Typed
 // free-hand here they fragment the Analytics "Source" breakdown, which groups
 // on the raw string.
+// Who collects the client's money — NOT "how did they hear about us", which is
+// REFERRAL_SOURCES below. Anything other than 'direct' means the platform took
+// payment, so we never ask for a deposit or a balance. Mirrors SOURCES in
+// netlify/functions/_source.js, which is the decider; this list is only what a
+// human picks from. Stored lowercase so the two agree.
+const BOOKING_SOURCES = [
+  { v: 'direct',   t: 'Direct (we collect payment)' },
+  { v: 'gigsalad', t: 'GigSalad (they collect payment)' },
+];
+
 const REFERRAL_SOURCES = [
   'Google Search', 'Facebook', 'Instagram',
   'Friend / Word of Mouth', 'Nextdoor', 'Repeat Customer',
@@ -2852,6 +2862,7 @@ function openBooking(id, seed) {
       ${bookingField('Phone', 'client_phone', b.client_phone, 'tel')}
       ${bookingField('Email', 'client_email', b.client_email, 'email')}
       ${bookingField('Referral', 'referral_source', b.referral_source, 'text', REFERRAL_SOURCES)}
+      ${bookingField('Booked Via', 'source', b.source || 'direct', 'text', BOOKING_SOURCES)}
       ${bookingField('Customer Type', 'customer_type', b.customer_type, 'text', CUSTOMER_TYPES)}
       ${bookingField('Event Date', 'event_date', (b.event_date || '').slice(0, 10), 'date')}
       ${bookingField('Event Time', 'event_time', b.event_time, 'time')}

@@ -394,7 +394,10 @@
       errorEl.style.display = 'none';
       document.getElementById('page-notice').style.display = 'none';
 
-      if (!reference || !email) {
+      // A claim link carries the reference alone — asking for the email here
+      // would be asking for the very thing the page exists to collect.
+      const claiming = !!reference && !email && new URLSearchParams(location.search).get('claim') === '1';
+      if (!reference || (!email && !claiming)) {
         errorEl.textContent = 'Please enter both your booking reference and email address';
         errorEl.style.display = 'block';
         return;
@@ -407,6 +410,14 @@
         const endpoint = isCampRef(reference) ? '/api/finalise-camp' : '/api/finalise';
         const res = await fetch(`${endpoint}?reference=${encodeURIComponent(reference)}&email=${encodeURIComponent(email)}`);
         const data = await res.json();
+
+        // A GigSalad booking nobody has claimed yet: the server let us in on the
+        // reference alone because it holds no email to check against. Different
+        // shape, different screen — and no money on it.
+        if (res.ok && data.claim) {
+          displayClaim(data);
+          return;
+        }
 
         if (!res.ok || (!data.booking && !data.camp && !data.redirect)) {
           errorEl.textContent = data.error || 'No booking found for that reference number and email. Please check and try again.';
@@ -823,6 +834,83 @@
       }
     }
 
+    // ── Claiming a platform booking ──────────────────────────────────────────
+    // GigSalad masks the client's email until after they book, so a booking can
+    // reach us with no way to contact them. This screen is how they hand it
+    // over: a short form behind the booking reference alone.
+    //
+    // It shows no prices and offers no payment. GigSalad already took their
+    // money; the only thing we need is how to reach them and where to send the
+    // crew.
+    let claimData = null;
+
+    function displayClaim(data) {
+      claimData = data;
+      document.getElementById('lookup-form').style.display = 'none';
+      document.getElementById('result').style.display = 'block';
+      const docs = document.getElementById('documents-card');
+      if (docs) docs.style.display = 'none';
+      const refEl = document.getElementById('result-reference');
+      if (refEl) refEl.textContent = data.reference;
+
+      // formatDate is this page's own helper (fmtDateShort/fmtTime are the staff
+      // portal's, and do not exist here). event_time is already "HH:MM".
+      const when = data.event_date ? formatDate(data.event_date) : 'your event';
+      document.getElementById('booking-details').innerHTML = `
+        <div class="section-title">👋 Welcome, ${esc((data.client_name || '').split(' ')[0] || 'there')}!</div>
+        <p style="color:#A78BCA;line-height:1.6;margin-bottom:18px">
+          We have your <strong style="color:#fff">${esc(data.service_name || 'booking')}</strong> on
+          <strong style="color:#fff">${esc(when)}</strong>${data.event_time ? ' at ' + esc(String(data.event_time).slice(0, 5)) : ''},
+          booked through ${esc(data.platform || 'the platform')}.
+          <strong style="color:#fff">Nothing to pay here</strong> — ${esc(data.platform || 'the platform')} has that.
+          We just need a couple of details so we can reach you and get the crew to the right place.
+        </p>
+        ${editableFieldHtml('client_email', 'Your Email Address', '', 'email')}
+        ${editableFieldHtml('client_phone', 'Phone Number', '', 'tel')}
+        ${editableFieldHtml('event_location', 'Event Address', '', 'text')}
+        ${editableFieldHtml('event_zip', 'Event ZIP Code', '', 'text')}
+        ${editableTextareaHtml('notes', 'Anything we should know?', '')}
+        ${smsConsentHtml(false)}
+        <button class="btn" id="claim-btn" onclick="submitClaim()">Save My Details</button>`;
+    }
+
+    async function submitClaim() {
+      const btn = document.getElementById('claim-btn');
+      const updates = buildUpdatesFrom(
+        ['client_email', 'client_phone', 'event_location', 'event_zip', 'notes', 'sms_consent'], {});
+
+      if (!String(updates.client_email || '').trim()) {
+        showNotice('Please give us an email address so we can send your confirmation.', true);
+        document.getElementById('f-client_email')?.focus();
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        // No email in the envelope — the server re-checks the claim conditions
+        // against the live row and this is the request that supplies it.
+        const res = await fetch('/api/finalise', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reference: claimData.reference, updates })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showNotice(data.error || 'Failed to save. Please try again.', true);
+          return;
+        }
+        // The door has now closed behind them. Reload on the ordinary two-factor
+        // link so everything after this is the normal authenticated page.
+        location.replace(`/my-booking.html?ref=${encodeURIComponent(claimData.reference)}&email=${encodeURIComponent(String(updates.client_email).trim().toLowerCase())}`);
+      } catch (e) {
+        showNotice('Failed to save. Please try again.', true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save My Details';
+      }
+    }
+
     async function saveBooking() {
       if (!currentBooking) return;
       const btn = document.getElementById('save-btn');
@@ -1122,6 +1210,11 @@
     if (params.get('ref') && params.get('email')) {
       document.getElementById('reference').value = params.get('ref');
       document.getElementById('email').value = params.get('email');
+      lookupBooking();
+    } else if (params.get('ref') && params.get('claim') === '1') {
+      // Pasted into a GigSalad message thread. There is no email to prefill —
+      // collecting it is the whole point.
+      document.getElementById('reference').value = params.get('ref');
       lookupBooking();
     }
   </script>

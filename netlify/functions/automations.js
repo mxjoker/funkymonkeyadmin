@@ -1,7 +1,8 @@
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { wrap, render, esc, sendEmail, logStatus, logEmail, ensureEmailLog, unresolvedLinkToken } = require('./_email');
+const { wrap, render, esc, sendEmail, logStatus, logEmail, ensureEmailLog, unresolvedLinkToken, asksForPayment } = require('./_email');
 const { sendSms, renderSms, ensureSmsTables, normalisePhone } = require('./_sms');
+const { platformBooked, platformLabel } = require('./_source');
 
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
 
@@ -409,6 +410,17 @@ async function sendAutomationMessage(client, rule, booking, stripeLink, now) {
   const NOTIFY = process.env.NOTIFY_EMAIL || 'Joe.Coover@gmail.com';
   const channel = rule.channel || 'email';
   let sentAnything = false;
+
+  // A booking the platform collected for must never be asked for money by us.
+  // Checked once, above both channels, and only for messages aimed at the
+  // CLIENT — an admin alert about a GigSalad gig is Joe talking to himself and
+  // carries no risk of billing anyone twice.
+  if (rule.recipient !== 'admin' && platformBooked(booking)
+      && (asksForPayment(rule.body_sms) || asksForPayment(rule.body_html))) {
+    console.log('automation skipped — booking paid through', platformLabel(booking),
+      '| rule:', rule.name, '| booking:', booking.id);
+    return false;
+  }
 
   // SMS first, and above the email recipient check — an SMS-only rule must not
   // be skipped because the booking happens to have no email address.
