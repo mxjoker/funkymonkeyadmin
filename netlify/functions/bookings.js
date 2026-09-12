@@ -132,6 +132,9 @@ async function ensureTable(client) {
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_payment_intent_id VARCHAR(255)",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_payment_link TEXT DEFAULT ''",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_balance_link TEXT DEFAULT ''",
+    // Who collects the money. NULL reads as 'direct' through _source.js, so
+    // every existing row keeps today's behaviour without a backfill.
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'direct'",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_date DATE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_time VARCHAR(10)",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_zip VARCHAR(10)",

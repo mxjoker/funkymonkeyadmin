@@ -175,6 +175,9 @@ exports.handler = async (event) => {
           client_phone:      "client_phone",
           client_email:      "client_email",
           referral_source:   "referral_source",
+          // Who collects the money. _source.js is the decider that reads it;
+          // this is the one place an admin can set it.
+          source:            "source",
           service_id:        "service_id",
           service_name:      "service_name",
           service_price:     "service_price",

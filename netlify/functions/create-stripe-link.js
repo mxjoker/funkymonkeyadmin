@@ -1,4 +1,5 @@
 const { withClient } = require('./_db');
+const { platformBooked, platformLabel } = require('./_source');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
 const { sendTemplate } = require('./automations');
 const { balanceCharge, SERVICE_FEE_RATE } = require('./_items');
@@ -93,7 +94,11 @@ exports.handler = async (event) => {
   }
 
   // Validate the referenced booking exists
-  const COLS = 'id, reference, balance_due, total_price, mileage_cost, deposit_amount, deposit_paid';
+  // `source` is in this list because platformBooked() reads it below. Left out,
+  // it would be undefined, _source.js would fall back to 'direct', and a
+  // GigSalad client would be billed for money GigSalad already took — a
+  // silent default producing a confident wrong answer.
+  const COLS = 'id, reference, balance_due, total_price, mileage_cost, deposit_amount, deposit_paid, source';
   const bookingRow = await withClient(async (c) => {
     if (bookingId) {
       const { rows } = await c.query(`SELECT ${COLS} FROM bookings WHERE id=$1 LIMIT 1`, [parseInt(bookingId)]);
@@ -108,6 +113,14 @@ exports.handler = async (event) => {
 
   if (!bookingRow) {
     return json(404, { error: "Booking not found" });
+  }
+
+  // Same refusal as the client-facing mint in finalise.js. An admin pressing
+  // "Send deposit link" on a GigSalad gig is a slip, not an override: the
+  // client has already paid the platform, so there is no second payment to
+  // take and the button should say so rather than produce a live checkout.
+  if (platformBooked(bookingRow)) {
+    return json(409, { error: `This booking was paid through ${platformLabel(bookingRow)} — there is nothing to collect.` });
   }
 
   // What we are about to charge. In balance mode this is the only place the

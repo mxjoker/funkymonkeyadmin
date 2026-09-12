@@ -12,6 +12,7 @@ const { CORS, preflight } = require('./_auth');
 const { esc, logChange, ensureBookingChanges, ensureEmailLog, finaliseLinkFor } = require('./_email');
 const { normaliseAddress } = require('./_address');
 const { sanitiseClientEdit, zipChanged, describeFieldChange, CLIENT_EDITABLE } = require('./_finalise');
+const { platformBooked, platformLabel } = require('./_source');
 const { ensureBookingItems, getItems, balanceCharge } = require('./_items');
 const { buildSessionParams } = require('./create-stripe-link');
 const { sendTemplate } = require('./automations');
@@ -79,6 +80,55 @@ async function authenticate(c, reference, email) {
   return rows[0];
 }
 
+// ── The claim door ───────────────────────────────────────────────────────────
+// A booking taken through GigSalad reaches us with no client email: the
+// platform masks it. That is a deadlock for the normal link, which authenticates
+// on reference AND email — we cannot email someone a form asking for the email
+// we would need to send them the form.
+//
+// So one narrow door opens on the reference alone, and it closes the moment it
+// has done its job. All four conditions must hold:
+//
+//   1. the booking is platform-booked, so the door never exists for the 732
+//      direct bookings that already authenticate properly;
+//   2. it has no client_email yet — once captured, this returns null forever
+//      and the ordinary two-factor link takes over;
+//   3. the reference matches exactly;
+//   4. nothing about money is served through it (see claimView below).
+//
+// The reference is the only secret, and it is GigSalad's own booking number
+// shared with that client in that thread. Someone guessing it learns a first
+// name, a service and a date — and can set an email, which is the one real
+// risk. It is bounded by (2): the first submission closes the door, so the
+// window is between Joe pasting the link and the client using it.
+async function authenticateClaim(c, reference) {
+  const ref = String(reference || '').trim().toUpperCase();
+  if (!ref) return null;
+  const { rows } = await c.query('SELECT * FROM bookings WHERE reference = $1', [ref]);
+  if (!rows.length) return null;
+  const b = rows[0];
+  if (!platformBooked(b)) return null;
+  if (String(b.client_email || '').trim()) return null;
+  return b;
+}
+
+// Deliberately NOT buildFinaliseResponse. That view carries total_price,
+// deposit_amount, balance_due and a payment link — every one of which is either
+// the platform's business or meaningless here, and all of it behind a single
+// guessable identifier. This shows just enough for the client to recognise
+// their own booking before they type into it.
+function claimView(booking) {
+  return {
+    claim: true,
+    reference: booking.reference,
+    platform: platformLabel(booking),
+    client_name: booking.client_name || '',
+    service_name: booking.service_name || '',
+    event_date: booking.event_date || '',
+    event_time: booking.event_time || '',
+  };
+}
+
 // A day inside a camp (Phase 2) shares one finalise form with its whole
 // camp — its own link must hand off to the camp's, or a client who finishes
 // Monday's form reasonably believes the whole week is done. Returns null
@@ -101,7 +151,14 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'GET') {
     return withClient(async (c) => {
       const booking = await authenticate(c, qs.reference, qs.email);
-      if (!booking) return json(404, { error: 'Booking not found' });
+      if (!booking) {
+        // No email supplied (or it did not match) — the claim door is the only
+        // other way in, and it opens for exactly one shape of booking. Tried
+        // second so it can never shadow the ordinary authenticated view.
+        const claim = await authenticateClaim(c, qs.reference);
+        if (claim) return json(200, claimView(claim));
+        return json(404, { error: 'Booking not found' });
+      }
       // This day belongs to a camp — hand off to the camp's own finalise
       // form rather than showing this day's alone. See campRedirectFor.
       if (booking.camp_id) {
@@ -148,6 +205,13 @@ exports.handler = async (event) => {
         // a client can reach, so both guards that keep the two links from being
         // live at once live here as well as in create-stripe-link.js.
         const kind = body.kind === 'balance' ? 'balance' : 'deposit';
+        // The platform already took their money. Minting a checkout here would
+        // bill one client twice for one gig — the single worst thing this
+        // endpoint could do — so it is refused before any Stripe call, and the
+        // message names who actually holds the payment.
+        if (platformBooked(booking)) {
+          return json(409, { error: `This booking was paid through ${platformLabel(booking)}, so there is nothing to pay here.` });
+        }
         if (kind === 'deposit' && booking.deposit_paid) {
           return json(409, { error: 'This deposit is already paid — nothing further to pay here.' });
         }
@@ -237,7 +301,17 @@ exports.handler = async (event) => {
       await ensureBookingChanges(c);
       await ensureEmailLog(c);
 
-      const booking = await authenticate(c, reference, email);
+      let booking = await authenticate(c, reference, email);
+      // The claim door again, on the write side: this is the submission that
+      // supplies the missing email, so by definition it cannot authenticate
+      // with one. authenticateClaim re-checks every condition against the
+      // current row — it is not enough that the GET was allowed, because the
+      // email may have been set in between.
+      let claiming = false;
+      if (!booking) {
+        booking = await authenticateClaim(c, reference);
+        claiming = !!booking;
+      }
       if (!booking) return json(404, { error: 'Booking not found' });
 
       // Same hand-off as the GET above — a camp day's edits must go through
@@ -250,13 +324,29 @@ exports.handler = async (event) => {
 
       // A booking already paid for is finished being finalised. Editing it here
       // would change details the crew may already be working from.
-      if (booking.deposit_paid) {
+      //
+      // A claim is the exception, and has to be: a platform booking is marked
+      // deposit_paid precisely BECAUSE the platform took the money, so this
+      // gate would have closed the claim door on every booking it was built
+      // for — booking 821 among them. A claim still cannot touch money; the
+      // whitelist never let it.
+      if (booking.deposit_paid && !claiming) {
         return json(409, { error: 'This booking is already confirmed. Call us on (405) 431-6625 to change anything.' });
       }
 
       const { fields, rejected } = sanitiseClientEdit(updates);
       if (rejected.length) console.error('finalise: rejected fields for', booking.reference, '|', rejected.join(', '));
       if (!Object.keys(fields).length) return json(400, { error: 'Nothing to save', rejected });
+
+      // A claim must deliver the email it exists to collect. Tested on the
+      // SANITISED field rather than the raw body, so sanitiseClientEdit's
+      // EMAIL_SHAPE stays the only definition of a valid address — a second
+      // regex here would eventually disagree with it. A rejected address lands
+      // here as absent, which is the right answer either way: the door stays
+      // open and they can try again.
+      if (claiming && !fields.client_email) {
+        return json(400, { error: 'Please give us a valid email address so we can send your confirmation.' });
+      }
 
       // Keep the ZIP out of the address line, same as every other writer.
       let addrConflict = null;

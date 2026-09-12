@@ -335,6 +335,18 @@ const LINK_TOKEN_SOURCES = {
   },
 };
 
+// Does this body ask the client for money? Decided by the link tokens it
+// carries rather than by the rule's name, because the name is Joe's to edit in
+// the Automations tab and a renamed rule must not change what it is allowed to
+// do. A body with a checkout link in it is a demand for payment whatever it is
+// called.
+const MONEY_TOKENS = ['{{balance_link}}', '{{payment_link}}', '{{deposit_link}}'];
+
+function asksForPayment(body) {
+  const text = String(body || '');
+  return MONEY_TOKENS.some(t => text.includes(t));
+}
+
 // Returns the first token the body asks for and cannot fill, or null. Callers
 // treat a non-null as "do not send", which is the only safe reading: a payment
 // message with no link is worse than no message, because the client believes
@@ -362,5 +374,5 @@ async function logChange(client, bookingId, action, detail) {
 }
 
 module.exports = {
-  unresolvedLinkToken,
+  unresolvedLinkToken, asksForPayment,
   rowTokens, stripTags, applyExtra, wrap, render, esc, fmtEventDate, reviewLinkFor, sendEmail, logStatus, logEmail, ensureEmailLog, ensureBookingChanges, logChange, finaliseLinkFor };
