@@ -306,6 +306,49 @@ function finaliseLinkFor(booking) {
   return `${site}/my-booking.html?ref=${encodeURIComponent(ref)}&email=${encodeURIComponent(email)}`;
 }
 
+// ── Link tokens that resolved to nothing ─────────────────────────────────────
+// A body that ASKS for a link and gets an empty string still sends. It still
+// reads like an instruction to pay. It simply has nothing after the colon.
+//
+// That is not hypothetical: measured 2026-09-12, 21 of 21 upcoming bookings
+// that owe money have an empty stripe_balance_link, because a balance link is
+// minted when the button is pressed rather than stored (see the 24-hour expiry
+// on Stripe Checkout sessions). The drafted "Balance due" SMS rule uses
+// {{balance_link}}, so switching it on would have texted all 21 a demand for
+// money with a blank where the link belongs.
+//
+// Each channel is checked against the fallbacks ITS OWN renderer applies —
+// renderSms falls back to the booking's stored deposit link and render() does
+// not — because a guard that disagrees with the renderer either blocks a
+// message that would have been fine or passes one that would not.
+const LINK_TOKEN_SOURCES = {
+  sms: {
+    '{{balance_link}}':  (b, link) => b.stripe_balance_link || '',
+    '{{payment_link}}':  (b, link) => link || b.stripe_payment_link || '',
+    '{{deposit_link}}':  (b, link) => link || b.stripe_payment_link || '',
+    '{{finalise_link}}': (b) => finaliseLinkFor(b),
+  },
+  email: {
+    '{{payment_link}}':  (b, link) => link || '',
+    '{{deposit_link}}':  (b, link) => link || '',
+    '{{finalise_link}}': (b) => finaliseLinkFor(b),
+  },
+};
+
+// Returns the first token the body asks for and cannot fill, or null. Callers
+// treat a non-null as "do not send", which is the only safe reading: a payment
+// message with no link is worse than no message, because the client believes
+// they were told how to pay.
+function unresolvedLinkToken(channel, body, booking, link) {
+  const sources = LINK_TOKEN_SOURCES[channel];
+  if (!sources) return null;
+  const text = String(body || '');
+  for (const [token, resolve] of Object.entries(sources)) {
+    if (text.includes(token) && !resolve(booking || {}, link)) return token;
+  }
+  return null;
+}
+
 // ── Log a booking change ───────────────────────────────────────────────────────
 async function logChange(client, bookingId, action, detail) {
   try {
@@ -319,4 +362,5 @@ async function logChange(client, bookingId, action, detail) {
 }
 
 module.exports = {
+  unresolvedLinkToken,
   rowTokens, stripTags, applyExtra, wrap, render, esc, fmtEventDate, reviewLinkFor, sendEmail, logStatus, logEmail, ensureEmailLog, ensureBookingChanges, logChange, finaliseLinkFor };
