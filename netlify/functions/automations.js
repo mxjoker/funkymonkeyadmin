@@ -1,6 +1,6 @@
 const { getPool, withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { wrap, render, esc, sendEmail, logStatus, logEmail, ensureEmailLog } = require('./_email');
+const { wrap, render, esc, sendEmail, logStatus, logEmail, ensureEmailLog, unresolvedLinkToken } = require('./_email');
 const { sendSms, renderSms, ensureSmsTables, normalisePhone } = require('./_sms');
 
 const SITE = process.env.SITE_URL || 'https://funkymonkeyadmin.netlify.app';
@@ -416,6 +416,7 @@ async function sendAutomationMessage(client, rule, booking, stripeLink, now) {
     const toAdmin = rule.recipient === 'admin';
     const toPhone = toAdmin ? process.env.NOTIFY_SMS : booking.client_phone;
     const smsBody = renderSms(rule.body_sms || '', booking, stripeLink);
+    const deadSmsLink = unresolvedLinkToken('sms', rule.body_sms, booking, stripeLink);
     // A client is texted only if they ticked the consent box. sms_optout is a
     // global STOP list and answers a different question — "did they ask us to
     // stop" — which is not the same as "did they ever agree to start". Having a
@@ -427,6 +428,13 @@ async function sendAutomationMessage(client, rule, booking, stripeLink, now) {
       console.error('automation SMS skipped — no phone | rule:', rule.name, '| booking:', booking.id);
     } else if (!smsBody.trim()) {
       console.error('automation SMS skipped — rule has an empty body_sms | rule:', rule.name);
+    } else if (deadSmsLink) {
+      // Refusing to send is the safe reading. A text that says "pay your
+      // balance here:" and then stops is worse than no text: the client
+      // believes they have been told how to pay, and there is nothing to
+      // click. Loud, because a rule in this state never sends to anyone.
+      console.error('automation SMS skipped — link token', deadSmsLink,
+        'resolved to nothing | rule:', rule.name, '| booking:', booking.id);
     } else if (await alreadySmsSent(client, rule.id, booking.id)) {
       console.log('automation SMS skipped — already sent | rule:', rule.name, '| booking:', booking.id);
     } else {
@@ -439,7 +447,14 @@ async function sendAutomationMessage(client, rule, booking, stripeLink, now) {
 
   if (channel === 'email' || channel === 'both') {
     const toEmail = rule.recipient === 'admin' ? NOTIFY : booking.client_email;
-    if (toEmail) {
+    const deadLink = unresolvedLinkToken('email', rule.body_html, booking, stripeLink);
+    if (deadLink) {
+      // Same rule as the SMS branch above. An email whose Pay button resolved
+      // to an empty string renders as a paragraph about paying with no button
+      // under it, which reads as a broken email rather than an honest one.
+      console.error('automation email skipped — link token', deadLink,
+        'resolved to nothing | rule:', rule.name, '| booking:', booking.id);
+    } else if (toEmail) {
       const subject = render(rule.subject, booking, stripeLink);
       const html    = wrap(render(rule.body_html, booking, stripeLink));
       // Guarded here rather than at each loop: one bad recipient must never
