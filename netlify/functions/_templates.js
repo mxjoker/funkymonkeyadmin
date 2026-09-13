@@ -186,6 +186,39 @@ const TEMPLATES = [
     // $0-deposit booking (school, library) must not be told to pay a deposit,
     // and a template language with an if-statement is a bigger thing to own
     // than a second row.
+    // GigSalad (and any later platform) takes the client's money and adds its
+    // own fees on top, so every figure we hold is the wrong figure to show
+    // them: our total is not what they paid. This version quotes nothing.
+    //
+    // It exists because the automatic confirmation (rule 1) carries
+    // {{deposit_link}}, which _source.js correctly suppresses for a platform
+    // booking — leaving a confirmed GigSalad client with no email at all. This
+    // is what goes instead, and like the two finalisation templates beside it,
+    // it is a button Joe presses.
+    //
+    // {{finalise_link}} not {{deposit_link}}: the page it opens collects the
+    // details and the SMS consent GigSalad never gave us, and offers no
+    // payment for a platform booking.
+    template_key: 'gigsalad_confirmed',
+    name: 'Booking confirmed — to a GigSalad client',
+    // 27, not 18: the decade decides the group in the Automations tab, and 10-15
+    // is money-to-the-client. This is a booking message and belongs beside the
+    // two finalisation templates at 20 and 21.
+    trigger_event: 'manual', recipient: 'client', sort_order: 27,
+    subject: "You're all set! 🎊 — Funky Monkey Events ({{reference}})",
+    body_html: `<h2>Hi {{client_first_name}}!</h2>
+      <p>Your booking is confirmed and we can't wait.</p>
+      <p><strong>Service:</strong> {{service_name}}<br/>
+         <strong>Date:</strong> {{event_datetime}}</p>
+      <p><strong>Payment is all handled through GigSalad</strong> — there's nothing to pay us directly, and nothing else for you to do about the money.</p>
+      <h3>One quick thing</h3>
+      <p>So we can reach you and get the crew to the right place, please confirm your details here:</p>
+      <p><a href="{{finalise_link}}">Confirm my details</a></p>
+      <p>Questions? Call or text us at <strong>(405) 431-6625</strong>, or just reply to this email.</p>
+      <p>— The Funky Monkey Events Team 🐒</p>`,
+    body_sms: "Hi {{client_first_name}}! You're confirmed for {{service_name}} on {{event_date}}. Payment's handled through GigSalad. Please confirm your details: {{finalise_link}} Reply STOP to opt out."
+  },
+  {
     template_key: 'finalisation_link_no_deposit',
     name: 'Finalisation link (nothing to pay) — to the client',
     trigger_event: 'manual', recipient: 'client', sort_order: 21,

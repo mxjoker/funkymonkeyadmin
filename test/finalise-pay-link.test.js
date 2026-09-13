@@ -57,7 +57,13 @@ test('sending a finalisation link always mints a fresh session', () => {
                          ADMIN.indexOf('async function recordClientPayment'));
   assert.ok(!/!b\.stripe_payment_link\s*&&/.test(fn),
     'the reuse check is back — a re-sent finalisation email will carry an expired link');
-  assert.match(fn, /if \(depositAmount > 0\)/, 'a $0-deposit booking must still not get a link');
+  // The guard gained a second clause (platform bookings) on 2026-09-13. Match
+  // the invariant rather than the exact line: a zero deposit must never mint a
+  // session, whatever else is being decided alongside it.
+  assert.match(fn, /if \(depositAmount > 0(\s*&&[^)]*)?\)/,
+    'a $0-deposit booking must still not get a link');
+  assert.match(fn, /depositAmount > 0 && !platform/,
+    'nor must a platform booking — GigSalad already took the money');
 });
 
 // The promotion must happen only after the send actually succeeded — a booking

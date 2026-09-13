@@ -4766,7 +4766,13 @@ async function sendFinalisationLink(id) {
     // could not pay. The manual deposit button worked precisely because it has
     // always minted a new one.
     const depositAmount = Number(b.deposit_amount) || 0;
-    if (depositAmount > 0) {
+    // A platform booking has no deposit for us to take — GigSalad took the
+    // money and added its own fees, so every figure we hold is the wrong one to
+    // quote at this client. No Stripe session, no amounts, its own template.
+    // Same shape as the $0-deposit branch below: the choice is made here, where
+    // we already know which kind of booking this is.
+    const platform = String(b.source || 'direct').toLowerCase() !== 'direct';
+    if (depositAmount > 0 && !platform) {
       const linkRes = await apiFetch('/api/create-stripe-link', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -4791,7 +4797,9 @@ async function sendFinalisationLink(id) {
     // A $0-deposit booking (school, library, etc.) has nothing to pay, and must
     // not be told to pay a deposit. Two templates rather than one with a
     // conditional — the choice is made here, where the amount is already known.
-    const key = depositAmount > 0 ? 'finalisation_link' : 'finalisation_link_no_deposit';
+    const key = platform ? 'gigsalad_confirmed'
+              : depositAmount > 0 ? 'finalisation_link'
+              : 'finalisation_link_no_deposit';
     const res = await apiFetch('/api/automations', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'send_template', booking_id: b.id, template_key: key })
@@ -5815,7 +5823,7 @@ async function loadStaffPortal() {
               <tbody>
                 ${payrollRuns.map(r => `
                   <tr style="border-bottom:1px solid #f3f4f6">
-                    <td style="padding:10px">${new Date(r.week_ending).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</td>
+                    <td style="padding:10px">${parseDate(r.week_ending).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</td>
                     <td style="padding:10px;text-align:right;font-weight:700">$${Number(r.staff_total).toFixed(2)}</td>
                     <td style="padding:10px;text-align:right">
                       ${r.status === 'paid'
@@ -7526,7 +7534,7 @@ async function loadGoogleReviews(bookingId) {
 
     const reviewsHtml = data.reviews.map(review => {
       const reviewDate = review.review_date 
-        ? new Date(review.review_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        ? parseDate(review.review_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
         : 'Date not set';
       
       const stars = review.rating ? '⭐'.repeat(review.rating) : '';
@@ -7971,7 +7979,7 @@ async function preflightPayroll() {
         html += `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer" onclick="openBooking(${ev.booking_id})">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
             <div>
-              <span style="font-weight:700;color:#1e1b4b">${new Date(ev.event_date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</span>
+              <span style="font-weight:700;color:#1e1b4b">${parseDate(ev.event_date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</span>
               ${ev.event_time ? `<span style="color:#6b7280;margin-left:6px;font-size:.85rem">${fmtTime(ev.event_time)}</span>` : ''}
               <span style="margin-left:8px;font-size:.85rem;color:#374151">${esc(ev.service_name)}</span>
               <a href="#" onclick="event.stopPropagation();openBooking(${ev.booking_id})" style="margin-left:8px;font-size:.82rem;color:#7c3aed;text-decoration:none">${esc(ev.reference)}</a>
@@ -8013,7 +8021,7 @@ async function preflightPayroll() {
         html += `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:10px">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px">
             <div>
-              <span style="font-weight:700;color:#1e1b4b">${new Date(ev.event_date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</span>
+              <span style="font-weight:700;color:#1e1b4b">${parseDate(ev.event_date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</span>
               ${ev.event_time ? `<span style="color:#6b7280;margin-left:6px;font-size:.85rem">${fmtTime(ev.event_time)}</span>` : ''}
               <span style="margin-left:8px;font-size:.85rem;color:#374151">${esc(ev.service_name)}</span>
               <a href="#" onclick="openBooking(${ev.booking_id})" style="margin-left:8px;font-size:.82rem;color:#7c3aed;text-decoration:none">${esc(ev.reference)}</a>
@@ -8050,7 +8058,8 @@ async function loadPayroll() {
 
     const today = new Date();
     const thisSunday = new Date(today);
-    thisSunday.setDate(today.getDate() + (7 - today.getDay()));
+    // On a Sunday, this week's Sunday is today — not next week's.
+    thisSunday.setDate(today.getDate() + (today.getDay() === 0 ? 0 : 7 - today.getDay()));
     const thisMonday = new Date(thisSunday);
     thisMonday.setDate(thisSunday.getDate() - 6);
 
@@ -8093,7 +8102,7 @@ async function loadPayroll() {
         <tbody>
           ${runs.map(r => `
             <tr>
-              <td>${new Date(r.week_ending).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'})}</td>
+              <td>${parseDate(r.week_ending).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'})}</td>
               <td>${r.staff_count || 0}</td>
               <td style="font-weight:700">$${Number(r.total_amount).toFixed(2)}</td>
               <td>${statusBadge(r.status)}</td>
@@ -8118,12 +8127,14 @@ function setPayrollRange(preset) {
     const day = today.getDay(); // 0=Sun
     const mon = new Date(today); mon.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
     const sun = new Date(mon);   sun.setDate(mon.getDate() + 6);
-    from = mon.toISOString().split('T')[0];
-    to   = sun.toISOString().split('T')[0];
+    // en-CA is YYYY-MM-DD in LOCAL time. toISOString() is UTC, which shifted the
+    // whole range a day forward whenever the page was opened after ~7pm CDT.
+    from = mon.toLocaleDateString('en-CA');
+    to   = sun.toLocaleDateString('en-CA');
   } else {
     // First–last of current month
-    from = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-    to   = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+    from = new Date(today.getFullYear(), today.getMonth(), 1).toLocaleDateString('en-CA');
+    to   = new Date(today.getFullYear(), today.getMonth() + 1, 0).toLocaleDateString('en-CA');
   }
   document.getElementById('payroll-date-from').value = from;
   document.getElementById('payroll-date-to').value   = to;
@@ -8226,7 +8237,7 @@ async function viewPayrollRun(runId) {
               : '';
             return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:0.875rem;color:#6b7280;border-bottom:1px solid #e5e7eb;flex-wrap:wrap;gap:4px">
               <span style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
-                <span>${item.reference} — ${esc(item.service_name)} — ${new Date(item.event_date).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
+                <span>${item.reference} — ${esc(item.service_name)} — ${parseDate(item.event_date).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
                 ${adjHtml}
               </span>
               <span style="display:flex;align-items:center;gap:4px">

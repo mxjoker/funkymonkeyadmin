@@ -338,6 +338,17 @@ async function sendTemplate(client, booking, templateKey, link, opts = {}) {
     return { sent: false, error: 'This booking has no client email address, so nothing was sent' };
   }
 
+  // The dedupe guard is deliberately absent from this function — re-sending on
+  // purpose is the whole point of a button. The MONEY guard is not the same
+  // thing: pressing "send the deposit link" on a GigSalad booking is a slip,
+  // not an intent, and the client has already paid the platform. Every manual
+  // send passes through here, so this is the one place it has to be checked.
+  if (toClient && platformBooked(booking) && (asksForPayment(rule.body_html) || asksForPayment(rule.body_sms))) {
+    const who = platformLabel(booking);
+    console.error('sendTemplate refused —', templateKey, 'asks for money but this booking was paid through', who);
+    return { sent: false, error: `This booking was paid through ${who}, so it must not be sent a payment request.` };
+  }
+
   const subject = render(rule.subject, booking, link, opts.extra);
   const html = wrap(render(rule.body_html, booking, link, opts.extra));
   let res;
