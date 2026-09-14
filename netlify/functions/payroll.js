@@ -298,6 +298,7 @@ exports.handler = async (event) => {
         const { rows: items } = await client.query(`
           SELECT pli.*,
                  s.name as staff_name, s.preferred_name, s.color,
+                 s.payment_method, s.payment_handle,
                  sp.booking_id, sp.pay_type,
                  b.reference, b.service_name, b.event_date
           FROM payroll_line_items pli
@@ -316,6 +317,8 @@ exports.handler = async (event) => {
               staff_name: item.staff_name,
               preferred_name: item.preferred_name,
               color: item.color,
+              payment_method: item.payment_method,
+              payment_handle: item.payment_handle,
               items: [],
               total: 0
             };
