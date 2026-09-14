@@ -2241,6 +2241,23 @@ function venmoPayLink(staff, amount, note) {
   return `https://venmo.com/${encodeURIComponent(handle)}?${q}`;
 }
 
+// What a notify_staff response actually means. The endpoint has always
+// returned a `reason` when it reached nobody — a booking still at 'quoted'
+// is not open to staff, and a service with no staff_slots has nothing to
+// match on — and the button threw it away and rendered "✅ Notified 0 staff",
+// a green tick over a send that never happened. Measured on FM-PM3CRC4Z,
+// 2026-09-13: status 'quoted', so the notifier correctly refused and the
+// screen reported success.
+function notifyOutcome(data) {
+  const n = Number(data && data.notified) || 0;
+  if (n > 0) return { ok: true, button: `✅ Notified ${n} staff`, message: '' };
+  return {
+    ok: false,
+    button: '⚠️ Nobody notified',
+    message: (data && data.reason) || 'Nobody matched this gig — check Catalogue → Staff Requirements and the staff skill tags.',
+  };
+}
+
 // ══ END PURE HELPERS ══
 
 // Default matches the old "Newest Inquiry" dropdown default, so the view the
@@ -4171,7 +4188,14 @@ async function notifyStaff(bookingId) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed');
-    btn.textContent = `✅ Notified ${data.notified} staff`;
+    const outcome = notifyOutcome(data);
+    btn.textContent = outcome.button;
+    // The reason goes in the summary line under the button, not a tooltip —
+    // "why did this send to nobody" is the whole answer and it has to be read.
+    const summary = document.getElementById('staff-summary-' + bookingId);
+    if (summary && outcome.message) {
+      summary.innerHTML = `<div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:8px;padding:8px 12px;margin-bottom:10px;color:#92400e;font-size:.82rem;font-weight:600">⚠️ ${esc(outcome.message)}</div>`;
+    }
     setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
   } catch(e) {
     btn.textContent = '❌ ' + e.message;

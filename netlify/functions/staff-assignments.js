@@ -118,6 +118,35 @@ let schemaReady;
 async function ensureTables(client) {
   if (!schemaReady) {
     schemaReady = (async () => {
+  // Every service a booking sells, one row each — not just the first one.
+  //
+  // bookings.service_id is rollupItems()'s services[0], so a booking that sells
+  // "Foam Party + Magic School Assembly" carries ONLY the foam id. Staffing is
+  // keyed on staff_slots.service_id, so the assembly's Magic Show slot was
+  // invisible: it never appeared in the admin slot panel, no magician ever saw
+  // the gig in the portal, and notify_staff never emailed one. Reorder the
+  // quote so the assembly is first and it inverts — the foam crew goes missing
+  // instead. Measured on FM-PM3CRC4Z (booking 776) 2026-09-13.
+  //
+  // A view rather than the same UNION written into three queries: staff_slots
+  // is joined from the admin panel, the portal's open-gig list and the
+  // notifier, and three copies of this is how they drift apart.
+  //
+  // The bookings arm is the fallback for legacy rows that predate booking_items
+  // and have a service_id but no item rows; DISTINCT absorbs the overlap.
+  await client.query(`
+    CREATE OR REPLACE VIEW booking_service_ids AS
+    SELECT DISTINCT booking_id, service_id FROM (
+      SELECT bi.booking_id, bi.service_id
+        FROM booking_items bi
+       WHERE bi.kind = 'service' AND COALESCE(bi.service_id, '') <> ''
+      UNION
+      SELECT b.id, b.service_id
+        FROM bookings b
+       WHERE COALESCE(b.service_id, '') <> ''
+    ) x
+  `);
+
   await client.query(`
     CREATE TABLE IF NOT EXISTS staff_slots (
       id SERIAL PRIMARY KEY,
@@ -317,11 +346,11 @@ exports.handler = async (event) => {
             [parseInt(bookingId)]
           );
           const { rows: slots } = await client.query(
-            `SELECT ss.*, b.service_id
+            `SELECT ss.*, bsi.service_id
              FROM staff_slots ss
-             JOIN bookings b ON b.service_id = ss.service_id
-             WHERE b.id = $1
-             ORDER BY ss.sort_order`,
+             JOIN booking_service_ids bsi ON bsi.service_id = ss.service_id
+             WHERE bsi.booking_id = $1
+             ORDER BY bsi.service_id, ss.sort_order`,
             [parseInt(bookingId)]
           );
           return json(200, { assignments, slots });
@@ -413,7 +442,8 @@ exports.handler = async (event) => {
                       -- whether to take the gig how long it runs.
                       svc.duration_minutes
                FROM bookings b
-               JOIN staff_slots ss ON ss.service_id = b.service_id
+               JOIN booking_service_ids bsi ON bsi.booking_id = b.id
+               JOIN staff_slots ss ON ss.service_id = bsi.service_id
                LEFT JOIN services svc ON svc.service_id = b.service_id
                WHERE b.status = ANY($3::text[])
                  AND b.event_date >= CURRENT_DATE
@@ -1165,8 +1195,11 @@ async function notifyStaffForBooking(client, booking) {
   }
 
   const { rows: slots } = await client.query(
-    'SELECT * FROM staff_slots WHERE service_id=$1 ORDER BY sort_order',
-    [booking.service_id]
+    `SELECT ss.* FROM staff_slots ss
+      JOIN booking_service_ids bsi ON bsi.service_id = ss.service_id
+     WHERE bsi.booking_id = $1
+     ORDER BY bsi.service_id, ss.sort_order`,
+    [booking.id]
   );
 
   // No slots means nobody knows what this gig needs, so nobody can be matched.
