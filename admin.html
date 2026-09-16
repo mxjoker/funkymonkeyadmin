@@ -1998,13 +1998,17 @@ function statusAfterFinalisationSent(status) {
   return now !== -1 && now < quoted ? 'quoted' : null;
 }
 
-// A deposit can only be waived while it is still outstanding. Waiving one that
-// was already collected would zero deposit_amount on a booking where money
-// actually arrived, and the balance recompute would then bill the client for
-// that money a second time.
-function depositWaivable(b) {
+// A deposit can only be waived — or asked for — while it is still outstanding.
+// Waiving one that was already collected would zero deposit_amount on a booking
+// where money actually arrived, and the balance recompute would then bill the
+// client for that money a second time. Asking again just confuses the client:
+// until 2026-09-15 the send button stayed up after payment and only
+// create-stripe-link.js's 400 stopped it, a guard the admin could not see.
+// One predicate for both, because they are the same question.
+function depositOutstanding(b) {
   return depositLinkAmount(b) > 0 && !!b && b.deposit_paid !== true;
 }
+const depositWaivable = depositOutstanding;   // kept: named in the waive UI and its tests
 
 // Mirrors workedHours() in netlify/functions/_timeclock.js — admin.html is a
 // static page with no build step and cannot require server modules, the same
@@ -2979,9 +2983,11 @@ function openBooking(id, seed) {
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
         <strong style="font-size:.875rem">💳 Stripe Deposit Link</strong>
         <div style="display:flex;align-items:center;gap:6px">
-          ${depositLinkAmount(b) > 0
+          ${depositOutstanding(b)
             ? `<button class="btn btn-primary btn-sm" onclick="sendStripeLink('${b.id}')">Send $${depositLinkAmount(b).toFixed(2)} deposit link</button>`
-            : `<span style="font-size:.75rem;color:#6b7280">No deposit on this booking</span>`}
+            : depositLinkAmount(b) > 0
+              ? `<span style="font-size:.75rem;color:#6b7280">Deposit paid${b.deposit_method ? ` (${esc(b.deposit_method)})` : ''}</span>`
+              : `<span style="font-size:.75rem;color:#6b7280">No deposit on this booking</span>`}
           ${depositWaivable(b)
             ? `<button class="btn btn-outline btn-sm" onclick="waiveDeposit('${b.id}')" title="Collect nothing up front. The whole amount becomes the balance, and the balance link unlocks.">Waive deposit</button>`
             : ''}
@@ -7133,6 +7139,7 @@ function openRuleModal(rule) {
             <option value="days_after_event" ${r.trigger_event==='days_after_event'?'selected':''}>X days after event</option>
             <option value="deposit_paid" ${r.trigger_event==='deposit_paid'?'selected':''}>Deposit paid</option>
             <option value="unstaffed" ${r.trigger_event==='unstaffed'?'selected':''}>Gig unstaffed, X days out</option>
+            <option value="incomplete" ${r.trigger_event==='incomplete'?'selected':''}>Gig incomplete (no time/ZIP/service), X days out</option>
           </select>
         </div>
         <div id="rule-trigger-detail">
@@ -7141,9 +7148,9 @@ function openRuleModal(rule) {
                <select class="form-control" id="rule-status">
                  ${['confirmed','cancelled','completed','accepted'].map(s=>`<option value="${s}" ${r.trigger_status===s?'selected':''}>${s}</option>`).join('')}
                </select>`
-            : r.trigger_event === 'unstaffed'
+            : isWindowedAlert(r.trigger_event)
             ? `<label class="form-label">Days ahead</label>
-               <input class="form-control" id="rule-days" type="number" min="0" value="${r.trigger_days ?? 3}">
+               <input class="form-control" id="rule-days" type="number" min="0" value="${r.trigger_days ?? alertDefaultDays(r.trigger_event)}">
                <label class="form-label" style="margin-top:8px">Watch which bookings</label>
                <select class="form-control" id="rule-status">
                  <option value="" ${!r.trigger_status?'selected':''}>Accepted and confirmed</option>
@@ -7199,14 +7206,25 @@ function openRuleModal(rule) {
   document.getElementById('booking-modal').classList.add('open');
 }
 
+// The two admin alerts — unstaffed and incomplete — are the only rules the
+// scheduler reads directly rather than the rules engine firing, and both carry
+// BOTH a day window and an optional status filter. Naming the set once matters:
+// a trigger missing from this list still SAVES, quietly dropping its window and
+// status to null, which is how an alert stops firing without anything failing.
+// Defaults mirror the seeds in automations.js — 14 days for incomplete, because
+// a missing ZIP has to be chased with the client and that takes longer than
+// finding crew.
+const isWindowedAlert = (t) => t === 'unstaffed' || t === 'incomplete';
+const alertDefaultDays = (t) => (t === 'incomplete' ? 14 : 3);
+
 function updateRuleTriggerUI() {
   const trigger = document.getElementById('rule-trigger').value;
   const det = document.getElementById('rule-trigger-detail');
   if (trigger === 'status_change') {
     det.innerHTML = `<label class="form-label">Status</label><select class="form-control" id="rule-status">${['confirmed','cancelled','completed','accepted'].map(s=>`<option value="${s}">${s}</option>`).join('')}</select>`;
-  } else if (trigger === 'unstaffed') {
+  } else if (isWindowedAlert(trigger)) {
     det.innerHTML = `<label class="form-label">Days ahead</label>
-      <input class="form-control" id="rule-days" type="number" min="0" value="3">
+      <input class="form-control" id="rule-days" type="number" min="0" value="${alertDefaultDays(trigger)}">
       <label class="form-label" style="margin-top:8px">Watch which bookings</label>
       <select class="form-control" id="rule-status">
         <option value="">Accepted and confirmed</option>
@@ -7229,10 +7247,10 @@ async function saveRule(ruleId) {
     // 'unstaffed' carries BOTH: a day window and an optional status filter.
     // An empty status means "accepted and confirmed", so '' must be sent as
     // null rather than dropped — otherwise narrowing it could never be undone.
-    trigger_status: (trigger==='status_change' || trigger==='unstaffed')
+    trigger_status: (trigger==='status_change' || isWindowedAlert(trigger))
       ? (document.getElementById('rule-status')?.value || null) : null,
-    trigger_days:   (trigger.startsWith('days_') || trigger==='unstaffed')
-      ? parseInt(document.getElementById('rule-days')?.value ?? (trigger==='unstaffed' ? 3 : 1)) : null,
+    trigger_days:   (trigger.startsWith('days_') || isWindowedAlert(trigger))
+      ? parseInt(document.getElementById('rule-days')?.value ?? (isWindowedAlert(trigger) ? alertDefaultDays(trigger) : 1)) : null,
     recipient:     document.getElementById('rule-recipient').value,
     subject:       document.getElementById('rule-subject').value.trim(),
     body_html:     document.getElementById('rule-body').value.trim(),

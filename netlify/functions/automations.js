@@ -101,6 +101,71 @@ async function ensureTables(client) {
      WHERE NOT EXISTS (SELECT 1 FROM automation_rules WHERE trigger_event='unstaffed')`
   );
 
+
+  // The incomplete-gig alert, same shape as the unstaffed one above: a rule so
+  // the window, statuses and wording are Joe's to edit, trigger_event matching
+  // no rules-engine query so only automations-scheduled.js fires it, and seeded
+  // by trigger_event so renaming it cannot duplicate it.
+  //
+  // 14 days rather than the unstaffed alert's 3: a missing ZIP or start time
+  // has to be chased with the client, which takes longer than finding crew.
+  await client.query(
+    `INSERT INTO automation_rules
+       (name, active, trigger_event, trigger_status, trigger_days, recipient, subject, body_html, body_sms, channel, sort_order)
+     SELECT 'Incomplete gig digest (admin)', TRUE, 'incomplete', NULL, 14, 'admin', 'Incomplete gig', '',
+            '{{count}} upcoming gig(s) need details before staff times can be calculated: {{list}}',
+            'sms', 810
+     WHERE NOT EXISTS (SELECT 1 FROM automation_rules WHERE trigger_event='incomplete')`
+  );
+
+
+  // ── The client SMS rules, seeded SWITCHED OFF ───────────────────────────────
+  // Drafted in docs/superpowers/plans/2026-08-14-sms-texting.md and never
+  // created, so no client has ever been texted — a client who said she got no
+  // reminders was right, and it was not a delivery failure.
+  //
+  // active=FALSE deliberately. Every trigger loop filters active=TRUE (see
+  // triggerStatusChange and runScheduledAutomations), so these fire nothing
+  // until Joe reads the wording in the Automations tab and switches each one
+  // on. Seeding a customer-facing text as live is not a decision code gets to
+  // make, and the wording is his anyway.
+  //
+  // channel='sms' rather than 'both': rule 1 already emails a confirmation and
+  // rule 2 already emails a reminder. 'both' on these would send that same
+  // message twice by two routes.
+  //
+  // Consent is enforced regardless — sendAutomationMessage refuses a client SMS
+  // unless booking.sms_consent is true, so switching one on reaches only the
+  // people who ticked the box on the finalisation page, currently about eight.
+  //
+  // Identified by template_key so this is idempotent and so re-running it can
+  // never duplicate a rule Joe has renamed. DO NOTHING, not DO UPDATE: once the
+  // row exists the wording and the on/off switch belong to him.
+  const CLIENT_SMS_DRAFTS = [
+    ['sms_deposit_request', 'Deposit request (SMS draft)', 'status_change', 'accepted', null, 23,
+     'Hi {{client_first_name}}! To lock in {{event_date}} we need your ${{deposit_amount}} deposit: {{finalise_link}} Reply STOP to opt out.'],
+    ['sms_day_before', 'Day-before reminder (SMS draft)', 'days_before_event', null, 1, 24,
+     "Hi {{client_first_name}}! We're all set for {{service_name}} tomorrow at {{event_time}}. See you then! Reply STOP to opt out."],
+    ['sms_balance_due', 'Balance due (SMS draft)', 'days_before_event', null, 7, 25,
+     'Hi {{client_first_name}}! Your remaining balance of ${{balance_due}} is due before {{event_date}}: {{finalise_link}} Reply STOP to opt out.'],
+  ];
+  // {{finalise_link}} rather than {{balance_link}} or {{deposit_link}} in all
+  // three: a Stripe checkout URL dies in 24 hours, so one minted into a text
+  // sent seven days out is dead on arrival, and stripe_balance_link is empty on
+  // every upcoming booking that owes money because links are minted on press
+  // now. finaliseLinkFor() is stable and the page it opens mints checkout when
+  // the client actually presses pay. unresolvedLinkToken() would refuse to send
+  // these at all if they used a stored link that resolved empty.
+  for (const [key, name, event, status, days, order, sms] of CLIENT_SMS_DRAFTS) {
+    await client.query(
+      `INSERT INTO automation_rules
+         (name, active, trigger_event, trigger_status, trigger_days, recipient, subject, body_html, body_sms, channel, sort_order, template_key)
+       VALUES ($1, FALSE, $2, $3, $4, 'client', '', '', $5, 'sms', $6, $7)
+       ON CONFLICT (template_key) DO NOTHING`,
+      [name, event, status, days, sms, order, key]
+    );
+  }
+
   // scheduled_emails: a one-off follow-up on a date Joe picks, per booking.
   // Not an automation_rule — a rule is "every booking N days from its event",
   // this is "this client, this date, this message", and modelling it as a rule

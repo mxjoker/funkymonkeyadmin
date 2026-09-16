@@ -22,6 +22,10 @@
 const { withClient } = require('./_db');
 const { runScheduledAutomations, ensureTables, sendDueScheduledEmails } = require('./automations');
 const { ensureSmsTables, sendSms, flushHeldSms, renderSms } = require('./_sms');
+// fmtEventDate, not a sixth private date formatter: event_date arrives as
+// "…T00:00:00.000Z" and any renderer that parses that whole string shows the
+// previous evening in Central. See test/my-booking-date.test.js.
+const { fmtEventDate } = require('./_email');
 const { wantsSms } = require('./staff-assignments');
 
 // ── Day-of reminder: call time and address, to everyone working today ────────
@@ -122,6 +126,105 @@ async function unstaffedAlerts(client, now) {
   return sent;
 }
 
+
+// ── Incomplete-gig alert: the fields staffing is built on ────────────────────
+// The gap this closes, measured 2026-09-15: booking 18 was confirmed, 11 days
+// out, with Joe himself assigned — and had no event_time and no ZIP. spanFor()
+// cannot compute a shift window without a time, so the assignment carried
+// schedule_start = NULL and the staff portal showed "Load up — not calculated
+// yet". Nothing said so. Two more upcoming gigs were in the same state, and
+// nine of thirty-three upcoming bookings had no service_id.
+//
+// admin.html's incompleteReasons() already paints exactly this list in the
+// dashboard panel — the detection was never the problem. Nobody was told. This
+// sends the same finding rather than re-deriving it, so the two agree on what
+// "incomplete" means; the reason strings below are deliberately the same words.
+//
+// Alert fatigue is the real risk: an incomplete gig stays incomplete until
+// someone edits it, so this must not text every day forever. The window is the
+// rule's trigger_days (default 14) and the dedupe is per booking per DAY, the
+// same shape as the unstaffed alert — but the gig drops out of the result the
+// moment the missing field is filled in, which is what actually ends the noise.
+async function incompleteAlerts(client, now) {
+  const notify = process.env.NOTIFY_SMS;
+  if (!notify) {
+    console.error('incompleteAlerts: NOTIFY_SMS unset — no alert sent');
+    return 0;
+  }
+
+  const { rows: ruleRows } = await client.query(
+    "SELECT * FROM automation_rules WHERE trigger_event='incomplete' ORDER BY id LIMIT 1");
+  const rule = ruleRows[0];
+  if (!rule) {
+    console.error('incompleteAlerts: no incomplete rule found — no alert sent');
+    return 0;
+  }
+  if (!rule.active) return 0;
+
+  const statuses = rule.trigger_status ? [rule.trigger_status] : ['accepted', 'confirmed'];
+  const days = Number.isFinite(Number(rule.trigger_days)) && Number(rule.trigger_days) >= 0
+    ? Number(rule.trigger_days) : 14;
+
+  // coalesce(col,'') <> '' rather than IS NOT NULL: every text column in this
+  // schema is DEFAULT '', so IS NOT NULL is a dead test that is always true.
+  // That exact mistake shipped a migration guard that could never fire.
+  const { rows } = await client.query(`
+    SELECT b.*,
+           CASE WHEN coalesce(b.service_id,'') = '' THEN 'no service' END AS r_service,
+           CASE WHEN coalesce(b.event_time::text,'') = '' THEN 'no time' END AS r_time,
+           CASE WHEN coalesce(b.event_zip,'') = '' THEN 'no ZIP' END AS r_zip
+    FROM bookings b
+    WHERE b.status = ANY($1)
+      AND b.event_date::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + $2::int)
+      AND (coalesce(b.service_id,'') = ''
+        OR coalesce(b.event_time::text,'') = ''
+        OR coalesce(b.event_zip,'') = '')
+      AND NOT EXISTS (
+        SELECT 1 FROM sms_log l
+        WHERE l.trigger_label = 'Incomplete gig'
+          AND l.created_at::date = CURRENT_DATE
+      )
+    ORDER BY b.event_date
+  `, [statuses, days]);
+
+  if (!rows.length) return 0;
+
+  // ONE message for all of them, not one each. The unstaffed alert sends per
+  // booking because a gig three days out with no crew is a separate emergency
+  // each time; this is a list of paperwork, it runs on a 14-day window, and a
+  // gig stays incomplete until someone edits it. Measured against production
+  // 2026-09-15 the per-booking shape would have sent SIX texts on the first
+  // run and six more every day after — which is how an alert gets ignored, and
+  // an ignored alert is worse than none because it still looks like cover.
+  //
+  // The per-day dedupe therefore carries no booking_id: the digest is one
+  // message about the whole window, so "already sent today" is one question,
+  // not one per booking.
+  const lines = rows.map((b) => {
+    const reasons = [b.r_service, b.r_time, b.r_zip].filter(Boolean).join(', ');
+    // Slice to YYYY-MM-DD before parsing: event_date is a DATE column and pg
+    // hands it over as "…T00:00:00.000Z", which formats as the previous evening
+    // in Central. fmtEventDate does this correctly, so use it rather than a
+    // sixth private copy of the same formatter.
+    // Short form: the full "Thursday, September 17, 2026" made a six-gig digest
+    // 461 characters, which Twilio bills as four segments every day. Six gigs
+    // now fit in two. fmtEventDate takes Intl options, so this is still the
+    // one formatter rather than a private one that could drift a day.
+    return `${b.client_name || 'Unnamed'} ${fmtEventDate(b.event_date, { weekday: undefined, month: 'short', year: undefined })} (${reasons})`;
+  });
+
+  const body = (rule.body_sms || '')
+    .replace(/{{count}}/g, String(rows.length))
+    .replace(/{{list}}/g, lines.join('; '));
+  if (!body.trim()) {
+    console.error('incompleteAlerts: the rule has an empty message — nothing sent');
+    return 0;
+  }
+
+  const res = await sendSms(client, notify, body, { trigger_label: 'Incomplete gig', now });
+  return res.status === 'queued' ? 1 : 0;
+}
+
 // ── Heartbeat ────────────────────────────────────────────────────────────────
 // The stamp that proves this run happened. Until it existed the only trace a
 // run left was the mail it sent, so a run that died was indistinguishable from
@@ -185,17 +288,18 @@ exports.handler = async () => {
       const sent = await runScheduledAutomations(client).catch(guard('runScheduledAutomations', 0));
       const dayOf = await staffDayOfReminders(client, now).catch(guard('staffDayOfReminders', 0));
       const alerts = await unstaffedAlerts(client, now).catch(guard('unstaffedAlerts', 0));
+      const gaps = await incompleteAlerts(client, now).catch(guard('incompleteAlerts', 0));
       const followUps = await sendDueScheduledEmails(client, now).catch(guard('sendDueScheduledEmails', 0));
 
       // Only a clean run stamps the heartbeat, so the hourly reader alerts on a
       // run that blew up as well as on one that never happened.
       if (!failures.length) await recordRun(client);
-      return { held, sent, dayOf, alerts, followUps, failures };
+      return { held, sent, dayOf, alerts, gaps, followUps, failures };
     });
 
     if (!result.failures.length) await pingHealthcheck();
 
-    console.log(`Scheduled automations complete — ${result.sent} rule message(s), ${result.held.sent} held SMS flushed, ${result.held.expired} expired, ${result.held.optedOut} opted out, ${result.held.blocked} blocked (no Twilio creds), ${result.dayOf} day-of reminder(s), ${result.alerts} unstaffed alert(s), ${result.followUps} scheduled follow-up(s)${result.failures.length ? ` — ${result.failures.length} job(s) FAILED: ${result.failures.join(', ')}` : ''}`);
+    console.log(`Scheduled automations complete — ${result.sent} rule message(s), ${result.held.sent} held SMS flushed, ${result.held.expired} expired, ${result.held.optedOut} opted out, ${result.held.blocked} blocked (no Twilio creds), ${result.dayOf} day-of reminder(s), ${result.alerts} unstaffed alert(s), ${result.gaps} incomplete-gig alert(s), ${result.followUps} scheduled follow-up(s)${result.failures.length ? ` — ${result.failures.length} job(s) FAILED: ${result.failures.join(', ')}` : ''}`);
     return { statusCode: 200, body: JSON.stringify({ ok: !result.failures.length, ...result, startedAt }) };
   } catch (e) {
     console.error('Scheduled automations FAILED:', e.message);
@@ -205,4 +309,5 @@ exports.handler = async () => {
 
 module.exports.staffDayOfReminders = staffDayOfReminders;
 module.exports.unstaffedAlerts = unstaffedAlerts;
+module.exports.incompleteAlerts = incompleteAlerts;
 module.exports.recordRun = recordRun;

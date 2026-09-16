@@ -16,7 +16,7 @@ function loadHelpers() {
   // reads it for the ladder order, so it comes into the context too.
   const sa = HTML.indexOf('const STATUSES = [');
   const sb = HTML.indexOf('];', sa) + 2;
-  vm.runInContext(HTML.slice(sa, sb) + '\n' + HTML.slice(a, b) + '\nout = { depositLinkAmount, depositWaivable, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS, reportButtonVisible, payLabel, statusAfterFinalisationSent, STATUSES };', ctx);
+  vm.runInContext(HTML.slice(sa, sb) + '\n' + HTML.slice(a, b) + '\nout = { depositLinkAmount, depositWaivable, depositOutstanding, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS, reportButtonVisible, payLabel, statusAfterFinalisationSent, STATUSES };', ctx);
   return ctx.out;
 }
 
@@ -348,4 +348,25 @@ test('the promotion follows the STATUSES ladder, not a copy of it', () => {
     assert.strictEqual(statusAfterFinalisationSent(id), i < quoted ? 'quoted' : null,
       `${id} at rung ${i} was classified wrongly`);
   });
+});
+
+// The send button asked for money that had already arrived — it ignored
+// deposit_paid while the server refused the request with a 400 the admin never
+// saw. One predicate now answers both "can it be waived" and "can it be asked
+// for", so the two cannot drift apart again.
+test('a paid deposit is neither waivable nor sendable', () => {
+  const { depositOutstanding, depositWaivable } = loadHelpers();
+  const paid = { deposit_amount: 100, deposit_paid: true };
+  assert.strictEqual(depositOutstanding(paid), false);
+  assert.strictEqual(depositWaivable(paid), false);
+  assert.strictEqual(depositOutstanding({ deposit_amount: 100, deposit_paid: false }), true);
+  assert.strictEqual(depositOutstanding({ deposit_amount: 0 }), false, 'no deposit means nothing to send');
+});
+
+// The label carries a dollar amount, and an edit dropped its "$" once already:
+// "$${amount}" in a String.replace replacement means one literal $, so
+// "Send $100.00" silently became "Send 100.00".
+test('the deposit button still shows a dollar sign before the amount', () => {
+  const HTML = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
+  assert.match(HTML, /Send \$\$\{depositLinkAmount\(b\)\.toFixed\(2\)\} deposit link/);
 });
