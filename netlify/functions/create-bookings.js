@@ -26,6 +26,9 @@ const ALLOWED_STATUS = new Set(['draft', 'review', 'quoted', 'accepted', 'confir
 // two-value set, which would have rejected 'fmms' while the public path
 // silently swallowed it.
 const { normaliseBrand } = require('./_brand');
+// Same decider as import-bookings.js and _items.js. One mapping, three intakes.
+const { resolveServiceId, norm, catalogueServiceIds } = require('./_service-map');
+
 
 // Clamp a numeric to [0, 100000]; blank/invalid -> 0.
 function num(v) {
@@ -33,6 +36,20 @@ function num(v) {
   return isNaN(n) ? 0 : Math.min(Math.max(n, 0), 100000);
 }
 const str = (v, max = 255) => String(v ?? '').trim().slice(0, max);
+// An explicit id always wins; a name is only resolved when the caller sent no
+// id at all. Never the reverse — a caller that names a catalogue service knows
+// more than a string match does.
+//
+// Then the legacy PPM map, then the live catalogue. Both, in that order,
+// because they answer different questions: the map knows retired names the
+// catalogue has dropped ("Story Doodles"), the catalogue knows services the map
+// was written too early to contain ("Game Show Champions"). Either alone leaves
+// a hole, and this endpoint had neither.
+const serviceIdFor = (b, catalogue) =>
+  str(b.service_id, 64)
+  || resolveServiceId(b.service_name)
+  || catalogue.get(norm(b.service_name))
+  || '';
 
 function validate(b) {
   const errors = [];
@@ -63,9 +80,13 @@ exports.handler = async (event) => {
   if (rows.length > 200) return json(400, { error: 'max 200 bookings per call' });
 
   const dryRun = event.queryStringParameters?.dryrun === 'true';
-  const result = { dryRun, total: rows.length, imported: 0, skipped: 0, errors: 0, details: [] };
+  const result = { dryRun, total: rows.length, imported: 0, skipped: 0, errors: 0, unlinked: 0, details: [] };
 
   return withClient(async (client) => {
+    // Once per request, not once per row: an import of 700 rows must not run
+    // 700 catalogue queries.
+    const catalogue = await catalogueServiceIds(client);
+
     for (const b of rows) {
       const ref = str(b.reference, 20);
       const errs = validate(b);
@@ -77,7 +98,12 @@ exports.handler = async (event) => {
       const { rows: existing } = await client.query('SELECT id FROM bookings WHERE reference=$1', [ref]);
       if (existing.length) { result.skipped++; result.details.push({ reference: ref, skipped: 'already exists' }); continue; }
 
-      if (dryRun) { result.imported++; result.details.push({ reference: ref, would_import: true }); continue; }
+      // Computed before the dry-run exit so a preview reports exactly what a
+      // real import would link — a preview that cannot show the gap is the
+      // reason an unstaffable booking gets created in the first place.
+      const serviceId = serviceIdFor(b, catalogue);
+      if (!serviceId) { result.unlinked++; result.details.push({ reference: ref, unlinked_service: str(b.service_name) }); }
+      if (dryRun) { result.imported++; result.details.push({ reference: ref, would_import: true, service_id: serviceId || null }); continue; }
 
       const total = num(b.total_price);
       const deposit = num(b.deposit_amount);
@@ -97,10 +123,18 @@ exports.handler = async (event) => {
         ) RETURNING id, reference
       `, [
         ref, String(b.status).trim(), normaliseBrand(b.brand),
-        // Optional, and the only link to staffing: staff_slots are keyed on
-        // service_id, so a booking created without one can never match a role
-        // or notify anyone. Callers that know the catalogue id should send it.
-        str(b.service_id, 64),
+        // The only link to staffing: staff_slots and the time templates are
+        // keyed on service_id, so a booking created without one can never match
+        // a role, notify anyone, or compute a real shift window.
+        //
+        // Callers that know the catalogue id should still send it. When one
+        // does not, the service NAME is resolved against the same decider
+        // import-bookings.js uses at intake — this endpoint is the other intake
+        // and had no resolution at all, which is why every unlinked upcoming
+        // booking measured on 2026-09-15 came through here or the admin modal.
+        // resolveServiceId returns '' for an ambiguous name rather than
+        // guessing, and the daily digest reports what stays unlinked.
+        serviceId,
         str(b.service_name), num(b.service_price),
         num(b.addon_total), num(b.mileage_cost), total, deposit, balance,
         b.deposit_paid === true, b.event_date, str(b.event_time, 32), str(b.event_zip, 20), str(b.event_location, 5000),

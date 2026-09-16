@@ -7916,19 +7916,57 @@ function legacyToItems(b) {
   return out;
 }
 
+// The catalogue loads lazily, so these rows can render before it arrives. The
+// row's CURRENT value is therefore always emitted as an option, even when the
+// catalogue is empty or no longer lists it: a <select> silently reports '' for
+// a value it has no option for, so without this, opening a booking and pressing
+// Save before the catalogue loaded would wipe a link that was already right —
+// turning a staffed gig into an unstaffable one, with nothing shown on screen.
+function serviceLinkOptionsHtml(current) {
+  const cur = String(current || '');
+  const listed = (catServices || []).some(sv => sv.service_id === cur);
+  return `<option value="">— no catalogue link —</option>
+    ${cur && !listed ? `<option value="${esc(cur)}" selected>${esc(cur)} (not in the catalogue)</option>` : ''}
+    ${(catServices || []).map(sv => `<option value="${esc(sv.service_id)}" ${sv.service_id === cur ? 'selected' : ''}>${esc(sv.name)}</option>`).join('')}`;
+}
+
+// The catalogue link was a HIDDEN input, so it could only ever be set by
+// picking a service from the "+ From catalogue…" dropdown. An admin who typed
+// their own title — "Bachelorette Party Magic Show", "Game Show Champions -
+// Sound Physicians Medical Director Summit" — got a booking with no link, and
+// nothing on screen said so. Measured 2026-09-15: nine of thirty-three upcoming
+// bookings, every one entered by hand or by an agent.
+//
+// It decides staff roles (staff_slots) and the shift window (the time
+// template), so it is a real field, not plumbing. Shown on service rows only,
+// where it means something; the server resolves it from an exact catalogue name
+// and reports what it cannot resolve either way.
+function syncItemRowKind(sel) {
+  const row = sel.closest('[data-item-row]');
+  const link = row && row.querySelector('[data-service-link]');
+  if (!link) return;
+  link.hidden = sel.value !== 'service';
+  // A row that stops being a service must not keep a link rollupItems would
+  // ignore but the next reader might not.
+  if (link.hidden) link.value = '';
+}
+
 function itemRowHtml(i, idx) {
   // Same list as ITEM_KINDS in _items.js, and a test pins them together. A
   // discount is typed as a POSITIVE amount and subtracted from the total —
   // never entered as a negative, which the server would clamp back to 0.
   const kinds = ['service', 'addon', 'travel', 'custom', 'discount'];
   return `<div class="q-row item-row" data-item-row="${idx}">
-    <select class="item-f" data-if="kind" style="max-width:96px">
+    <select class="item-f" data-if="kind" style="max-width:96px" onchange="syncItemRowKind(this)">
       ${kinds.map(k => `<option value="${k}" ${k === i.kind ? 'selected' : ''}>${k}</option>`).join('')}
     </select>
     <input class="item-f" data-if="name" value="${esc(i.name || '')}" placeholder="Description" style="flex:1;min-width:140px">
     <input class="item-f" data-if="quantity" type="number" min="1" step="1" value="${Number(i.quantity) || 1}" style="max-width:64px">
     <input class="item-f" data-if="price" type="number" step="0.01" min="0" value="${Number(i.price) || 0}" style="max-width:104px">
-    <input type="hidden" class="item-f" data-if="service_id" value="${esc(i.service_id || '')}">
+    <select class="item-f" data-if="service_id" data-service-link title="Which catalogue service this is, for staff roles and shift times. A custom title still needs one."
+            style="max-width:170px;font-size:.78rem" ${i.kind === 'service' ? '' : 'hidden'}>
+      ${serviceLinkOptionsHtml(i.service_id)}
+    </select>
     <button class="btn btn-outline btn-sm" onclick="removeItemRow(this)" title="Remove">✕</button>
   </div>`;
 }
@@ -7955,6 +7993,11 @@ function ensureCatalogueLoaded(bookingId) {
   loadCatalogue().then(() => {
     const sel = document.getElementById('item-picker-' + bookingId);
     if (sel) sel.innerHTML = catalogueOptionsHtml();
+    // The per-row links rendered before the catalogue arrived: refill them,
+    // preserving each row's current value rather than resetting it.
+    document.querySelectorAll('[data-service-link]').forEach((link) => {
+      link.innerHTML = serviceLinkOptionsHtml(link.value);
+    });
   });
 }
 

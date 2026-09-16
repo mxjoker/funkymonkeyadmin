@@ -62,4 +62,27 @@ const NORMALISED = Object.fromEntries(
 // is VARCHAR and rollupItems() already uses '' for "no catalogue link".
 const resolveServiceId = (serviceName) => NORMALISED[norm(serviceName)] || '';
 
-module.exports = { NAME_TO_SERVICE, resolveServiceId, norm };
+// The async sibling: the LIVE catalogue, which knows services the map above
+// never will. That map was written for the PPM import and is frozen in 2026 —
+// it has no entry for game_show, dj_pinata, mini_donuts or either photo booth,
+// all of which the catalogue sells. An admin typing a real service therefore
+// got no link while a retired PPM name did.
+//
+// Returns normalised name -> service_id. A name held by two catalogue rows maps
+// to '' so neither wins: an ambiguous link sends the wrong roles to the gig,
+// which is worse than no link, and no link is reported by the daily digest.
+//
+// Callers match EXACTLY on the normalised name. No prefix, no substring:
+// "Corporate Magic Show (banquet style)" must stay unlinked, because the suffix
+// may be exactly what changes the staffing.
+async function catalogueServiceIds(client) {
+  const { rows } = await client.query('SELECT service_id, name FROM services');
+  const byName = new Map();
+  for (const r of rows) {
+    const key = norm(r.name);
+    byName.set(key, byName.has(key) ? '' : r.service_id);
+  }
+  return byName;
+}
+
+module.exports = { NAME_TO_SERVICE, resolveServiceId, norm, catalogueServiceIds };

@@ -10,6 +10,10 @@
 // the one guard stopping a malformed payload from writing a negative line into
 // any of the four money columns. One kind that flips sign in one place beats a
 // sign that can appear anywhere.
+// The one decider for a free-text service name -> catalogue service_id, shared
+// with import-bookings.js and scripts/backfill-service-ids.js.
+const { resolveServiceId, norm, catalogueServiceIds } = require('./_service-map');
+
 const ITEM_KINDS = ['service', 'addon', 'travel', 'custom', 'discount'];
 
 // ponytail: 50 lines is far past any real package (the largest historical
@@ -56,11 +60,30 @@ function clampPrice(v) {
 // Accepts whatever the admin UI or a client posts and returns rows safe to
 // write. Anything nameless is dropped — a line item with no description is not
 // a line item.
+// A service row whose name matches the catalogue but carries no service_id gets
+// one here. That link is the ONLY join to staff_slots and the time templates, so
+// a row without it produces a gig that can be assigned nobody and whose shift
+// window falls back to a guessed 60 minutes. Measured 2026-09-15, nine of
+// thirty-three upcoming bookings had no service_id — every one entered by an
+// admin or an agent, never by the public form, which always sends one.
+//
+// It goes here because this is the funnel every item-writing path already
+// passes through (bookings.js POST and booking.js PATCH both call it), so the
+// resolution exists once rather than in each writer — which is how the brand
+// rule ended up with four private copies that disagreed.
+//
+// Only 'service' rows: an addon or a custom line is not a catalogue service,
+// and giving one a service_id would have rollupItems report the wrong thing as
+// the booking's service. resolveServiceId answers only for names it is sure
+// about and returns '' for anything ambiguous ("Magic Show", "Custom Event",
+// one-off event titles) — a wrong link sends the wrong roles to the wrong gig,
+// which is worse than none, and none is now reported by the daily digest.
 function normaliseItems(raw) {
   const list = Array.isArray(raw) ? raw : [];
   return list
     .map((i) => ({
-      service_id: String((i && i.service_id) || '').trim().slice(0, 64),
+      service_id: String((i && i.service_id) || '').trim().slice(0, 64)
+                  || (i && i.kind === 'service' ? resolveServiceId(i && i.name) : ''),
       name:       String((i && i.name) || '').trim().slice(0, 255),
       price:      clampPrice(i && i.price),
       quantity:   Math.min(Math.max(Math.floor(Number((i && i.quantity)) || 1), 1), 1000),
@@ -137,10 +160,34 @@ async function getItemsForBookings(client, bookingIds) {
   return map;
 }
 
+// Links service rows to the LIVE catalogue by name.
+//
+// normaliseItems already resolves the legacy PPM names in _service-map.js, but
+// that map was written for the import and knows nothing the catalogue has
+// gained since — there is no entry for game_show, dj_pinata, mini_donuts or
+// either photo booth. So an admin typing "Game Show Champions", a service that
+// exists, got no link, while "Story Doodles", a name PPM used, did. The
+// catalogue is the source of truth for what services exist; the static map is
+// only for legacy names that no longer match one.
+//
+// Exact match on the normalised name, never a prefix or a substring: "Corporate
+// Magic Show (banquet style)" stays unlinked rather than being guessed into
+// corporate_magic, because the suffix might be what changes the staffing. A
+// name held by two catalogue rows is also refused — an ambiguous link sends the
+// wrong roles to the gig, and the daily digest reports what stays unlinked.
+async function linkCatalogueServices(client, items) {
+  if (!items.some((i) => i.kind === 'service' && !i.service_id)) return items;
+
+  const byName = await catalogueServiceIds(client);
+  return items.map((i) => (i.kind === 'service' && !i.service_id
+    ? { ...i, service_id: byName.get(norm(i.name)) || '' }
+    : i));
+}
+
 // Replace-on-save. A quote is edited as a whole, so diffing rows would buy
 // nothing but a chance to get it wrong. Runs in the caller's transaction.
 async function replaceItems(client, bookingId, items) {
-  const clean = normaliseItems(items);
+  const clean = await linkCatalogueServices(client, normaliseItems(items));
   await client.query('DELETE FROM booking_items WHERE booking_id = $1', [bookingId]);
   for (const i of clean) {
     await client.query(
@@ -203,6 +250,7 @@ function balanceCharge(row) {
 }
 
 module.exports = {
+  linkCatalogueServices,
   ITEM_KINDS, ensureBookingItems, normaliseItems, rollupItems,
   getItems, getItemsForBookings, replaceItems, balanceIsDerivable,
   SERVICE_FEE_RATE, balanceCharge,
