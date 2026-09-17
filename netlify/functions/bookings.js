@@ -2,6 +2,7 @@ const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
 const { notifyMatchingStaff } = require('./staff-assignments');
 const { normaliseBrand } = require('./_brand');
+const { DIRECT, sourceOf, platformBooked } = require('./_source');
 const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems, getItemsForBookings } = require('./_items');
 const { sendSms, SMS_CONSENT_TEXT } = require('./_sms');
 const { sendTemplate } = require('./automations');
@@ -307,6 +308,23 @@ exports.handler = async (event) => {
       if (!auth) return unauthorized();
     }
 
+    // Who collects the money, and therefore whether we ever ask for it. A
+    // platform source suppresses every payment request — deposit link, balance
+    // link, and any automation whose body carries one — so an anonymous caller
+    // must not be able to set it. This endpoint is the PUBLIC booking form as
+    // well as admin entry, so the same gate the draft relaxation uses applies:
+    // it is the token that decides, not the string in the payload. Without it,
+    // anyone could post themselves a booking we would never bill.
+    //
+    // Only checked when something other than 'direct' is asked for, so the
+    // public path keeps its single round trip.
+    let source = DIRECT;
+    if (sourceOf(b) !== DIRECT) {
+      const auth = await requireAuth(event, ['admin']);
+      if (!auth) return unauthorized();
+      source = sourceOf(b);
+    }
+
     // ── Validation (contract §POST /api/bookings) ────────────────────────────
     const clientName = String(b.client_name || '').trim();
     // Strict true. An absent field, a string, or anything else is NOT consent —
@@ -398,7 +416,15 @@ exports.handler = async (event) => {
     const depositAmount = Math.min(Math.max(Number(b.deposit_amount) || 100, 0), 100000);
 
     // Balance calc: total_price + mileage_cost - deposit_amount
-    const balanceDue = Math.max(0, totalPrice + mileageCost - depositAmount);
+    // Who collects decides whether there is a balance at all. GigSalad takes
+    // the client's money, so a platform booking owes US nothing and must not be
+    // created showing one — every GigSalad booking to date was created as
+    // 'direct' and carried a balance we could never collect, one of them $465
+    // on a live confirmed gig. balanceIsDerivable then protects the zero from a
+    // later quote edit, the same way it protects a customer who paid in full.
+    const balanceDue = platformBooked({ source })
+      ? 0
+      : Math.max(0, totalPrice + mileageCost - depositAmount);
 
     return withClient(async (client) => {
       await ensureTable(client);
@@ -434,7 +460,8 @@ exports.handler = async (event) => {
           child_name, brand,
           organisation_name, occasion, surface_type, venue, customer_type,
           guests_of_honour, deposit_paid_at, deposit_method, deposit_ref,
-          sms_consent, sms_consent_at, sms_consent_text, camp_id
+          sms_consent, sms_consent_at, sms_consent_text, camp_id,
+          source
         ) VALUES (
           $1, $29,
           $2, $3, $4,
@@ -447,7 +474,8 @@ exports.handler = async (event) => {
           $27, $28,
           $30, $31, $32, $33, $34,
           $35, $36, $37, $38,
-          $39, $40, $41, $42
+          $39, $40, $41, $42,
+          $43
         ) RETURNING *
       `, [
         reference,
@@ -492,6 +520,9 @@ exports.handler = async (event) => {
         smsConsent ? new Date() : null,
         smsConsent ? SMS_CONSENT_TEXT : '',
         campId,
+        // Normalised through the one decider: anything unrecognised reads as
+        // 'direct', which keeps today's behaviour for every existing row.
+        source,
       ]);
 
       const booking = rows[0];

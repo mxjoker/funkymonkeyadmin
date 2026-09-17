@@ -51,6 +51,22 @@ const draftBody = (extra) => JSON.stringify({
   ...extra,
 });
 
+// Reads the value actually bound to a named column, rather than assuming it is
+// the last parameter. It was the last one until a `source` column was appended
+// in 2026-09, and these three tests failed for a reason that had nothing to do
+// with camps — a positional assertion pins the shape of the INSERT, not the
+// behaviour under test.
+function paramFor(insert, column) {
+  const [cols, vals] = insert.sql.split(/VALUES/);
+  const names = cols.slice(cols.indexOf("(") + 1, cols.lastIndexOf(")")).split(",").map((c) => c.trim());
+  const holders = vals.slice(vals.indexOf("(") + 1, vals.indexOf(")")).split(",").map((v) => v.trim());
+  const at = names.indexOf(column);
+  assert.ok(at !== -1, column + " is not in the INSERT column list");
+  const n = Number(holders[at].slice(1));
+  assert.ok(Number.isFinite(n), "no placeholder for " + column);
+  return insert.params[n - 1];
+}
+
 test('a camp day POST carries camp_id all the way into the INSERT', async () => {
   const client = fakeClient();
   const { handler } = loadBookingsHandler(client);
@@ -61,7 +77,7 @@ test('a camp day POST carries camp_id all the way into the INSERT', async () => 
   const insert = client.queries.find(q => /INSERT INTO bookings/i.test(q.sql));
   assert.ok(insert, 'expected an INSERT INTO bookings');
   assert.match(insert.sql, /camp_id/);
-  assert.strictEqual(insert.params[insert.params.length - 1], 7);
+  assert.strictEqual(paramFor(insert, 'camp_id'), 7);
 });
 
 test('an ordinary booking with no camp_id stores NULL — identical to today', async () => {
@@ -72,7 +88,7 @@ test('an ordinary booking with no camp_id stores NULL — identical to today', a
 
   assert.strictEqual(res.statusCode, 201);
   const insert = client.queries.find(q => /INSERT INTO bookings/i.test(q.sql));
-  assert.strictEqual(insert.params[insert.params.length - 1], null);
+  assert.strictEqual(paramFor(insert, 'camp_id'), null);
 });
 
 test('a non-numeric camp_id is dropped to NULL rather than stored or crashing', async () => {
@@ -83,7 +99,7 @@ test('a non-numeric camp_id is dropped to NULL rather than stored or crashing', 
 
   assert.strictEqual(res.statusCode, 201);
   const insert = client.queries.find(q => /INSERT INTO bookings/i.test(q.sql));
-  assert.strictEqual(insert.params[insert.params.length - 1], null);
+  assert.strictEqual(paramFor(insert, 'camp_id'), null);
 });
 
 test('POST /api/bookings ensures the camp tables before inserting', async () => {

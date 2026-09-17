@@ -26,6 +26,9 @@ const ALLOWED_STATUS = new Set(['draft', 'review', 'quoted', 'accepted', 'confir
 // two-value set, which would have rejected 'fmms' while the public path
 // silently swallowed it.
 const { normaliseBrand } = require('./_brand');
+// Who collected the money. Admin-only endpoint, so the caller is trusted here —
+// unlike bookings.js, which is also the public form and gates this on the token.
+const { sourceOf, platformBooked } = require('./_source');
 // Same decider as import-bookings.js and _items.js. One mapping, three intakes.
 const { resolveServiceId, norm, catalogueServiceIds } = require('./_service-map');
 
@@ -107,8 +110,14 @@ exports.handler = async (event) => {
 
       const total = num(b.total_price);
       const deposit = num(b.deposit_amount);
+      const source = sourceOf(b);
+      // A platform collected from the client, so nothing is owed to us. An
+      // explicit balance_due still wins — a caller correcting a figure by hand
+      // outranks a derivation, as everywhere else in this file.
       const balance = b.balance_due !== undefined ? num(b.balance_due)
-        : (String(b.status) === 'completed' ? 0 : Math.max(0, total - deposit));
+        : (platformBooked({ source }) || String(b.status) === 'completed'
+            ? 0
+            : Math.max(0, total - deposit));
 
       const { rows: ins } = await client.query(`
         INSERT INTO bookings (
@@ -116,10 +125,11 @@ exports.handler = async (event) => {
           addon_total, mileage_cost, total_price, deposit_amount, balance_due,
           deposit_paid, event_date, event_time, event_zip, event_location,
           event_type, guest_count, notes, client_name, client_phone,
-          client_email, child_name, customer_type, referral_source, admin_notes
+          client_email, child_name, customer_type, referral_source, admin_notes,
+          source
         ) VALUES (
           $1,$2,$3,$4,$5, $6,$7,$8,$9,$10, $11,$12,$13,$14,$15,
-          $16,$17,$18,$19,$20, $21,$22,$23,$24,$25,$26
+          $16,$17,$18,$19,$20, $21,$22,$23,$24,$25,$26, $27
         ) RETURNING id, reference
       `, [
         ref, String(b.status).trim(), normaliseBrand(b.brand),
@@ -140,6 +150,12 @@ exports.handler = async (event) => {
         b.deposit_paid === true, b.event_date, str(b.event_time, 32), str(b.event_zip, 20), str(b.event_location, 5000),
         str(b.event_type), Math.floor(num(b.guest_count)), str(b.notes, 5000), str(b.client_name, 120), str(b.client_phone, 64),
         str(b.client_email, 200), str(b.child_name, 120), str(b.customer_type, 64), str(b.referral_source), str(b.admin_notes, 5000),
+        // This column was missing entirely, so every booking this seam created
+        // stored NULL and read as 'direct'. All three GigSalad bookings in
+        // production arrived that way, and one carried a $465 balance we could
+        // never collect. referral_source beside it is marketing free text and
+        // answers a different question — see the header of _source.js.
+        source,
       ]);
       result.imported++;
       result.details.push({ reference: ins[0].reference, id: ins[0].id, imported: true });
