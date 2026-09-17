@@ -2732,6 +2732,53 @@ function addItemRow(bookingId, seed) {
   renderItemsTotal(bookingId);
 }
 
+// Fills the travel line from the ZIP, using the server's one travel rule
+// (_geo.travelFor, measured from the home base in admin_settings) instead of
+// the copy that lived only in booking-form.html's browser JavaScript. Booking
+// 26-151 — Tonkawa, 81 miles — was charged $0 travel because the admin side
+// has never had this button, not because its ZIP was unknown.
+//
+// It REPLACES any existing travel row rather than appending: rollupItems sums
+// every travel line into mileage_cost, so a second press would quietly double
+// the charge. And it only fills the row — the admin still presses Save, because
+// a quote that edited its own money when someone opened it is not a quote.
+async function calcTravel(bookingId) {
+  const msg = document.getElementById('travel-msg-' + bookingId);
+  const say = (t) => { if (msg) msg.textContent = t; };
+  const zipEl = document.querySelector('.bk-edit[data-f="event_zip"]');
+  const zip = zipEl ? zipEl.value.trim() : '';
+  if (!/^\d{5}$/.test(zip)) return say('Enter the five-digit ZIP first.');
+
+  say('Checking…');
+  try {
+    const res = await apiFetch('/api/travel?zip=' + encodeURIComponent(zip));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return say(data.error || ('Lookup failed (' + res.status + ')'));
+    if (!data.known) return say(data.message || 'That ZIP could not be located.');
+    // Too far to drive: the per-mile rule does not apply, so say so and add
+    // nothing rather than offering a four-figure travel line for a flight.
+    if (data.driveable === false) return say(data.message);
+
+    const host = document.getElementById('items-list-' + bookingId);
+    if (host) {
+      host.querySelectorAll('[data-item-row]').forEach((row) => {
+        const kind = row.querySelector('[data-if="kind"]');
+        if (kind && kind.value === 'travel') row.remove();
+      });
+    }
+    if (data.fee > 0) {
+      addItemRow(bookingId, { kind: 'travel', name: 'Travel (' + data.miles + ' miles)',
+                              price: data.fee, quantity: 1, service_id: '' });
+      say(data.one_way_miles + ' mi each way — $' + data.fee + ' added. Press Save to keep it.');
+    } else {
+      renderItemsTotal(bookingId);
+      say(data.miles + ' mi round trip — inside the free radius, so no travel fee.');
+    }
+  } catch (e) {
+    say('Lookup failed: ' + e.message);
+  }
+}
+
 function addItemFromCatalogue(bookingId, sel) {
   const v = sel.value;
   if (!v) return;
@@ -2957,6 +3004,9 @@ function openBooking(id, seed) {
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin:10px 0">
         <button class="btn btn-outline btn-sm" onclick="addItemRow('${b.id}')">+ Line</button>
+        <button class="btn btn-outline btn-sm" onclick="calcTravel('${b.id}')"
+                title="Work out the travel fee from the event ZIP, measured from the home base. Replaces any existing travel line; nothing is saved until you press Save.">🚗 Calculate travel</button>
+        <span id="travel-msg-${b.id}" style="font-size:.75rem;color:#6b7280"></span>
         <button class="btn btn-outline btn-sm" onclick="addItemRow('${b.id}', { kind: 'discount', name: 'Discount', price: 0, quantity: 1, service_id: '' })"
                 title="A discount line. Enter the amount to take off as a positive number.">− Discount</button>
         <select id="item-picker-${b.id}" onchange="addItemFromCatalogue('${b.id}', this)" style="max-width:260px">

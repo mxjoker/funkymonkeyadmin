@@ -237,6 +237,14 @@
   to = "/.netlify/functions/availability"
   status = 200
 
+# Travel distance and fee for one ZIP, admin only. Its own route rather than a
+# query on /api/bookings because it answers a question about a PLACE, not about
+# a booking — the admin modal asks before a booking exists.
+[[redirects]]
+  from = "/api/travel"
+  to = "/.netlify/functions/travel"
+  status = 200
+
 # Twilio webhooks. The signature check rebuilds the signed URL from SITE_URL +
 # these exact paths, so Twilio must be configured with these URLs and no query
 # string — see _twilio-sig.js.

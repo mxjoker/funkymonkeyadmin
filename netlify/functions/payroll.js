@@ -4,7 +4,7 @@ const {
 } = require('./_auth');
 const { payableHours, mergeClockSpan } = require('./_timeclock');
 const { paymentForBooking } = require('./_pay');
-const { getDriveMins, DEFAULT_MINUTES } = require('./_schedule');
+const { getDriveMins, DEFAULT_MINUTES, loadZipCoords, homeBase } = require('./_schedule');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -15,12 +15,17 @@ const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stri
 // the defaults now come from _schedule.js, so 45 is the value everywhere —
 // see test/payroll-span.test.js for the pin proving this is the only number
 // that moved.
-function computeAssignmentSpan(a, tmpl, party) {
+// `geo` carries the coordinates and origin loaded once by the caller. Passed
+// rather than looked up here because this runs per assignment inside a payroll
+// run: a query or a fetch per row would be an N+1 across a whole pay period.
+// Omitted, it falls back to the built-in seed — which is what every caller did
+// before the zip_coords table existed.
+function computeAssignmentSpan(a, tmpl, party, geo = {}) {
   const load    = a.load_minutes          ?? tmpl.load_minutes          ?? DEFAULT_MINUTES.load;
   const unload  = a.unload_minutes         ?? tmpl.unload_minutes         ?? DEFAULT_MINUTES.unload;
   const pack    = a.pack_out_minutes       ?? tmpl.pack_out_minutes       ?? DEFAULT_MINUTES.packOut;
   const homeUn  = a.home_unload_minutes    ?? tmpl.home_unload_minutes    ?? DEFAULT_MINUTES.homeUnload;
-  const driveInfo = getDriveMins(a.event_zip);
+  const driveInfo = getDriveMins(a.event_zip, { coords: geo.coords, home: geo.home });
   const drive   = a.drive_minutes_each_way ?? driveInfo.minutes;
   // A guess only when nothing pins the number down: no per-assignment
   // override AND the ZIP isn't in the table. An override is a deliberate
@@ -409,6 +414,16 @@ exports.handler = async (event) => {
           const durationMap = {};
           services.forEach(s => { durationMap[s.service_id] = s.duration_minutes || 60; });
 
+          // Coordinates and origin once for the whole run, not per assignment.
+          // loadZipCoords does not reach the network: a payroll run must not be
+          // able to fail, or change what it pays, because a third-party lookup
+          // was slow. ZIPs nobody has looked up yet keep the 30-minute estimate
+          // and stay flagged as a guess, exactly as before.
+          const geo = {
+            coords: await loadZipCoords(client, assignments.map(a => a.event_zip)),
+            home: await homeBase(client),
+          };
+
           const { rows: rolePayRows } = await client.query('SELECT role_name, pay_type FROM role_pay');
           const rolePayByRole = {};
           for (const r of rolePayRows) rolePayByRole[r.role_name] = r.pay_type;
@@ -449,7 +464,7 @@ exports.handler = async (event) => {
             const tmpl = templateMap[a.service_id] || {};
             const party = durationMap[a.service_id] || 60;
             const { load, unload, pack, homeUn, drive, totalMins, rawHours, driveIsGuess } =
-              computeAssignmentSpan(a, tmpl, party);
+              computeAssignmentSpan(a, tmpl, party, geo);
 
             // A person who filled two roles worked one continuous shift, and
             // each role's gig_logs row only stamps its own clock — picking one

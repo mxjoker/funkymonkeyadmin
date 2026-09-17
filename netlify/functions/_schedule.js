@@ -12,46 +12,14 @@ const { zonedToInstant } = require('./_tz');
 
 const TZ = 'America/Chicago';
 
-// ── ZIP → coords map for OKC metro drive-time estimation ─────────────────────
-// Moved verbatim from staff-assignments.js:59-95 — see task-3 report for the
-// diff proving it is byte-for-byte unchanged.
-const ZIP_COORDS = {
-  '73099':{ lat:35.5176, lng:-97.7618 }, '73101':{ lat:35.4676, lng:-97.5164 },
-  '73102':{ lat:35.4714, lng:-97.5169 }, '73103':{ lat:35.4869, lng:-97.5245 },
-  '73104':{ lat:35.4781, lng:-97.5058 }, '73105':{ lat:35.4947, lng:-97.5112 },
-  '73106':{ lat:35.4875, lng:-97.5411 }, '73107':{ lat:35.4786, lng:-97.5631 },
-  '73108':{ lat:35.4531, lng:-97.5604 }, '73109':{ lat:35.4397, lng:-97.5245 },
-  '73110':{ lat:35.4631, lng:-97.4203 }, '73111':{ lat:35.5061, lng:-97.4913 },
-  '73112':{ lat:35.5008, lng:-97.5631 }, '73114':{ lat:35.5675, lng:-97.5245 },
-  '73115':{ lat:35.4275, lng:-97.4581 }, '73116':{ lat:35.5397, lng:-97.5631 },
-  '73117':{ lat:35.4841, lng:-97.4913 }, '73118':{ lat:35.5161, lng:-97.5411 },
-  '73119':{ lat:35.4231, lng:-97.5631 }, '73120':{ lat:35.5675, lng:-97.5831 },
-  '73121':{ lat:35.5008, lng:-97.4581 }, '73122':{ lat:35.5008, lng:-97.6031 },
-  '73127':{ lat:35.4786, lng:-97.6431 }, '73128':{ lat:35.4397, lng:-97.6431 },
-  '73129':{ lat:35.4231, lng:-97.4913 }, '73130':{ lat:35.4631, lng:-97.3803 },
-  '73131':{ lat:35.5397, lng:-97.4581 }, '73132':{ lat:35.5397, lng:-97.6231 },
-  '73134':{ lat:35.6097, lng:-97.5831 }, '73135':{ lat:35.3875, lng:-97.4581 },
-  '73139':{ lat:35.3875, lng:-97.5245 }, '73142':{ lat:35.6097, lng:-97.6231 },
-  '73149':{ lat:35.3875, lng:-97.4203 }, '73150':{ lat:35.4231, lng:-97.3803 },
-  '73159':{ lat:35.3875, lng:-97.6031 }, '73160':{ lat:35.3275, lng:-97.5245 },
-  '73162':{ lat:35.5675, lng:-97.6431 }, '73165':{ lat:35.3275, lng:-97.4203 },
-  '73169':{ lat:35.3875, lng:-97.6431 }, '73170':{ lat:35.3275, lng:-97.6031 },
-  '73179':{ lat:35.4397, lng:-97.6831 },
-  '73003':{ lat:35.6597, lng:-97.4781 }, '73007':{ lat:35.6097, lng:-97.4203 },
-  '73008':{ lat:35.5397, lng:-97.6831 }, '73013':{ lat:35.6397, lng:-97.5631 },
-  '73020':{ lat:35.4631, lng:-97.2803 }, '73025':{ lat:35.6597, lng:-97.7418 },
-  '73026':{ lat:35.2275, lng:-97.4413 }, '73034':{ lat:35.6597, lng:-97.3803 },
-  '73044':{ lat:35.8597, lng:-97.4581 }, '73049':{ lat:35.4631, lng:-97.1803 },
-  '73051':{ lat:35.1275, lng:-97.3803 }, '73054':{ lat:35.6097, lng:-97.2803 },
-  '73059':{ lat:35.3275, lng:-97.8031 }, '73064':{ lat:35.4097, lng:-97.7618 },
-  '73066':{ lat:35.5397, lng:-97.2803 }, '73069':{ lat:35.2275, lng:-97.2803 },
-  '73071':{ lat:35.2275, lng:-97.4413 }, '73072':{ lat:35.2275, lng:-97.4413 },
-  '73073':{ lat:36.1597, lng:-97.5831 }, '73074':{ lat:34.9275, lng:-97.4413 },
-  '73078':{ lat:35.5675, lng:-97.7818 }, '73080':{ lat:35.2275, lng:-97.6031 },
-  '73084':{ lat:35.5397, lng:-97.3803 }, '73089':{ lat:35.3275, lng:-97.7218 },
-  '73093':{ lat:35.2275, lng:-97.5631 }, '73097':{ lat:35.3875, lng:-97.7218 },
-};
-const HOME_ZIP = '73118';
+// ── Coordinates ─────────────────────────────────────────────────────────────
+// The 67-ZIP table that used to sit here now lives in _geo.js as the seed for
+// the zip_coords table, because the same coordinates answer two questions —
+// how long the crew drives, and what the client is charged — and two copies of
+// that answer had already drifted 7.9 miles apart.
+const { ZIP_SEED, HOME_FALLBACK, MAX_DRIVEABLE_MILES, milesBetween, normZip,
+        ensureZipCoords, loadZipCoords, homeBase } = require('./_geo');
+
 
 // The four component defaults, in one place so payroll.js can import them
 // instead of carrying its own copy. It used to: unload defaulted to 15 there
@@ -64,15 +32,29 @@ const DEFAULT_MINUTES = { load: 30, unload: 45, packOut: 20, homeUnload: 15 };
 // estimate path. Deciding what payroll should do with an unknown drive is
 // BUG-1's job, not this refactor's. zipKnown is the only new thing — it lets a
 // caller say "estimated" without altering the number.
-function getDriveMins(destZip) {
-  const home = ZIP_COORDS[HOME_ZIP];
-  const dest = ZIP_COORDS[String(destZip == null ? '' : destZip).substring(0, 5)];
-  if (!home || !dest) return { minutes: 30, zipKnown: false };
-  const R = 3958.8;
-  const dLat = (dest.lat - home.lat) * Math.PI / 180;
-  const dLng = (dest.lng - home.lng) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(home.lat*Math.PI/180)*Math.cos(dest.lat*Math.PI/180)*Math.sin(dLng/2)**2;
-  const miles = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+// `coords` and `home` are injected so a caller that has already loaded the
+// zip_coords table — or filled it from the lookup API — gets the real distance,
+// while a caller that has not behaves exactly as before. Deliberately still
+// SYNCHRONOUS: bookings.js calls this once per row when rendering the admin
+// list, so a version that queried or fetched per call would be an N+1 on every
+// page load. The network lives in _geo.ensureZipCoords, which callers invoke
+// once for the ZIPs they care about.
+//
+// The 30-minute fallback for an unknown ZIP is UNCHANGED, and so is zipKnown
+// reporting false for it — a wrong number that announces itself is the one
+// thing here that was already right.
+function getDriveMins(destZip, { coords, home } = {}) {
+  const table = coords instanceof Map ? coords : new Map(Object.entries(coords || ZIP_SEED));
+  const origin = home || HOME_FALLBACK;
+  const dest = table.get(normZip(destZip));
+  if (!origin || !dest) return { minutes: 30, zipKnown: false };
+  const miles = milesBetween(origin, dest);
+  // A flown-to gig has no meaningful drive time, and a computed one is
+  // dangerous rather than merely wrong: the shift counts the drive twice, so
+  // Orlando's 1,833 minutes each way would bill 64 hours. Report it the same
+  // way as a ZIP we have never seen — 30 minutes, zipKnown false — so payroll
+  // keeps treating it as an estimate and a human sets the real figure.
+  if (miles > MAX_DRIVEABLE_MILES) return { minutes: 30, zipKnown: false, tooFarToDrive: true };
   return { minutes: Math.max(10, Math.round((miles / 35) * 60)) + 15, zipKnown: true };
 }
 
@@ -83,8 +65,24 @@ async function spanFor(client, booking, overrides = {}) {
     'SELECT duration_minutes FROM services WHERE service_id=$1', [booking.service_id]);
 
   const unknowns = [];
-  const drive = getDriveMins(booking.event_zip);
-  if (!drive.zipKnown) unknowns.push(`drive time estimated — ZIP ${booking.event_zip || '(none)'} is not in the table`);
+  // One booking, so this is the right place to spend a lookup: if the ZIP is
+  // not in the table yet, ensureZipCoords fetches it once and stores it, and
+  // every later read — including the per-row list path, which never fetches —
+  // gets the real distance for free. A lookup that fails leaves the map
+  // unchanged and getDriveMins falls back to 30 minutes exactly as before.
+  const [coords, home] = await Promise.all([
+    ensureZipCoords(client, [booking.event_zip]).catch((e) => {
+      console.error('spanFor: zip lookup failed, using what we have —', e.message);
+      return undefined;
+    }),
+    homeBase(client),
+  ]);
+  const drive = getDriveMins(booking.event_zip, { coords, home });
+  if (!drive.zipKnown) {
+    unknowns.push(drive.tooFarToDrive
+      ? `drive time estimated — ${booking.event_zip} is too far to drive to; set the drive minutes by hand`
+      : `drive time estimated — ZIP ${booking.event_zip || '(none)'} is not in the table`);
+  }
 
   const load   = overrides.load_minutes           ?? tmpl?.load_minutes           ?? DEFAULT_MINUTES.load;
   const setup  = overrides.unload_minutes         ?? tmpl?.unload_minutes         ?? DEFAULT_MINUTES.unload;
@@ -132,4 +130,7 @@ async function spanFor(client, booking, overrides = {}) {
   };
 }
 
-module.exports = { spanFor, getDriveMins, DEFAULT_MINUTES, TZ };
+module.exports = { spanFor, getDriveMins, DEFAULT_MINUTES, TZ,
+  // Re-exported so a caller needing a batch of ZIPs does not have to know
+  // whether coordinates live here or in _geo.js.
+  loadZipCoords, ensureZipCoords, homeBase };

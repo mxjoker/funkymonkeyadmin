@@ -7,7 +7,7 @@ const { ensureBookingItems, replaceItems, rollupItems, normaliseItems, getItems,
 const { sendSms, SMS_CONSENT_TEXT } = require('./_sms');
 const { sendTemplate } = require('./automations');
 const { normaliseAddress } = require('./_address');
-const { getDriveMins } = require('./_schedule');
+const { getDriveMins, loadZipCoords, homeBase } = require('./_schedule');
 const { ensureTables: ensureCampTables } = require('./camps');
 const { generateReference } = require('./_reference');
 
@@ -287,9 +287,16 @@ exports.handler = async (event) => {
       // booking's event_zip. admin.html's dashboard uses it to flag an
       // upcoming gig whose drive/departure time is a guess, without keeping
       // its own copy of the ZIP table (see needsZipEstimate in admin.html).
+      // Coordinates for every ZIP on the page in ONE query, rather than a
+      // lookup per row. loadZipCoords never reaches the network — a list render
+      // must not depend on a third-party API being up — so a ZIP nobody has
+      // looked up yet still reports zip_known:false here, and gets filled the
+      // first time that booking is actually scheduled.
+      const zipCoords = await loadZipCoords(client, rows.map(r => r.event_zip));
+      const home = await homeBase(client);
       for (const r of rows) {
         r.items = itemMap.get(r.id) || [];
-        r.zip_known = getDriveMins(r.event_zip).zipKnown;
+        r.zip_known = getDriveMins(r.event_zip, { coords: zipCoords, home }).zipKnown;
       }
       return json(200, rows);
     });
