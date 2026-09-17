@@ -916,6 +916,10 @@ input,select,textarea{font-family:inherit}
           <button class="btn btn-primary btn-sm" onclick="downloadExport('revenue_by_service')">
             📈 Revenue by Service
           </button>
+          <button class="btn btn-primary btn-sm" onclick="downloadExport('gigsalad')"
+                  title="What GigSalad billed on our behalf, what actually landed in PayPal, and their cut. Gigs with no payout recorded yet show as due.">
+            🤝 GigSalad Reconciliation
+          </button>
           <button class="btn btn-accent btn-sm" onclick="downloadExport('summary')">
             💼 Summary Report
           </button>
@@ -2479,6 +2483,15 @@ const BOOKING_SOURCES = [
   { v: 'gigsalad', t: 'GigSalad (they collect payment)' },
 ];
 
+// Mirrors platformBooked() in netlify/functions/_source.js — admin.html is a
+// static page with no build step and cannot require server modules, the same
+// constraint as balanceLinkAmounts() above. Unrecognised reads as direct, which
+// is the server's rule too: the safe direction is asking for money we should
+// not have, not silently never invoicing.
+function isPlatformBooked(b) {
+  return String((b && b.source) || 'direct').toLowerCase() !== 'direct';
+}
+
 const REFERRAL_SOURCES = [
   'Google Search', 'Facebook', 'Instagram',
   'Friend / Word of Mouth', 'Nextdoor', 'Repeat Customer',
@@ -2904,6 +2917,13 @@ function openBooking(id, seed) {
       ${bookingField('Email', 'client_email', b.client_email, 'email')}
       ${bookingField('Referral', 'referral_source', b.referral_source, 'text', REFERRAL_SOURCES)}
       ${bookingField('Booked Via', 'source', b.source || 'direct', 'text', BOOKING_SOURCES)}
+      ${isPlatformBooked(b) ? `
+        ${bookingField('Payout Received', 'platform_payout',
+          b.platform_payout === null || b.platform_payout === undefined ? '' : b.platform_payout, 'number')}
+        ${bookingField('Payout Date', 'platform_payout_at', (b.platform_payout_at || '').slice(0, 10), 'date')}
+        <div style="grid-column:1/-1;margin-top:-6px">
+          <span style="font-size:.72rem;color:#9ca3af">What actually landed from the platform, after their cut — leave blank until it does. Feeds the GigSalad Reconciliation export.</span>
+        </div>` : ''}
       ${bookingField('Customer Type', 'customer_type', b.customer_type, 'text', CUSTOMER_TYPES)}
       ${bookingField('Event Date', 'event_date', (b.event_date || '').slice(0, 10), 'date')}
       ${bookingField('Event Time', 'event_time', b.event_time, 'time')}
@@ -4821,7 +4841,7 @@ async function sendFinalisationLink(id) {
     // quote at this client. No Stripe session, no amounts, its own template.
     // Same shape as the $0-deposit branch below: the choice is made here, where
     // we already know which kind of booking this is.
-    const platform = String(b.source || 'direct').toLowerCase() !== 'direct';
+    const platform = isPlatformBooked(b);
     if (depositAmount > 0 && !platform) {
       const linkRes = await apiFetch('/api/create-stripe-link', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },

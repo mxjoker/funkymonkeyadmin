@@ -130,13 +130,17 @@ exports.handler = async (event) => {
 
         // A cleared <input> posts '' — Postgres rejects that for non-text
         // columns. Only touch keys actually present, so no null is invented.
-        for (const f of ['event_date', 'confirmation_deadline', 'deposit_paid_at']) {
+        for (const f of ['event_date', 'confirmation_deadline', 'deposit_paid_at',
+                         'platform_payout_at']) {
           if (f in u && u[f] === '') u[f] = null;
         }
         for (const f of ['guest_count', 'service_price', 'total_price',
                          'mileage_miles', 'mileage_cost', 'deposit_amount',
                          'balance_due', 'extra_hours', 'extra_hours_cost',
-                         'payment_amount']) {
+                         // Blank means the payout has not arrived, which is NULL
+                         // and not 0 — the report prints a blank cell for it, and
+                         // a 0 would read as "the platform kept everything".
+                         'payment_amount', 'platform_payout']) {
           if (f in u && u[f] === '') u[f] = null;
         }
 
@@ -178,6 +182,11 @@ exports.handler = async (event) => {
           // Who collects the money. _source.js is the decider that reads it;
           // this is the one place an admin can set it.
           source:            "source",
+          // What the platform actually paid us, and when it landed. Admin-only
+          // by virtue of living in this map — the client edit path works off
+          // _finalise.js's CLIENT_EDITABLE whitelist, which does not name these.
+          platform_payout:    "platform_payout",
+          platform_payout_at: "platform_payout_at",
           service_id:        "service_id",
           service_name:      "service_name",
           service_price:     "service_price",

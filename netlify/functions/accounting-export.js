@@ -40,6 +40,84 @@ function generateCSV(data, columns) {
 }
 
 /**
+ * Platform (GigSalad) bookings and what they actually paid us.
+ *
+ * Why this is its own report rather than a column on the others: a platform
+ * booking's total_price is OUR price, the client pays the platform, and the
+ * platform pays us later through PayPal minus its cut. So the money that
+ * reaches us is a THIRD number that cannot be derived from the first two —
+ * it has to be recorded when it lands, which is what platform_payout is.
+ *
+ * Reads source through the same column _source.js decides on, so a platform
+ * added later (The Bash, Thumbtack) appears here with no change: anything that
+ * is not 'direct' is a platform booking.
+ */
+async function getPlatformReconciliation(client, startDate, endDate) {
+  const { rows } = await client.query(`
+    SELECT b.reference, b.status, b.event_date, b.client_name, b.service_name,
+           b.source, b.total_price, b.deposit_amount,
+           b.platform_payout, b.platform_payout_at
+    FROM bookings b
+    WHERE COALESCE(b.source, 'direct') <> 'direct'
+      AND b.event_date BETWEEN $1 AND $2
+      AND b.status <> 'cancelled'
+    ORDER BY b.event_date
+  `, [startDate, endDate]);
+  return rows;
+}
+
+/**
+ * Shapes those rows for the CSV, and appends a TOTAL line.
+ *
+ * Pure so it can be tested without a database — the arithmetic is the part
+ * worth pinning. Two rules it must never break:
+ *
+ *  - A payout that has not arrived is NULL, not zero. It renders blank, and the
+ *    cut is blank with it: subtracting from nothing would print the whole fee
+ *    as if the platform had kept everything. This is the same trap as the $100
+ *    deposit default — a number in a money column gets read as fact.
+ *  - The TOTAL sums only what actually landed, so it answers "how much money
+ *    has reached me", not "how much is promised".
+ */
+function platformReconciliationRows(rows) {
+  const out = rows.map((r) => {
+    const price = Number(r.total_price || 0);
+    const arrived = r.platform_payout !== null && r.platform_payout !== undefined;
+    const payout = arrived ? Number(r.platform_payout) : null;
+    return {
+      reference: r.reference,
+      event_date: r.event_date,
+      status: r.status,
+      client_name: r.client_name,
+      service_name: r.service_name,
+      platform: r.source,
+      total_price: price,
+      deposit_amount: Number(r.deposit_amount || 0),
+      payout: payout,
+      payout_at: r.platform_payout_at || '',
+      // Their cut is what we billed minus what we got. Only computable once the
+      // payout is known; blank otherwise, never a guess.
+      platform_cut: arrived ? Number((price - payout).toFixed(2)) : null,
+      payout_status: arrived ? 'paid' : 'due',
+    };
+  });
+
+  if (!out.length) return out;
+  const sum = (key) => Number(out.reduce((t, r) => t + Number(r[key] || 0), 0).toFixed(2));
+  out.push({
+    reference: 'TOTAL',
+    event_date: '', status: '', client_name: '', service_name: '', platform: '',
+    total_price: sum('total_price'),
+    deposit_amount: sum('deposit_amount'),
+    payout: sum('payout'),
+    payout_at: '',
+    platform_cut: sum('platform_cut'),
+    payout_status: `${out.filter((r) => r.payout_status === 'due').length} awaiting payout`,
+  });
+  return out;
+}
+
+/**
  * Get detailed booking financials
  */
 async function getBookingFinancials(client, startDate, endDate) {
@@ -316,6 +394,28 @@ exports.handler = async (event) => {
           break;
         }
 
+        case 'gigsalad': {
+          // Platform reconciliation: our price, what actually landed, the cut.
+          const platform = platformReconciliationRows(
+            await getPlatformReconciliation(client, startDate, endDate));
+          csvData = generateCSV(platform, [
+            { key: 'reference', label: 'Reference' },
+            { key: 'event_date', label: 'Event Date' },
+            { key: 'status', label: 'Status' },
+            { key: 'client_name', label: 'Client' },
+            { key: 'service_name', label: 'Service' },
+            { key: 'platform', label: 'Platform' },
+            { key: 'total_price', label: 'Our Price', format: 'currency' },
+            { key: 'deposit_amount', label: 'Deposit', format: 'currency' },
+            { key: 'payout', label: 'Payout Received', format: 'currency' },
+            { key: 'payout_at', label: 'Payout Date' },
+            { key: 'platform_cut', label: 'Platform Cut', format: 'currency' },
+            { key: 'payout_status', label: 'Payout Status' }
+          ]);
+          filename = `gigsalad_reconciliation_${startDate}_to_${endDate}.csv`;
+          break;
+        }
+
         default: {
           // Summary report (all data)
           const allBookings = await getBookingFinancials(client, startDate, endDate);
@@ -354,3 +454,7 @@ exports.handler = async (event) => {
     }
   });
 };
+
+// Exported for test/gigsalad-report.test.js — the arithmetic is the part
+// worth pinning, and it needs no database.
+module.exports.platformReconciliationRows = platformReconciliationRows;

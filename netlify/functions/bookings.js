@@ -136,6 +136,15 @@ async function ensureTable(client) {
     // Who collects the money. NULL reads as 'direct' through _source.js, so
     // every existing row keeps today's behaviour without a backfill.
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'direct'",
+    // What a platform actually paid us, and when. GigSalad collects from the
+    // client and pays out through PayPal after the event, keeping a cut, so the
+    // money that reaches us is never total_price and cannot be derived from it.
+    //
+    // NULL means "has not arrived yet" and is NOT zero. The reconciliation
+    // report renders NULL blank rather than $0.00 for the same reason the $100
+    // deposit default was a bug: a number in a money column is read as fact.
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS platform_payout NUMERIC(10,2)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS platform_payout_at DATE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_date DATE",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_time VARCHAR(10)",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_zip VARCHAR(10)",
