@@ -63,10 +63,22 @@ Three repos, three deploy stories, several integrations that grew separately.
 - [ ] **178 bookings unlinked to a catalogue service** — "Custom Event" (161),
       "Magic Show" (11) and one-off titles. Genuinely ambiguous; link by hand in
       the Quote Breakdown. Never guess these into `_service-map.js`.
-- [ ] **Multi-service bookings only staff their first line item.**
-      `rollupItems()` takes `services[0]`, so a foam party + face painting
-      resolves staff for the foam party alone. Lives in the staffing subsystem,
-      which Connecteam has already won.
+- [x] **Multi-service bookings only staff their first line item — FIXED
+      2026-09-13** (`ff46e99`). `rollupItems()` still takes `services[0]` for
+      the legacy column, but staffing reads every service through the
+      `booking_service_ids` view, so a foam party + face painting now resolves
+      both. Found from a real booking, FM-PM3CRC4Z, that notified nobody.
+- [ ] **New bookings can still arrive with no catalogue service at all.**
+      Partly fixed 2026-09-16 (`221784f`): an exact catalogue name now links,
+      the quote row exposes the link as a real field, and create-bookings.js
+      reports what it could not resolve. What remains is human — an
+      event-specific title ("Bachelorette Party Magic Show") has to be pointed
+      at a catalogue service by hand. 7 upcoming bookings were on the list on
+      2026-09-17, and the daily digest now names them.
+- [ ] **`create-bookings.js` never writes `source`**, so all three GigSalad
+      bookings read as `direct` and one shows a $465 balance that GigSalad
+      already collected. Pressing the balance button on it would bill the client
+      twice. Small code fix; the three existing rows are a money judgement.
 - [ ] **Public form bookings carry no line items** until their quote is first
       edited. Reads fall back to legacy columns, so nothing breaks; Phase 3's
       machinery just starts on first edit.
