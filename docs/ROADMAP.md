@@ -75,10 +75,15 @@ Three repos, three deploy stories, several integrations that grew separately.
       event-specific title ("Bachelorette Party Magic Show") has to be pointed
       at a catalogue service by hand. 7 upcoming bookings were on the list on
       2026-09-17, and the daily digest now names them.
-- [ ] **`create-bookings.js` never writes `source`**, so all three GigSalad
-      bookings read as `direct` and one shows a $465 balance that GigSalad
-      already collected. Pressing the balance button on it would bill the client
-      twice. Small code fix; the three existing rows are a money judgement.
+- [x] **Neither create path wrote `source` — FIXED 2026-09-17** (`bb72e64`).
+      Both write it now, a platform booking is created owing nothing, and the
+      public endpoint gates a non-direct source on the admin token. The three
+      GS- rows were set to `gigsalad` with their balances zeroed ($465 and
+      $365), each with a `booking_changes` entry.
+- [ ] **A GigSalad report, to balance the books.** `total_price` on platform
+      bookings is what the client paid GigSalad, before GigSalad's cut, so
+      revenue reports overstate what actually reaches us. Owner's call
+      2026-09-17: leave the totals alone and reconcile in a report later.
 - [ ] **Public form bookings carry no line items** until their quote is first
       edited. Reads fall back to legacy columns, so nothing breaks; Phase 3's
       machinery just starts on first edit.
