@@ -59,12 +59,24 @@ function parseItems(file) {
   try {
     if (records.length) {
       for (const [ref, checkNo] of records) {
+        // payment_ref is the strong key, but it is often already a Square or
+        // Stripe id. Rather than overwrite something real, fall back to a
+        // canonical "check no. N" in the note — the exact phrasing the
+        // already-recorded lookup above searches for.
         const { rows } = await client.query(
           `UPDATE bookings SET payment_ref = $1, updated_at = NOW()
-           WHERE reference = $2 AND coalesce(payment_ref,'') = '' RETURNING id, reference`, [checkNo, ref]);
-        console.log(rows.length
-          ? `recorded: ${ref} ← check ${checkNo}`
-          : `skipped:  ${ref} (not found, or payment_ref already set — never overwritten)`);
+           WHERE reference = $2 AND coalesce(payment_ref,'') = '' RETURNING reference`, [checkNo, ref]);
+        if (rows.length) { console.log(`recorded: ${ref} ← check ${checkNo} (payment_ref)`); continue; }
+        const { rows: noted } = await client.query(
+          `UPDATE bookings
+              SET payment_note = trim(coalesce(payment_note,'') || ' · check no. ' || $1),
+                  updated_at = NOW()
+            WHERE reference = $2
+              AND payment_note !~* ('check \\(no\\.?|#\\) *0*' || $1)
+            RETURNING reference`, [checkNo, ref]);
+        console.log(noted.length
+          ? `recorded: ${ref} ← check ${checkNo} (appended to the note; payment_ref was already in use)`
+          : `skipped:  ${ref} (not found, or check ${checkNo} is already on it)`);
       }
       console.log('');
     }
@@ -80,7 +92,32 @@ function parseItems(file) {
           (known[0].bal > 0 ? `  ⚠ still shows ${money(known[0].bal)} owed` : ''));
         continue;
       }
-      // 2. Not recorded — which outstanding gigs is it the right size for?
+      // 2. Recorded, but without the number. Most older notes are like
+      //    "City of Ardmore check deposited 2026-07-20" — the reconciliation was
+      //    done, the number just was not written down. Measured 2026-09-18: 21
+      //    notes mention a check and only 2 name it. Matching the AMOUNT against
+      //    an already-settled booking catches these, and --record then writes
+      //    the number back so the next pass matches on the strong key.
+      const amtStr = it.amount.toFixed(2);
+      const amtComma = it.amount.toLocaleString('en-US', { minimumFractionDigits: 2 });
+      const { rows: settled } = await client.query(`
+        SELECT reference, client_name, payment_note, payment_ref, balance_due::float bal
+        FROM bookings
+        WHERE balance_due <= 0
+          AND (abs(payment_amount - $1) < 0.01
+               OR payment_note LIKE '%' || $2 || '%'
+               OR payment_note LIKE '%' || $3 || '%')
+        ORDER BY event_date DESC LIMIT 3`, [it.amount, amtStr, amtComma]);
+      if (settled.length) {
+        console.log(`${money(it.amount).padStart(10)} check ${String(it.checkNo || '—').padEnd(8)} LOOKS RECORDED → ${settled[0].reference} ${settled[0].client_name}`);
+        console.log(`${' '.repeat(12)}  note: ${String(settled[0].payment_note || '').slice(0, 78)}`);
+        if (it.checkNo && !new RegExp('check (no\\.?|#) *0*' + it.checkNo, 'i').test(settled[0].payment_note || '')) {
+          console.log(`${' '.repeat(12)}  → confirm, then: --record ${settled[0].reference}=${it.checkNo}`);
+        }
+        continue;
+      }
+
+      // 3. Not recorded at all — which outstanding gigs is it the right size for?
       const { rows: cand } = await client.query(`
         SELECT reference, client_name, event_date::text d, balance_due::float bal
         FROM bookings WHERE status IN ('completed','confirmed') AND balance_due > 0

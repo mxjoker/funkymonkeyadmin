@@ -64,3 +64,31 @@ test('it looks for an already-recorded check before offering candidates', () => 
 test('--record never overwrites an existing reference', () => {
   assert.match(SRC, /AND coalesce\(payment_ref,''\) = ''/);
 });
+
+// Most reconciliations were already done and just not written down in a
+// findable way: measured 2026-09-18, 21 payment notes mention a check and only
+// 2 name its number. Matching the AMOUNT against an already-settled booking is
+// what catches those — without it the tool said "no booking owes this amount",
+// which is true and useless, for four of seven checks in a real deposit.
+test('a settled booking is recognised by amount when the number was never written down', () => {
+  assert.match(SRC, /LOOKS RECORDED/);
+  const block = SRC.split('// 2. Recorded, but without the number')[1].split('// 3.')[0];
+  assert.match(block, /balance_due <= 0/, 'only already-settled bookings count as recorded');
+  assert.match(block, /abs\(payment_amount - \$1\) < 0\.01/);
+  assert.match(block, /payment_note LIKE/, 'and the amount as it appears in prose');
+});
+
+// The strong key is the check number, so a recognised-by-amount match should
+// leave the number behind for next time.
+test('it offers to write the number back after an amount match', () => {
+  const block = SRC.split('// 2. Recorded, but without the number')[1].split('// 3.')[0];
+  assert.match(block, /--record \$\{settled\[0\]\.reference\}=\$\{it\.checkNo\}/);
+});
+
+// payment_ref is frequently a Square or Stripe id already. Overwriting it would
+// destroy a real reference to record a different one.
+test('recording never overwrites a reference that is already in use', () => {
+  assert.match(SRC, /coalesce\(payment_ref,''\) = ''/, 'payment_ref is only set when empty');
+  assert.match(SRC, /check no\. ' \|\| \$1/, 'otherwise the number is appended to the note');
+  assert.match(SRC, /payment_note !~\* \('check/, 'and never appended twice');
+});
