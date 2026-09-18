@@ -21,6 +21,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 if (!process.env.DATABASE_URL) {
   const p = path.join(__dirname, '..', '.env');
   const m = fs.existsSync(p) && fs.readFileSync(p, 'utf8').match(/^DATABASE_URL=(.*)$/m);
@@ -81,7 +82,25 @@ function parseItems(file) {
       console.log('');
     }
 
+    // Income that is not booking revenue — contract labour for the Sooner
+    // Theatre residency, an expense reimbursement for magic kits, a JCM job that
+    // never went through the CRM. Without this every pass re-investigates them
+    // and finds nothing, which is indistinguishable from a real gap.
+    const notesFile = path.join(os.homedir(), 'FME-private', 'non-booking-checks.txt');
+    const notBooking = new Map();
+    if (fs.existsSync(notesFile)) {
+      for (const line of fs.readFileSync(notesFile, 'utf8').split('\n')) {
+        const m = line.trim().match(/^(\d+)\s+(.*)$/);
+        if (m) notBooking.set(stripZeros(m[1]), m[2]);
+      }
+    }
+
     for (const it of items) {
+      if (it.checkNo && notBooking.has(it.checkNo)) {
+        console.log(`${money(it.amount).padStart(10)} check ${String(it.checkNo).padEnd(8)} NOT A BOOKING — ${notBooking.get(it.checkNo)}`);
+        continue;
+      }
+
       // 1. Already reconciled? The check number is the only unique key.
       // deposit_ref as well as payment_ref: a deposit cheque is recorded in a
       // different column from a balance cheque, and searching only one of them

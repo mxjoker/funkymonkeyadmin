@@ -111,3 +111,16 @@ test('every booking named in the output carries its date', () => {
     assert.ok(SRC.includes(line), 'missing the date beside: ' + line);
   }
 });
+
+// Not every cheque is booking revenue. The Sooner Theatre residency pays
+// contract labour and reimburses magic kits; a JCM job may never touch the CRM.
+// Without a register of these, every pass re-investigates them and finds
+// nothing, which looks exactly like a real gap.
+test('known non-booking income is named, not re-investigated', () => {
+  assert.match(SRC, /NOT A BOOKING/);
+  assert.match(SRC, /non-booking-checks\.txt/);
+  const block = SRC.split('const notBooking = new Map()')[1].split('for (const it of items)')[0];
+  assert.match(block, /stripZeros\(m\[1\]\)/, 'check numbers there must normalise like everywhere else');
+  assert.ok(SRC.indexOf('NOT A BOOKING') < SRC.indexOf('// 1. Already reconciled?'),
+    'it should short-circuit before the database lookups');
+});
