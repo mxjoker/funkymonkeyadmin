@@ -245,6 +245,54 @@
   to = "/.netlify/functions/travel"
   status = 200
 
+# ── Not for the public ───────────────────────────────────────────────────────
+# There is no publish directory, so Netlify serves the REPOSITORY ROOT: every
+# committed file is downloadable by anyone who guesses the path. Verified
+# 2026-09-18 — /import-data.csv returned 200 with client names, phone numbers,
+# email addresses and children names and dates of birth, and /docs/*,
+# /scripts/*, /test/* and /package.json were all readable too. Only .env
+# escaped, and only because it was already gitignored.
+#
+# These rules 404 the paths that are not web pages. The proper fix is to move
+# the five HTML pages into a publish directory so the default is "serve
+# nothing"; this is the containment that does not require moving files.
+# Redirects are evaluated in order and these sit AFTER the /api/* rules, so
+# they cannot shadow a function route.
+[[redirects]]
+  from = "/docs/*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/scripts/*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/test/*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/*.csv"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/package.json"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/package-lock.json"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/netlify.toml"
+  to = "/404.html"
+  status = 404
+
 # Twilio webhooks. The signature check rebuilds the signed URL from SITE_URL +
 # these exact paths, so Twilio must be configured with these URLs and no query
 # string — see _twilio-sig.js.

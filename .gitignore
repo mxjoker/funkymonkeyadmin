@@ -34,3 +34,11 @@ FME Passcodes/
 
 # SDD scratch workspace (ledger, briefs, review packages)
 .superpowers/
+
+# NEVER commit these — the Netlify site publishes the repo ROOT, so anything
+# committed here is downloadable by anyone who guesses the path. Verified
+# 2026-09-18: /docs/CUTOVER.md, /scripts/*.js, /test/*.js and /package.json all
+# return 200 on the live site. Only .env escapes, because it was already ignored.
+Bank Docs/
+*.csv
+!netlify/**/*.csv
