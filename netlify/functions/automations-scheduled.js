@@ -26,7 +26,10 @@ const { ensureSmsTables, sendSms, flushHeldSms, renderSms } = require('./_sms');
 // "…T00:00:00.000Z" and any renderer that parses that whole string shows the
 // previous evening in Central. See test/my-booking-date.test.js.
 const { fmtEventDate } = require('./_email');
-const { wantsSms } = require('./staff-assignments');
+// STAFFABLE_STATUSES is the same constant the Notify Staff button and the
+// open-gig list read. Imported rather than repeated: when two paths must
+// agree about which bookings are real work, they have to read one list.
+const { wantsSms, STAFFABLE_STATUSES } = require('./staff-assignments');
 
 // ── Day-of reminder: call time and address, to everyone working today ────────
 async function staffDayOfReminders(client, now) {
@@ -38,13 +41,21 @@ async function staffDayOfReminders(client, now) {
     JOIN staff s    ON s.id = sa.staff_id AND s.active = TRUE
     JOIN bookings b ON b.id = sa.booking_id
     WHERE sa.status = 'assigned'
+      -- Cancelling a booking does not release its staff_assignments rows, so
+      -- without this the crew of a dead gig is told to load up. It happened
+      -- four times before anyone noticed, and once to a real crew member:
+      -- Noah Drews was texted "Today: ..." on 2026-08-29 about booking 26-276,
+      -- which had been cancelled. The Notify Staff button, the open-gig list
+      -- and the staff portal all gate on booking status; this was the one
+      -- staff-messaging path that never did.
+      AND b.status = ANY($1)
       AND b.event_date::date = CURRENT_DATE
       AND NOT EXISTS (
         SELECT 1 FROM sms_log l
         WHERE l.staff_id = s.id AND l.booking_id = b.id
           AND l.trigger_label = 'Day-of reminder'
       )
-  `);
+  `, [STAFFABLE_STATUSES]);
   let sent = 0;
   for (const r of rows) {
     if (!wantsSms(r) || !r.phone) continue;
