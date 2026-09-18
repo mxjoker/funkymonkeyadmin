@@ -92,3 +92,22 @@ test('recording never overwrites a reference that is already in use', () => {
   assert.match(SRC, /check no\. ' \|\| \$1/, 'otherwise the number is appended to the note');
   assert.match(SRC, /payment_note !~\* \('check/, 'and never appended twice');
 });
+
+// A deposit cheque is recorded in deposit_ref, a balance cheque in payment_ref.
+// Searching only one of them reported "no booking owes this amount" for check
+// 4462 — the $100 show deposit for the Sep 27 Lawton festival — which had been
+// recorded correctly all along.
+test('a booking deposit cheque counts as recorded too', () => {
+  assert.match(SRC, /coalesce\(deposit_ref,''\) <> '' AND replace\(deposit_ref, ' ', ''\) = \$1/);
+  assert.match(SRC, /booking deposit/, 'and it should say which kind it was');
+  assert.match(SRC, /the balance, correctly/, 'a deposit cheque leaves a balance outstanding on purpose');
+});
+
+// Joe navigates by date, not by reference number.
+test('every booking named in the output carries its date', () => {
+  for (const line of ['ALREADY RECORDED → ${k.reference} (${k.d})',
+                      'LOOKS RECORDED → ${settled[0].reference} (${settled[0].d})',
+                      '${c.reference} (${c.d})']) {
+    assert.ok(SRC.includes(line), 'missing the date beside: ' + line);
+  }
+});

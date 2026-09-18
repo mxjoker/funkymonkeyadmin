@@ -83,13 +83,22 @@ function parseItems(file) {
 
     for (const it of items) {
       // 1. Already reconciled? The check number is the only unique key.
+      // deposit_ref as well as payment_ref: a deposit cheque is recorded in a
+      // different column from a balance cheque, and searching only one of them
+      // reported "no booking owes this amount" for check 4462 — the $100 deposit
+      // for the Sep 27 Lawton festival, which was correctly recorded all along.
       const { rows: known } = await client.query(`
-        SELECT reference, client_name, balance_due::float bal FROM bookings
+        SELECT reference, client_name, event_date::text AS d, balance_due::float bal,
+               CASE WHEN replace(coalesce(deposit_ref,''), ' ', '') = $1 THEN 'deposit' ELSE 'payment' END AS kind
+        FROM bookings
         WHERE (coalesce(payment_ref,'') <> '' AND replace(payment_ref, ' ', '') = $1)
+           OR (coalesce(deposit_ref,'') <> '' AND replace(deposit_ref, ' ', '') = $1)
            OR payment_note ~* ('check (no\\.?|#) *0*' || $1)`, [it.checkNo || '~none~']);
       if (known.length) {
-        console.log(`${money(it.amount).padStart(10)} check ${String(it.checkNo).padEnd(8)} ALREADY RECORDED → ${known[0].reference} ${known[0].client_name}` +
-          (known[0].bal > 0 ? `  ⚠ still shows ${money(known[0].bal)} owed` : ''));
+        const k = known[0];
+        console.log(`${money(it.amount).padStart(10)} check ${String(it.checkNo).padEnd(8)} ALREADY RECORDED → ${k.reference} (${k.d}) ${k.client_name}` +
+          (k.kind === 'deposit' ? ' — booking deposit' : '') +
+          (k.bal > 0 ? `  · still owes ${money(k.bal)}${k.kind === 'deposit' ? ' (the balance, correctly)' : ' ⚠'}` : ''));
         continue;
       }
       // 2. Recorded, but without the number. Most older notes are like
@@ -101,7 +110,7 @@ function parseItems(file) {
       const amtStr = it.amount.toFixed(2);
       const amtComma = it.amount.toLocaleString('en-US', { minimumFractionDigits: 2 });
       const { rows: settled } = await client.query(`
-        SELECT reference, client_name, payment_note, payment_ref, balance_due::float bal
+        SELECT reference, client_name, event_date::text AS d, payment_note, payment_ref, balance_due::float bal
         FROM bookings
         WHERE balance_due <= 0
           AND (abs(payment_amount - $1) < 0.01
@@ -109,7 +118,7 @@ function parseItems(file) {
                OR payment_note LIKE '%' || $3 || '%')
         ORDER BY event_date DESC LIMIT 3`, [it.amount, amtStr, amtComma]);
       if (settled.length) {
-        console.log(`${money(it.amount).padStart(10)} check ${String(it.checkNo || '—').padEnd(8)} LOOKS RECORDED → ${settled[0].reference} ${settled[0].client_name}`);
+        console.log(`${money(it.amount).padStart(10)} check ${String(it.checkNo || '—').padEnd(8)} LOOKS RECORDED → ${settled[0].reference} (${settled[0].d}) ${settled[0].client_name}`);
         console.log(`${' '.repeat(12)}  note: ${String(settled[0].payment_note || '').slice(0, 78)}`);
         if (it.checkNo && !new RegExp('check (no\\.?|#) *0*' + it.checkNo, 'i').test(settled[0].payment_note || '')) {
           console.log(`${' '.repeat(12)}  → confirm, then: --record ${settled[0].reference}=${it.checkNo}`);
@@ -126,7 +135,7 @@ function parseItems(file) {
         console.log(`${money(it.amount).padStart(10)} check ${String(it.checkNo || '—').padEnd(8)} no booking owes this amount — already settled, or never entered`);
       } else {
         console.log(`${money(it.amount).padStart(10)} check ${String(it.checkNo || '—').padEnd(8)} ${cand.length} candidate(s) — the PAYER NAME on the check decides:`);
-        cand.forEach((c) => console.log(`${' '.repeat(12)}  ${c.reference.padEnd(12)} ${c.d} ${c.client_name}  owes ${money(c.bal)}`));
+        cand.forEach((c) => console.log(`${' '.repeat(12)}  ${c.reference} (${c.d}) ${c.client_name}  owes ${money(c.bal)}`));
       }
     }
     console.log('\nAmount alone never identifies a check. Confirm the payer, then re-run with');
