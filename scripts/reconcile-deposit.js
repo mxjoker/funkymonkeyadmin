@@ -55,6 +55,11 @@ function parseItems(file) {
   if (!file) { console.error('usage: reconcile-deposit.js <items file> [--record REF=CHECKNO ...]'); process.exit(1); }
   const records = rest.filter((a) => a.includes('=')).map((a) => a.replace(/^--record=?/, '').split('='));
   const items = parseItems(file);
+  // From the file name: 2026-05-21.txt. A cheque cannot pay for a gig that has
+  // not happened yet, and a settled booking from a year earlier was not paid by
+  // this deposit — without that, amount alone matched a May cheque to an August
+  // booking and called it recorded.
+  const depositDate = (path.basename(file).match(/\d{4}-\d{2}-\d{2}/) || [null])[0];
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
   const client = await pool.connect();
   try {
@@ -128,16 +133,35 @@ function parseItems(file) {
       //    the number back so the next pass matches on the strong key.
       const amtStr = it.amount.toFixed(2);
       const amtComma = it.amount.toLocaleString('en-US', { minimumFractionDigits: 2 });
+      // Two tiers of evidence, and nothing below them.
+      //
+      // STRONG: the note names this deposit's date AND this amount. That is a
+      // previous reconciliation of this very cheque.
+      // PLAUSIBLE: the recorded payment equals the cheque and the gig happened
+      // in the months before the deposit.
+      //
+      // An earlier version also matched "the amount appears anywhere in the
+      // note", which tied three different cheques to one booking because her
+      // note happened to contain those figures. A loose match here is worse
+      // than none: it tells someone a cheque is accounted for when it is not.
       const { rows: settled } = await client.query(`
-        SELECT reference, client_name, event_date::text AS d, payment_note, payment_ref, balance_due::float bal
+        SELECT reference, client_name, event_date::text AS d, payment_note, balance_due::float bal,
+               (payment_note LIKE '%' || $4 || '%' AND
+                (payment_note LIKE '%' || $2 || '%' OR payment_note LIKE '%' || $3 || '%')) AS names_this_deposit
         FROM bookings
         WHERE balance_due <= 0
-          AND (abs(payment_amount - $1) < 0.01
-               OR payment_note LIKE '%' || $2 || '%'
-               OR payment_note LIKE '%' || $3 || '%')
-        ORDER BY event_date DESC LIMIT 3`, [it.amount, amtStr, amtComma]);
+          AND (
+            (payment_note LIKE '%' || $4 || '%' AND
+             (payment_note LIKE '%' || $2 || '%' OR payment_note LIKE '%' || $3 || '%'))
+            OR (abs(payment_amount - $1) < 0.01 AND $4 <> ''
+                AND event_date <= $4::date AND event_date >= $4::date - INTERVAL '150 days')
+          )
+        ORDER BY names_this_deposit DESC, event_date DESC LIMIT 3`,
+        [it.amount, amtStr, amtComma, depositDate || '1900-01-01']);
+
       if (settled.length) {
-        console.log(`${money(it.amount).padStart(10)} check ${String(it.checkNo || '—').padEnd(8)} LOOKS RECORDED → ${settled[0].reference} (${settled[0].d}) ${settled[0].client_name}`);
+        const sure = settled[0].names_this_deposit;
+        console.log(`${money(it.amount).padStart(10)} check ${String(it.checkNo || '—').padEnd(8)} ${sure ? 'RECORDED, and its note names this very deposit' : 'MAYBE RECORDED — amount and timing fit, nothing more'} → ${settled[0].reference} (${settled[0].d}) ${settled[0].client_name}`);
         console.log(`${' '.repeat(12)}  note: ${String(settled[0].payment_note || '').slice(0, 78)}`);
         if (it.checkNo && !new RegExp('check (no\\.?|#) *0*' + it.checkNo, 'i').test(settled[0].payment_note || '')) {
           console.log(`${' '.repeat(12)}  → confirm, then: --record ${settled[0].reference}=${it.checkNo}`);

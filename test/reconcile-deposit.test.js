@@ -124,3 +124,24 @@ test('known non-booking income is named, not re-investigated', () => {
   assert.ok(SRC.indexOf('NOT A BOOKING') < SRC.indexOf('// 1. Already reconciled?'),
     'it should short-circuit before the database lookups');
 });
+
+// Amount matching has to be anchored in time and in evidence. Early versions
+// tied a May cheque to an August booking, and tied three different cheques to
+// one booking whose note happened to contain those figures — her note reads
+// "$341.00 check ... paid in full ($385.00 + $56.00 travel)", so both amounts
+// appear in it. A loose match is worse than none: it says a cheque is accounted
+// for when it is not.
+test('a match must fit the deposit date, not just the amount', () => {
+  assert.match(SRC, /const depositDate = \(path\.basename\(file\)/, 'the deposit date comes from the file name');
+  const q = SRC.split('const { rows: settled }')[1].split('LIMIT 3')[0];
+  assert.match(q, /event_date <= \$4::date/, 'a cheque cannot pay for a gig that has not happened');
+  assert.match(q, /INTERVAL '150 days'/, 'nor for one from a year earlier');
+});
+
+test('the strong claim requires the note to name BOTH this deposit and this amount', () => {
+  const q = SRC.split('const { rows: settled }')[1].split('LIMIT 3')[0];
+  assert.match(q, /payment_note LIKE '%' \|\| \$4 \|\| '%' AND/, 'the deposit date must appear');
+  assert.match(q, /payment_note LIKE '%' \|\| \$2 \|\| '%' OR payment_note LIKE '%' \|\| \$3 \|\| '%'/, 'and the amount');
+  assert.match(SRC, /names this very deposit/);
+  assert.match(SRC, /MAYBE RECORDED/, 'a weaker match must be labelled as weaker');
+});
