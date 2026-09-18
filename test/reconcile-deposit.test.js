@@ -71,11 +71,11 @@ test('--record never overwrites an existing reference', () => {
 // what catches those — without it the tool said "no booking owes this amount",
 // which is true and useless, for four of seven checks in a real deposit.
 test('a settled booking is recognised by amount when the number was never written down', () => {
-  assert.match(SRC, /LOOKS RECORDED/);
-  const block = SRC.split('// 2. Recorded, but without the number')[1].split('// 3.')[0];
+  assert.match(SRC, /MAYBE RECORDED/, 'an amount-and-timing match is still surfaced, just labelled honestly');
+  const block = SRC.split('// Two tiers of evidence')[1].split('if (settled.length)')[0];
   assert.match(block, /balance_due <= 0/, 'only already-settled bookings count as recorded');
   assert.match(block, /abs\(payment_amount - \$1\) < 0\.01/);
-  assert.match(block, /payment_note LIKE/, 'and the amount as it appears in prose');
+  assert.match(block, /payment_note LIKE/, 'and a note naming this deposit counts as the stronger evidence');
 });
 
 // The strong key is the check number, so a recognised-by-amount match should
@@ -106,7 +106,7 @@ test('a booking deposit cheque counts as recorded too', () => {
 // Joe navigates by date, not by reference number.
 test('every booking named in the output carries its date', () => {
   for (const line of ['ALREADY RECORDED → ${k.reference} (${k.d})',
-                      'LOOKS RECORDED → ${settled[0].reference} (${settled[0].d})',
+                      '${settled[0].reference} (${settled[0].d}) ${settled[0].client_name}',
                       '${c.reference} (${c.d})']) {
     assert.ok(SRC.includes(line), 'missing the date beside: ' + line);
   }
