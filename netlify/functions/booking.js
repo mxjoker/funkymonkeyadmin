@@ -2,7 +2,7 @@ const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized, forbidden } = require('./_auth');
 const { wrap, render, sendEmail, logEmail, ensureEmailLog, ensureBookingChanges, logChange } = require('./_email');
 const { triggerStatusChange } = require('./automations');
-const { notifyMatchingStaff } = require('./staff-assignments');
+const { notifyMatchingStaff, invalidateDerivedTimes } = require('./staff-assignments');
 const { ensureBookingItems, replaceItems, rollupItems, getItems, balanceIsDerivable, normaliseItems } = require('./_items');
 const { normaliseAddress } = require('./_address');
 
@@ -395,6 +395,33 @@ exports.handler = async (event) => {
             console.log(`Auto-notified matching staff for booking ${updated.reference}`);
           } catch(e) {
             console.error(`Failed to auto-notify staff for booking ${updated.id}:`, e.message);
+          }
+        }
+
+        // A staff schedule is DERIVED from the booking's time, date, ZIP and
+        // service. Change one and the stored schedule is stale — but
+        // autoCalcTimes skips any row that already has total_minutes, so it
+        // stayed stale and silent. That is how 26-143 kept a 30-minute drive to
+        // a town 81 miles away and told its crew member to leave 70 minutes too
+        // late, two days before the gig.
+        //
+        // Compared prev-vs-updated rather than reading `u`, because service_id
+        // also moves via the items rollup, which never appears in the payload.
+        // Rows a human pinned are left alone — see invalidateDerivedTimes.
+        const SCHEDULE_INPUTS = ['event_time', 'event_date', 'event_zip', 'service_id'];
+        const scheduleMoved = SCHEDULE_INPUTS.filter(
+          (f) => String(prev[f] ?? '') !== String(updated[f] ?? ''));
+        if (scheduleMoved.length) {
+          try {
+            const n = await invalidateDerivedTimes(c, parseInt(id));
+            if (n) {
+              await logChange(c, parseInt(id), 'Staff times recalculated',
+                `${scheduleMoved.join(', ')} changed — ${n} assignment(s) recomputed`);
+            }
+          } catch (e) {
+            // A failed recalc must not fail the save; the booking edit is the
+            // thing the admin asked for. It is loud, and the next edit retries.
+            console.error('invalidateDerivedTimes failed for booking', id, '|', e.message);
           }
         }
 

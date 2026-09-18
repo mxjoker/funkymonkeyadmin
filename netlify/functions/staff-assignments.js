@@ -113,6 +113,33 @@ async function autoCalcTimes(client, assignmentId, bookingId, forceRecalc = fals
   }
 }
 
+// Throws away times we DERIVED, so they get derived again.
+//
+// The bug this exists to stop: schedule_start, total_minutes and
+// drive_minutes_each_way are computed from the booking's time, ZIP and service.
+// Change any of those — or improve the data behind them, as the zip_coords
+// backfill did — and the stored figures are stale, but autoCalcTimes skips any
+// row that already has total_minutes, so they stayed stale silently. Booking
+// 26-143 kept a 30-minute drive to Tonkawa, 81 miles away, and told the crew
+// member to leave 70 minutes too late for a gig two days out.
+//
+// times_manual rows are left alone: if somebody typed the numbers, a booking
+// edit must not quietly discard what they decided. Everything else is ours to
+// recompute, and nulling it is what makes autoCalcTimes willing to.
+async function invalidateDerivedTimes(client, bookingId) {
+  const { rows } = await client.query(`
+    UPDATE staff_assignments
+       SET total_minutes = NULL, schedule_start = NULL,
+           drive_minutes_each_way = NULL, updated_at = NOW()
+     WHERE booking_id = $1
+       AND COALESCE(times_manual, FALSE) = FALSE
+     RETURNING id`, [bookingId]);
+  for (const r of rows) await autoCalcTimes(client, r.id, bookingId);
+  if (rows.length) console.log(`invalidateDerivedTimes: recomputed ${rows.length} assignment(s) on booking ${bookingId}`);
+  return rows.length;
+}
+
+
 
 let schemaReady;
 async function ensureTables(client) {
@@ -238,6 +265,12 @@ async function ensureTables(client) {
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS pack_out_minutes INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS home_unload_minutes INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS drive_minutes_each_way INTEGER",
+    // Did a person type these minutes, or did we work them out? The columns
+    // could not tell them apart, and that ambiguity is what let a stale
+    // schedule survive: drive_minutes_each_way persisted from an old run looked
+    // exactly like a deliberate override, so nothing dared recompute it. Only
+    // update_assignment_times — the admin's own edit — sets this true.
+    "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS times_manual BOOLEAN DEFAULT FALSE",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS total_minutes INTEGER",
     "ALTER TABLE staff_assignments ADD COLUMN IF NOT EXISTS schedule_start TIME",
     // Guaranteed here too, not only by payroll.js's ensureTables — this file
@@ -1031,7 +1064,7 @@ exports.handler = async (event) => {
             UPDATE staff_assignments SET
               load_minutes=$1, unload_minutes=$2, pack_out_minutes=$3,
               home_unload_minutes=$4, drive_minutes_each_way=$5,
-              total_minutes=$6, schedule_start=$7, updated_at=NOW()
+              total_minutes=$6, schedule_start=$7, times_manual=TRUE, updated_at=NOW()
             WHERE id=$8 RETURNING *
           `, [load, unload, pack, homeUn, drive, total, scheduleStart, parseInt(assignment_id)]);
 
@@ -1295,6 +1328,8 @@ exports.notifyMatchingStaff = async function notifyMatchingStaff(booking) {
 
 // Exported for tests — the invariant these two share is the thing worth pinning.
 exports.STAFFABLE_STATUSES = STAFFABLE_STATUSES;
+exports.invalidateDerivedTimes = invalidateDerivedTimes;
+exports.autoCalcTimes = autoCalcTimes;
 exports.isStaffable = isStaffable;
 exports.slotTags = slotTags;
 exports.eligibleStaff = eligibleStaff;
