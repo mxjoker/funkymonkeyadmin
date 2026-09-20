@@ -48,6 +48,19 @@ test('every template is seedable and lands in a group', () => {
   }
 });
 
+// A body_sms nobody sends. sendTemplate only reaches the SMS half when the
+// rule says channel 'sms' or 'both', so a template carrying text copy on
+// channel 'email' is wording written, seeded, and never delivered — the
+// finalisation link sat that way from 2026-08-19 to 2026-09-20 while clients
+// who had ticked the SMS box got email only.
+test('a template with SMS copy is on a channel that sends it', () => {
+  for (const t of TEMPLATES) {
+    if (!(t.body_sms || '').trim()) continue;
+    assert.ok(['sms', 'both'].includes(t.channel),
+      `${t.template_key} has SMS copy but channel "${t.channel || 'email'}" — the text would never send`);
+  }
+});
+
 test('template keys are unique, or the seed keeps only one of them', () => {
   assert.strictEqual(keys.size, TEMPLATES.length, 'duplicate template_key');
 });

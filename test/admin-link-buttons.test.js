@@ -10,13 +10,13 @@ function loadHelpers() {
   const a = HTML.indexOf('// ══ PURE HELPERS');
   const b = HTML.indexOf('// ══ END PURE HELPERS');
   assert.ok(a !== -1 && b !== -1, 'pure-helper sentinels missing from admin.html');
-  const ctx = {};
+  const ctx = { location: { origin: 'https://funkymonkeyadmin.netlify.app' } };
   vm.createContext(ctx);
   // STATUSES lives above the sentinel block but statusAfterFinalisationSent
   // reads it for the ladder order, so it comes into the context too.
   const sa = HTML.indexOf('const STATUSES = [');
   const sb = HTML.indexOf('];', sa) + 2;
-  vm.runInContext(HTML.slice(sa, sb) + '\n' + HTML.slice(a, b) + '\nout = { depositLinkAmount, depositWaivable, depositOutstanding, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS, reportButtonVisible, payLabel, statusAfterFinalisationSent, STATUSES };', ctx);
+  vm.runInContext(HTML.slice(sa, sb) + '\n' + HTML.slice(a, b) + '\nout = { depositLinkAmount, depositWaivable, depositOutstanding, balanceLinkAmounts, balanceLinkEligible, clockRowLabel, clockAdjustAllowed, CHECKLIST_STATUSES, CHECKLIST_LABELS, reportButtonVisible, payLabel, statusAfterFinalisationSent, finalisationLinkFor, STATUSES };', ctx);
   return ctx.out;
 }
 
@@ -369,4 +369,23 @@ test('a paid deposit is neither waivable nor sendable', () => {
 test('the deposit button still shows a dollar sign before the amount', () => {
   const HTML = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
   assert.match(HTML, /Send \$\$\{depositLinkAmount\(b\)\.toFixed\(2\)\} deposit link/);
+});
+
+// The link Joe copies must be the link the client was emailed, or the two
+// paths for "here is your booking" disagree and one of them 404s.
+const { finalisationLinkFor } = loadHelpers();
+const { finaliseLinkFor } = require('../netlify/functions/_email.js');
+
+test('the copied link is character-for-character the emailed one', () => {
+  const b = { reference: 'FM-8TEDR3QY', client_email: 'nusrat.sanober@gmail.com' };
+  process.env.SITE_URL = 'https://funkymonkeyadmin.netlify.app';
+  assert.strictEqual(finalisationLinkFor(b), finaliseLinkFor(b));
+});
+
+// A link with no email 404s the moment it is opened, so neither side offers one.
+test('no email, no link — on both sides', () => {
+  const b = { reference: 'FM-8TEDR3QY', client_email: '' };
+  assert.strictEqual(finalisationLinkFor(b), '');
+  assert.strictEqual(finaliseLinkFor(b), '');
+  assert.strictEqual(finalisationLinkFor({ client_email: 'a@b.com' }), '');
 });

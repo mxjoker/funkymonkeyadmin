@@ -471,6 +471,11 @@ async function sendTemplate(client, booking, templateKey, link, opts = {}) {
     sent: emailSent || smsSent,
     skipped: !emailSent && !smsSent && (emailOptOut || smsOptOut),
     suppressed: !!(res && res.suppressed),
+    // Which channels went, so a button can SAY "emailed and texted" instead of
+    // leaving Joe to guess. He guessed wrong on 2026-09-20 and was right to:
+    // the text half had never fired.
+    emailed: emailSent,
+    sms: smsSent,
     label: rule.name,
   };
 }
@@ -949,7 +954,7 @@ exports.handler = async (event) => {
 
         const result = await sendTemplate(client, booking, template_key, booking.stripe_payment_link || null);
         if (!result.sent) return json(400, { success: false, error: result.error });
-        return json(200, { success: true, suppressed: result.suppressed, label: result.label });
+        return json(200, { success: true, suppressed: result.suppressed, sms: result.sms, label: result.label });
       }
 
       if (action === 'send_manual') {

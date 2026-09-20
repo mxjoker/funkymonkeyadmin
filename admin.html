@@ -2002,6 +2002,21 @@ function statusAfterFinalisationSent(status) {
   return now !== -1 && now < quoted ? 'quoted' : null;
 }
 
+// The client's own link, built the same way finaliseLinkFor() in _email.js
+// builds it for the email and the text. admin.html is served from SITE_URL,
+// so location.origin IS that site and there is nothing to keep in step.
+//
+// Empty without an email, exactly as the server helper is: the page
+// authenticates on reference + email, so a link missing one 404s the instant
+// it is opened. An empty box is honest; a dead link handed to a client is not.
+function finalisationLinkFor(b) {
+  const ref = (b && b.reference) || '';
+  const email = (b && b.client_email) || '';
+  if (!ref || !email) return '';
+  const origin = typeof location !== 'undefined' ? location.origin : '';
+  return origin + '/my-booking.html?ref=' + encodeURIComponent(ref) + '&email=' + encodeURIComponent(email);
+}
+
 // A deposit can only be waived — or asked for — while it is still outstanding.
 // Waiving one that was already collected would zero deposit_amount on a booking
 // where money actually arrived, and the balance recompute would then bill the
@@ -3085,9 +3100,18 @@ function openBooking(id, seed) {
     <div style="background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:18px">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <strong style="font-size:.875rem">🔗 Finalisation Link</strong>
-        <button class="btn btn-primary btn-sm" onclick="sendFinalisationLink('${b.id}')">Send Finalisation Link</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="copyFinalisationLink('${b.id}')">Copy link</button>
+          <button class="btn btn-primary btn-sm" onclick="sendFinalisationLink('${b.id}')">Send Finalisation Link</button>
+        </div>
       </div>
-      <div style="font-size:.75rem;color:#6b7280;margin-top:6px">Emails the client a link to review/complete their details and pay the deposit.</div>
+      <div style="font-size:.75rem;color:#6b7280;margin-top:6px">Sends the client a link to review/complete their details and pay the deposit — by email, and by text too if they have opted in.</div>
+      <!-- The same URL the email and the text carry, spelled out so it can be
+           pasted into a text, an email or a DM. A link you can see is also a
+           link you can check, which is how a wrong contact email gets caught
+           before the client says "I never got it". -->
+      <input readonly onclick="this.select()" value="${esc(finalisationLinkFor(b))}"
+        style="width:100%;margin-top:8px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:.7rem;font-family:monospace;color:#374151;background:#fff">
       <div style="font-size:.75rem;margin-top:6px" id="sent-final-${b.id}"></div>
     </div>
 
@@ -4856,6 +4880,27 @@ async function saveCall(id) {
   } catch (e) { msg.innerHTML = `<span style="color:#dc2626">${esc(e.message)}</span>`; }
 }
 
+// Copy the client's link to the clipboard so Joe can text or email it himself.
+// The send button is the normal path; this is for the client who says the email
+// never arrived, or who wants it in a thread that is already open.
+//
+// ponytail: navigator.clipboard needs a secure context, which the admin always
+// has. If it ever fails the link is still in the box beside the button, so the
+// fallback is to say so rather than to reimplement copying.
+async function copyFinalisationLink(id) {
+  const b = allBookings.find(x => String(x.id) === String(id));
+  if (!b) return;
+  const url = finalisationLinkFor(b);
+  if (!url) { alert('This booking has no client email, so its link would not open — add one first.'); return; }
+  try {
+    await navigator.clipboard.writeText(url);
+    const el = document.getElementById('sent-final-' + b.id);
+    if (el) el.innerHTML = '<span style="color:#059669">Link copied.</span>';
+  } catch (e) {
+    alert('Could not copy automatically — click the link box below the button and copy it.');
+  }
+}
+
 async function sendFinalisationLink(id) {
   const b = allBookings.find(x => String(x.id) === String(id));
   if (!b) return;
@@ -4925,6 +4970,8 @@ async function sendFinalisationLink(id) {
       body: JSON.stringify({ action: 'send_template', booking_id: b.id, template_key: key })
     });
     if (!res.ok) throw new Error((await res.json()).error || 'Send failed');
+    // The body is still unread here — only the failure branch above consumes it.
+    const sentBoth = (await res.json().catch(() => ({}))).sms === true;
 
     // Only AFTER the email is away. Promoting a booking whose send failed
     // would tell the board this client has been quoted when nothing reached
@@ -4940,7 +4987,10 @@ async function sendFinalisationLink(id) {
         console.error('finalisation sent but status stayed', b.status, '|', e.message);
       }
     }
-    alert(promoted ? 'Sent — booking moved to Quoted.' : 'Sent.');
+    // Naming the channels is the whole point: 'Sent.' is what let a text that
+    // never sent look like one that did.
+    const how = sentBoth ? 'Emailed and texted' : 'Emailed';
+    alert(promoted ? how + " — booking moved to Quoted." : how + '.');
     await loadComms(b.id);
     if (promoted) openBooking(id);
   } catch (e) { alert('Could not send: ' + e.message); }

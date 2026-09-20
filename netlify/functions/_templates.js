@@ -174,7 +174,13 @@ const TEMPLATES = [
   {
     template_key: 'finalisation_link',
     name: 'Finalisation link (deposit due) — to the client',
-    trigger_event: 'manual', recipient: 'client', sort_order: 20,
+    // channel 'both': a client who ticked the SMS box gets the link by text as
+    // well as email. It has carried a body_sms since the day it was written but
+    // stayed channel 'email', so the text half never fired — FM-8TEDR3QY,
+    // consented 2026-09-20 02:05, emailed twice, texted never. Email alone is a
+    // single point of failure for the one message a booking cannot proceed
+    // without: if it spam-filters, the booking just stops.
+    trigger_event: 'manual', recipient: 'client', sort_order: 20, channel: 'both',
     subject: 'Finalise your booking — {{reference}}',
     body_html: `<p>Hi {{client_first_name}}!</p>
       <p>Please review your details, fill in anything missing, and pay your deposit to secure the date:</p>
@@ -204,7 +210,7 @@ const TEMPLATES = [
     // 27, not 18: the decade decides the group in the Automations tab, and 10-15
     // is money-to-the-client. This is a booking message and belongs beside the
     // two finalisation templates at 20 and 21.
-    trigger_event: 'manual', recipient: 'client', sort_order: 27,
+    trigger_event: 'manual', recipient: 'client', sort_order: 27, channel: 'both',
     subject: "You're all set! 🎊 — Funky Monkey Events ({{reference}})",
     body_html: `<h2>Hi {{client_first_name}}!</h2>
       <p>Your booking is confirmed and we can't wait.</p>
@@ -221,7 +227,7 @@ const TEMPLATES = [
   {
     template_key: 'finalisation_link_no_deposit',
     name: 'Finalisation link (nothing to pay) — to the client',
-    trigger_event: 'manual', recipient: 'client', sort_order: 21,
+    trigger_event: 'manual', recipient: 'client', sort_order: 21, channel: 'both',
     subject: 'Finalise your booking — {{reference}}',
     body_html: `<p>Hi {{client_first_name}}!</p>
       <p>Please review your details and fill in anything missing so we have everything we need for your event:</p>
