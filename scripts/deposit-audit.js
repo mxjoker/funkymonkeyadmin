@@ -55,8 +55,31 @@ const files = fs.existsSync(DEPOSITS)
 
 // A deposit total often appears as a header line in the pasted detail, so the
 // items may sum to either the total or twice it. Both count as a clean match.
-const matchFor = (dep) => files.find((x) => x.date === dep.iso
-  && (Math.abs(x.sum - dep.amt) < 0.01 || Math.abs(x.sum - dep.amt * 2) < 0.01));
+//
+// A file may also cover SEVERAL deposits banked the same day — 2026-07-27 had
+// four, and three of them were pasted into one file. Without this the audit
+// reported all four as outstanding when three were done, which is the opposite
+// of the problem this tracker exists to solve.
+const sameDay = (iso) => batches.filter((b) => b.iso === iso);
+const subsetHits = (file) => {
+  const pool = sameDay(file.date);
+  for (let mask = 1; mask < (1 << pool.length); mask++) {
+    const pick = pool.filter((_, i) => mask & (1 << i));
+    const total = pick.reduce((t, d) => t + d.amt, 0);
+    if (Math.abs(total - file.sum) < 0.01 || Math.abs(total * 2 - file.sum) < 0.01) return pick;
+  }
+  return null;
+};
+const covered = new Set();
+for (const file of files) {
+  const pick = subsetHits(file);
+  if (pick) pick.forEach((d) => covered.add(d.iso + '|' + d.amt + '|' + d.acct));
+}
+const matchFor = (dep) => {
+  const key = dep.iso + '|' + dep.amt + '|' + dep.acct;
+  if (!covered.has(key)) return null;
+  return files.find((x) => x.date === dep.iso) || { count: '?' };
+};
 
 let done = 0, doneValue = 0, todo = 0, todoValue = 0;
 console.log('DEPOSIT AUDIT — connecting checks to bookings\n');
