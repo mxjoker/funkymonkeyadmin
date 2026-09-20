@@ -423,6 +423,11 @@ exports.handler = async (event) => {
           const { rows: myGigs } = await client.query(
             `SELECT sa.*, b.reference, b.service_name, b.event_date, b.event_time,
                     b.event_type, b.guest_count, b.event_zip, b.event_location,
+                    -- What to load and where to stand. surface_type is the
+                    -- one field on this row that changes what goes in the
+                    -- van, and it was on Joe's calendar while the people
+                    -- doing the loading could not see it.
+                    b.venue, b.surface_type,
                     b.client_name, b.client_phone, b.client_email,
                     b.total_price, b.deposit_paid, b.balance_due,
                     -- Whether anyone collects from this client at all: a
@@ -475,6 +480,36 @@ exports.handler = async (event) => {
             g.collect_amount = c.amount;
             g.collect_note = c.note;
           }
+
+          // Who else is working it. One query for every booking, not one per
+          // gig, and only assignments that are actually 'assigned' — listing
+          // someone who merely expressed interest would read as a covered gig.
+          //
+          // Names only, deliberately no phone numbers: a crew member knowing
+          // who they are working with is operational, handing out a colleague's
+          // mobile is a decision Joe gets to make, not a side effect of this
+          // screen. The crew list is NOT in the redaction block below — it is
+          // about staff, carries no client data, and somebody deciding whether
+          // to take a gig has a fair reason to know who is already on it.
+          const bookingIds = [...new Set(myGigs.map((g) => g.booking_id))];
+          const crewByBooking = new Map();
+          if (bookingIds.length) {
+            const { rows: crew } = await client.query(
+              `SELECT sa.booking_id, sa.tag_filled AS role,
+                      COALESCE(NULLIF(st.preferred_name,''), st.name) AS name
+                 FROM staff_assignments sa
+                 JOIN staff st ON st.id = sa.staff_id
+                WHERE sa.booking_id = ANY($1) AND sa.staff_id <> $2
+                  AND sa.status = 'assigned'
+                ORDER BY sa.tag_filled, name`,
+              [bookingIds, staffId]
+            );
+            for (const c of crew) {
+              if (!crewByBooking.has(c.booking_id)) crewByBooking.set(c.booking_id, []);
+              crewByBooking.get(c.booking_id).push({ name: c.name, role: c.role });
+            }
+          }
+          for (const g of myGigs) g.crew = crewByBooking.get(g.booking_id) || [];
 
           const { rows: staffRow } = await client.query('SELECT skills FROM staff WHERE id=$1', [staffId]);
           const skills = staffRow[0]?.skills || [];

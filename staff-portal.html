@@ -820,7 +820,7 @@ function gigCard(g, isAssigned) {
         ${onSite ? row('📍', 'On site', onSite) : ''}
         ${party ? row('🎉', 'Party', party) : ''}
         ${homeBy ? row('🏠', 'Home by', homeBy) : ''}
-        ${len && loadUp ? `<div style="color:#a78bca;font-size:.72rem;margin-left:82px">(${len} total)</div>` : ''}
+        ${len && loadUp ? `<div style="color:#a78bca;font-size:.72rem;margin-left:82px">(${len} total${Number(g.drive_minutes_each_way) > 0 ? `, ${g.drive_minutes_each_way} min drive each way` : ''})</div>` : ''}
         ${onSite && !g.zip_known ? `<div style="color:#a78bca;font-size:.7rem;margin-top:6px;font-style:italic">On-site time is an estimate — we have no drive time for this ZIP.</div>` : ''}
       </div>`;
     })()}
@@ -834,6 +834,18 @@ function gigCard(g, isAssigned) {
       })()}
       ${g.guest_count ? `<div>👥 ${g.guest_count} guests</div>` : ''}
       ${g.event_type ? `<div>🎉 ${esc(g.event_type)}</div>` : ''}
+      ${g.venue ? `<div>🏛 ${esc(g.venue)}</div>` : ''}
+      <!-- Surface decides what comes out of the van, so it is the one detail
+           here a crew member acts on before leaving the house. -->
+      ${g.surface_type ? `<div>🌱 ${esc(g.surface_type)}</div>` : ''}
+      <!-- Who else is on it. Names and roles only — see the query comment in
+           staff-assignments.js for why no phone numbers. -->
+      ${(g.crew || []).length
+        ? `<div style="grid-column:1/-1">🧑\u200d🤝\u200d🧑 With ${g.crew.map(c => esc(c.name) + (c.role ? ` (${esc(c.role)})` : '')).join(', ')}</div>`
+        : ''}
+      <!-- The reference is how a gig gets named in a text to Joe. It was
+           already being fetched and never shown. -->
+      ${g.reference ? `<div style="grid-column:1/-1;opacity:.6;font-size:.72rem">${esc(g.reference)}</div>` : ''}
     </div>
     ${contactInfo}
     ${collectBlock(g, isAssigned)}
