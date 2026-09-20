@@ -16,6 +16,8 @@
 const crypto = require('crypto');
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
+const { getDriveMins, loadZipCoords, homeBase } = require('./_schedule');
+const { collectFromClient } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -94,6 +96,65 @@ const VTIMEZONE = [
   'END:VTIMEZONE',
 ];
 
+// ── Call time ───────────────────────────────────────────────────────────────
+// The one thing this feed could not answer on a Saturday morning: what time
+// does anybody have to be at the house. It is NOT derived here. schedule_start
+// is the persisted "leave home" time on the assignment — event_time minus load,
+// drive and setup — and it is the exact figure the crew were texted and the
+// staff portal shows as "Load up". Deriving a second one would put a different
+// number on Joe's phone from the one in a crew member's hand.
+//
+// The EARLIEST across the assignments: a per-role override can move one
+// person's start, and the call time is when the first of them turns up. Rows
+// with no schedule_start are skipped rather than counted as midnight — it is
+// only computed once somebody is actually assigned, so an "interested" row
+// legitimately has none.
+//
+// total_minutes and the drive come off that same row, not off a max across all
+// of them, so "home by" is that call time plus that shift — two figures from
+// two different assignments would add up to a time nobody is ever home.
+function callFor(staff) {
+  let best = null;
+  for (const s of staff) {
+    const mins = hhmmToMins(s.schedule_start);
+    if (mins == null) continue;
+    if (!best || mins < best.mins) best = { mins, row: s };
+  }
+  if (!best) return null;
+  const total = Number(best.row.total_minutes);
+  const drive = Number(best.row.drive_minutes_each_way);
+  return {
+    mins: best.mins,
+    homeMins: isFinite(total) && total > 0 ? best.mins + total : null,
+    driveMinutes: isFinite(drive) && drive > 0 ? drive : null,
+  };
+}
+
+// pg hands a TIME column back as a string ("13:45:00"), never a Date — there is
+// no type-1083 parser registered. Same treatment as automations-scheduled.js.
+function hhmmToMins(t) {
+  const m = String(t == null ? '' : t).match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const h = Number(m[1]), min = Number(m[2]);
+  return h > 23 || min > 59 ? null : h * 60 + min;
+}
+
+// Minutes-of-day to "1:45 PM". Wraps rather than overflowing: a call time that
+// lands before midnight on a 12:30am gig is the previous evening, and printing
+// "25:45" would be worse than printing "11:45 PM".
+function fmt12(mins) {
+  if (mins == null) return '';
+  const m = ((mins % 1440) + 1440) % 1440;
+  const h24 = Math.floor(m / 60);
+  const h = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h}:${pad(m % 60)} ${h24 < 12 ? 'AM' : 'PM'}`;
+}
+
+// What the crew collect on the day comes from _items.js collectFromClient, not
+// from a rule spelled out here: the staff portal prints the same figure, and
+// the calendar quietly disagreeing with the phone in a crew member's hand is
+// the whole failure this feature is meant to prevent.
+
 // The calendar title uses the service's internal short_name ("Foam 45min
 // Single Cannon") in place of the customer-facing name ("Foam Party — Single
 // Cannon"), which says nothing about length.
@@ -146,21 +207,70 @@ function buildEvent(b, staff, now) {
   const gross = Number(b.total_price || 0) + Number(b.mileage_cost || 0);
   const money = [];
   if (gross) money.push(`Total $${gross.toFixed(2)}${Number(b.mileage_cost) ? ' (incl. travel)' : ''}`);
-  if (Number(b.balance_due)) money.push(`Balance $${Number(b.balance_due).toFixed(2)} due`);
+  // The old "Balance $745.00 due" line is gone, not lost: collectLine() below
+  // says the same number as an instruction to whoever reads it at 8am.
   if (b.deposit_paid) money.push('deposit paid');
 
+  // When the crew meet at the house, and when they are home again. Blank for a
+  // booking nobody is staffed to — which is most 'quoted' rows on this feed —
+  // and that absence is stated rather than left as a gap, because "no call
+  // time" and "nobody is going" are the same fact and both need doing something
+  // about.
+  const call = callFor(staff);
+  const when = [];
+  if (call) {
+    when.push(`Call time: ${fmt12(call.mins)} at the house`);
+    const tail = [];
+    if (call.homeMins != null) tail.push(`Home by ~${fmt12(call.homeMins)}`);
+    if (call.driveMinutes != null) tail.push(`${call.driveMinutes} min drive each way`);
+    if (tail.length) when.push(tail.join(' · '));
+  } else if (b.status !== 'completed') {
+    when.push('Call time: not set — nobody staffed yet');
+  }
+  // A completed gig gets no such line: the feed carries 90 days of history, and
+  // "nobody staffed yet" on a gig that already happened is a nag about a
+  // decision that can no longer be made.
+  // An unknown ZIP silently becomes a 30-minute drive (_schedule.js getDriveMins),
+  // which makes the call time above fiction rather than merely imprecise. Say so
+  // here, where it is read, in the same words the staff portal uses. zip_known is
+  // set on the row by buildFeed, exactly as bookings.js sets it for the list.
+  if (call && b.zip_known === false) {
+    // No ZIP at all and an unrecognised ZIP are different jobs: one is a field
+    // to fill in, the other is a drive time to set by hand. "no drive time for
+    // ZIP (none)" told Joe neither — measured on FM-BF5XDJVB, 2026-09-20.
+    when.push(String(b.event_zip || '').trim()
+      ? `⚠ Times are a guess — no drive time for ZIP ${b.event_zip}`
+      : '⚠ Times are a guess — this booking has no ZIP');
+  }
+
+  // What to load and where to stand. Both are client-editable on the
+  // finalisation page, so they are the fields most likely to have changed since
+  // the booking was taken.
+  const place = [b.venue ? `Venue: ${b.venue}` : '', b.surface_type ? `Surface: ${b.surface_type}` : '']
+    .filter(Boolean).join(' · ');
+
+  // null means "leave this out"; '' is a deliberate blank line between the
+  // sections. Those two were the same value until the notes grew sections, and
+  // the filter dropped every separator along with the empty fields — which is
+  // why this was one unbroken wall of text on a phone.
   lines.push(`DESCRIPTION:${esc([
-    `Status: ${b.status}`,
+    // The reference rides on the status line: it is what gets pasted into
+    // admin, and it was already being fetched and thrown away.
+    `Status: ${b.status}${b.reference ? ` · ${b.reference}` : ''}`,
+    '',
+    ...when,
     '',
     'Staff:',
     crew,
     '',
+    place || null,
     b.client_phone ? `Client: ${who} · ${b.client_phone}` : `Client: ${who}`,
-    money.length ? money.join(' · ') : '',
-    b.guest_count ? `${b.guest_count} guests` : '',
-    b.notes ? `\nNotes: ${b.notes}` : '',
+    collectFromClient(b).note,
+    money.length ? money.join(' · ') : null,
+    b.guest_count ? `${b.guest_count} guests` : null,
+    b.notes ? `\nNotes: ${b.notes}` : null,
     `\n${SITE}/admin.html`,
-  ].filter((x) => x !== '').join('\n'))}`);
+  ].filter((x) => x !== null).join('\n'))}`);
 
   // Every booking that reaches this feed is a real commitment — cancelled and
   // review rows are filtered out upstream — so they are all CONFIRMED to the
@@ -175,7 +285,10 @@ async function buildFeed(client) {
   const { rows: bookings } = await client.query(
     `SELECT b.id, b.reference, b.status, b.service_name, b.client_name, b.client_phone,
             b.event_date::text AS event_date, b.event_time, b.event_location, b.event_zip,
-            b.guest_count, b.notes, b.deposit_paid,
+            b.guest_count, b.notes, b.deposit_paid, b.venue, b.surface_type,
+            -- source decides whether anyone collects at all: a GigSalad client
+            -- already paid the platform (_source.js).
+            b.source,
             b.total_price::float8 AS total_price, b.balance_due::float8 AS balance_due,
             b.mileage_cost::float8 AS mileage_cost,
             s.duration_minutes, s.short_name
@@ -194,7 +307,11 @@ async function buildFeed(client) {
   const byBooking = new Map();
   if (ids.length) {
     const { rows: crew } = await client.query(
+      // schedule_start / total_minutes / drive_minutes_each_way come along for
+      // the call time. They live on the assignment, so this join — already here
+      // for the crew list — is the whole cost of the feature: no second query.
       `SELECT sa.booking_id, sa.tag_filled AS role, sa.status,
+              sa.schedule_start, sa.total_minutes, sa.drive_minutes_each_way,
               COALESCE(NULLIF(st.preferred_name,''), st.name) AS name
          FROM staff_assignments sa
          JOIN staff st ON st.id = sa.staff_id
@@ -206,6 +323,16 @@ async function buildFeed(client) {
       if (!byBooking.has(c.booking_id)) byBooking.set(c.booking_id, []);
       byBooking.get(c.booking_id).push(c);
     }
+  }
+
+  // Is the call time real or a 30-minute guess? One bulk read of the ZIP table
+  // answers it for every booking at once — loadZipCoords never reaches the
+  // network, so a feed poll cannot be slowed down by a geocoder having a bad
+  // day. Same two calls, same reason, as the admin list (bookings.js:295).
+  const zipCoords = await loadZipCoords(client, bookings.map((b) => b.event_zip));
+  const home = await homeBase(client);
+  for (const b of bookings) {
+    b.zip_known = getDriveMins(b.event_zip, { coords: zipCoords, home }).zipKnown;
   }
 
   const now = new Date();

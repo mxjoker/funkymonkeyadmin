@@ -129,8 +129,13 @@ test('the total shown includes travel, so it is never smaller than the balance',
 
 test('a booking with no travel shows a plain total', () => {
   const ics = buildEvent({ ...base, total_price: 500, mileage_cost: 0, balance_due: 400 }, [], NOW).join('\r\n');
-  assert.match(ics, /Total \$500\.00 ·/);
+  assert.match(ics, /Total \$500\.00/);
   assert.doesNotMatch(ics, /incl\. travel/);
+  // The balance used to share this line as "· Balance $400.00 due". It now has
+  // its own line as an instruction (see the collect tests below) — the figure
+  // did not go anywhere, it just stopped being a footnote to the total.
+  assert.match(ics, /COLLECT \$400\.00 from the client/);
+  assert.doesNotMatch(ics, /Balance \$400\.00 due/);
 });
 
 // ── Address completeness ────────────────────────────────────────────────────
@@ -212,4 +217,109 @@ test('a single-service booking gets no +0 suffix', () => {
 test('a booking with neither name still produces a valid summary', () => {
   const ics = buildEvent({ ...base, service_name: null, short_name: null }, [], NOW).join('\r\n');
   assert.match(ics, /SUMMARY:Event — Jane Doe/);
+});
+
+// ── Call time ───────────────────────────────────────────────────────────────
+// What time anyone has to be at the house is the thing this feed could not
+// answer, and the reason it is read off the assignment rather than recomputed
+// is that the crew have already been texted a figure. These tests pin the two
+// together: buildEvent must print schedule_start, not its own arithmetic.
+
+const CREW = [{
+  name: 'Aliza', role: 'Magician', status: 'assigned',
+  schedule_start: '13:45:00', total_minutes: 275, drive_minutes_each_way: 45,
+}];
+
+test('the call time is the assignment\'s schedule_start, in plain 12-hour time', () => {
+  const ics = buildEvent({ ...base, zip_known: true }, CREW, NOW).join('\r\n');
+  assert.match(ics, /Call time: 1:45 PM at the house/);
+  // 13:45 + 275 minutes. Both figures come off the same assignment row, so a
+  // per-role override can never produce a home time from someone else\'s shift.
+  assert.match(ics, /Home by ~6:20 PM/);
+  assert.match(ics, /45 min drive each way/);
+});
+
+test('the earliest crew member sets the call time, and their shift sets the way home', () => {
+  const crew = [
+    { name: 'Late', status: 'assigned', schedule_start: '15:00:00', total_minutes: 60 },
+    { name: 'Early', status: 'assigned', schedule_start: '13:00:00', total_minutes: 300 },
+  ];
+  const ics = buildEvent({ ...base, zip_known: true }, crew, NOW).join('\r\n');
+  assert.match(ics, /Call time: 1:00 PM/, 'the first to turn up');
+  assert.match(ics, /Home by ~6:00 PM/, '13:00 + 300, not 15:00 + 300 or 13:00 + 60');
+});
+
+test('a crew member with no computed times does not fake a call time', () => {
+  // schedule_start is only computed once somebody is assigned, so an
+  // "interested" row legitimately has none. Treating null as midnight would
+  // put "Call time: 12:00 AM" on the gig.
+  const ics = buildEvent({ ...base, zip_known: true },
+    [{ name: 'Maybe', status: 'interested', schedule_start: null }], NOW).join('\r\n');
+  assert.match(ics, /Call time: not set — nobody staffed yet/);
+  assert.doesNotMatch(ics, /12:00 AM/);
+});
+
+test('an unknown ZIP says the times are a guess, where the times are read', () => {
+  // getDriveMins falls back to 30 minutes for a ZIP it does not know, which
+  // makes the call time fiction rather than merely imprecise.
+  const ics = buildEvent({ ...base, zip_known: false, event_zip: '99999' }, CREW, NOW).join('\r\n');
+  assert.match(ics, /Times are a guess/);
+  assert.match(ics, /99999/);
+  // ...and a known ZIP does not nag.
+  const ok = buildEvent({ ...base, zip_known: true }, CREW, NOW).join('\r\n');
+  assert.doesNotMatch(ok, /Times are a guess/);
+});
+
+// ── What the crew collect ───────────────────────────────────────────────────
+
+test('the amount to collect is the balance itself, with no service fee on it', () => {
+  const { balanceCharge } = require('../netlify/functions/_items.js');
+  const ics = buildEvent({ ...base, balance_due: 745 }, CREW, NOW).join('\r\n');
+  assert.match(ics, /COLLECT \$745\.00 from the client/);
+  // The 5% lives only on a Stripe session. Printing the fee-bearing figure
+  // would have someone take $782.25 in cash at a birthday party.
+  assert.strictEqual(balanceCharge({ balance_due: 745 }).total, 782.25);
+  assert.doesNotMatch(ics, /782\.25/);
+});
+
+test('nothing owed, nothing priced and platform-paid are three different sentences', () => {
+  const line = (over) => buildEvent({ ...base, ...over }, CREW, NOW).join('\r\n');
+  assert.match(line({ balance_due: 0 }), /Paid in full — collect nothing/);
+  assert.match(line({ balance_due: null }), /Not priced yet — collect nothing/);
+  // A GigSalad client already paid the platform; asking again bills them twice.
+  assert.match(line({ balance_due: 800, source: 'gigsalad' }), /Paid through GigSalad — collect nothing/);
+  assert.doesNotMatch(line({ balance_due: 800, source: 'gigsalad' }), /COLLECT/);
+});
+
+test('a completed gig is not nagged about staffing it', () => {
+  // The feed carries 90 days of history. "nobody staffed yet" on a gig that
+  // already happened is a nag about a decision nobody can make any more.
+  const done = buildEvent({ ...base, status: 'completed' }, [], NOW).join('\r\n');
+  assert.doesNotMatch(done, /Call time/);
+  const upcoming = buildEvent({ ...base, status: 'confirmed' }, [], NOW).join('\r\n');
+  assert.match(upcoming, /Call time: not set — nobody staffed yet/);
+});
+
+test('a missing ZIP and an unknown ZIP are different complaints', () => {
+  const none = buildEvent({ ...base, zip_known: false, event_zip: '' }, CREW, NOW).join('\r\n');
+  assert.match(none, /this booking has no ZIP/, 'the fix for this is to fill a field in');
+  assert.doesNotMatch(none, /\(none\)/);
+  const odd = buildEvent({ ...base, zip_known: false, event_zip: '99999' }, CREW, NOW).join('\r\n');
+  assert.match(odd, /no drive time for ZIP 99999/, 'the fix for this is to set a drive time');
+});
+
+test('the reference, venue and surface ride along', () => {
+  const ics = buildEvent({ ...base, reference: 'FM-ABC12345', venue: 'The MAC', surface_type: 'grass' },
+    CREW, NOW).join('\r\n');
+  assert.match(ics, /FM-ABC12345/, 'the reference was already fetched and thrown away');
+  assert.match(ics, /Venue: The MAC · Surface: grass/);
+});
+
+test('the sections are separated by real blank lines', () => {
+  // They were not: the filter that dropped empty fields dropped the deliberate
+  // separators too, so the notes arrived as one wall of text on a phone.
+  const ics = buildEvent({ ...base, zip_known: true }, CREW, NOW).join('\r\n');
+  const desc = ics.match(/DESCRIPTION:(.*)/)[1];
+  assert.match(desc, /\\n\\nCall time/, 'a blank line before the times');
+  assert.match(desc, /\\n\\nStaff:/, 'a blank line before the crew');
 });

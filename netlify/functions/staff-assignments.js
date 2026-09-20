@@ -7,6 +7,7 @@ const { sendTemplate } = require('./automations');
 const { sendSms, ensureSmsTables } = require('./_sms');
 const { isValidPayType, resolvePayType, assignmentRefusal } = require('./_pay');
 const { spanFor, getDriveMins } = require('./_schedule');
+const { collectFromClient } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -424,9 +425,16 @@ exports.handler = async (event) => {
                     b.event_type, b.guest_count, b.event_zip, b.event_location,
                     b.client_name, b.client_phone, b.client_email,
                     b.total_price, b.deposit_paid, b.balance_due,
+                    -- Whether anyone collects from this client at all: a
+                    -- GigSalad booking was paid through the platform, and
+                    -- asking for it again bills them twice (_source.js).
+                    b.source,
                     b.notes as client_notes, b.status as booking_status,
                     gl.status as checklist_status, gl.id as log_id,
                     gl.clocked_in_at, gl.clocked_out_at,
+                    -- Already reported collected? The card then says so instead
+                    -- of asking a second time for money that is in a pocket.
+                    gl.balance_collected, gl.balance_amount,
                     -- Both portals hide the post-gig report once it has been
                     -- filed. Without this column that check reads undefined on
                     -- every row and the button never hides — a rule that can
@@ -455,6 +463,18 @@ exports.handler = async (event) => {
           // event_zip, so the staff portal can label a guessed departure time
           // without ever shipping the ZIP table itself to the browser.
           for (const g of myGigs) g.zip_known = getDriveMins(g.event_zip).zipKnown;
+
+          // What to collect at the door, decided server-side by the same
+          // function the calendar feed uses. The portal is handed a figure and
+          // a sentence, never the rule: a browser that worked out its own
+          // amount from balance_due would be a second decider, and the one
+          // that matters (a platform booking is never collected from) would
+          // then live in two places.
+          for (const g of myGigs) {
+            const c = collectFromClient(g);
+            g.collect_amount = c.amount;
+            g.collect_note = c.note;
+          }
 
           const { rows: staffRow } = await client.query('SELECT skills FROM staff WHERE id=$1', [staffId]);
           const skills = staffRow[0]?.skills || [];
@@ -495,7 +515,11 @@ exports.handler = async (event) => {
 
           const safeGigs = myGigs.map(g => {
             if (g.status !== 'assigned') {
-              const { client_name, client_phone, client_email, total_price, deposit_paid, balance_due, ...safe } = g;
+              // collect_* joins the redaction list for the same reason
+              // balance_due is on it: somebody who has only raised a hand for
+              // this gig has no business knowing what the client owes.
+              const { client_name, client_phone, client_email, total_price, deposit_paid, balance_due,
+                      collect_amount, collect_note, ...safe } = g;
               return safe;
             }
             return g;

@@ -280,6 +280,13 @@ function groupGigsByBooking(gigs) {
     }
     // The report is filed per role, so the button stays up until all have.
     if (!g.survey_submitted_at) seen.survey_submitted_at = null;
+    // One person collects the money for the whole booking, so a single role
+    // reporting it answers for the card. Without this the merged row could
+    // still tell the second role to collect $745 that is already in a pocket.
+    if (g.balance_collected === true) {
+      seen.balance_collected = true;
+      seen.balance_amount = g.balance_amount;
+    }
     // The worked-hours line needs a row carrying both stamps.
     if (!seen.clocked_out_at && g.clocked_out_at) {
       seen.clocked_in_at  = g.clocked_in_at;
@@ -640,6 +647,67 @@ function sectionHeader(label, color) {
   return `<div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;font-weight:800;color:${color};margin:24px 0 10px;padding-bottom:6px;border-bottom:1px solid rgba(168,85,247,.12)">${label}</div>`;
 }
 
+// Where a client's money goes when it is not a card on our website. Printed
+// for the crew, so these are deliberately not secret — but they are also not
+// guessable, and a crew member reading the wrong handle to a client sends
+// money to a stranger. One copy, here, because the portal is the only thing
+// that shows them.
+//
+// ponytail: a constant, not a settings row. These three have changed never;
+// admin_settings with a UI is the upgrade path if that stops being true.
+const PAY_TO = {
+  name:    'Funky Monkey Events',
+  venmo:   '@Joe-Coover',
+  cashapp: '$joecoover',
+  mail:    '1200 NW 43rd St, OKC, OK 73118',
+};
+
+// The money block on an assigned gig card.
+//
+// collect_amount and collect_note are computed by the server (_items.js
+// collectFromClient) and are absent on a gig somebody has only expressed an
+// interest in. The amount is balance_due with NO service fee: that 5% exists
+// only on a Stripe checkout session, so adding it to a cash handover would
+// over-collect and there is no refund path for it. The note from the server is
+// the figure to read out; this function never does arithmetic of its own.
+function collectBlock(g, isAssigned) {
+  if (!isAssigned || !g.collect_note) return '';
+  const owed = Number(g.collect_amount) > 0;
+
+  // Already reported collected: say so and stop asking. balance_collected is
+  // the crew's own report from the post-gig form, not a settled payment — Joe
+  // records the money in admin — so this says "you reported", never "paid".
+  if (g.balance_collected === true) {
+    const amt = Number(g.balance_amount);
+    return `
+    <div style="margin-top:10px;padding:10px;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.35);border-radius:8px;font-size:.8rem;color:#6ee7b7">
+      ✅ You reported collecting${isFinite(amt) && amt > 0 ? ' $' + amt.toFixed(2) : ''} for this gig.
+    </div>`;
+  }
+
+  // Nothing owed is still worth a line: it is what stops someone asking for
+  // money at a school that paid by invoice three weeks ago.
+  if (!owed) {
+    return `
+    <div style="margin-top:10px;padding:8px 10px;background:rgba(168,85,247,.06);border-radius:8px;font-size:.75rem;color:#a78bca">
+      💳 ${esc(g.collect_note)}
+    </div>`;
+  }
+
+  return `
+  <div style="margin-top:10px;padding:12px;background:rgba(245,158,11,.1);border:1.5px solid rgba(245,158,11,.45);border-radius:8px">
+    <div style="font-weight:800;color:#fbbf24;font-size:.95rem">💵 ${esc(g.collect_note)}</div>
+    <div style="font-size:.72rem;color:#a78bca;margin-top:8px;line-height:1.7">
+      <strong style="color:#c084fc">Cash or check</strong> — payable to ${esc(PAY_TO.name)}<br>
+      <strong style="color:#c084fc">Venmo</strong> ${esc(PAY_TO.venmo)} · <strong style="color:#c084fc">Cash App</strong> ${esc(PAY_TO.cashapp)}<br>
+      <strong style="color:#c084fc">Mail</strong> ${esc(PAY_TO.mail)}
+    </div>
+    <div style="font-size:.7rem;color:#a78bca;margin-top:8px;font-style:italic">
+      Take the exact amount above — nothing is added for paying in person. Say on the post-gig report whether you got it.
+    </div>
+  </div>`;
+}
+
 function gigCard(g, isAssigned) {
   const dateStr = fmtDate(g.event_date);
   // Must match CHECKLIST_STATUSES in staff-assignments.js — the server rejects
@@ -683,7 +751,7 @@ function gigCard(g, isAssigned) {
         ⏱ Worked <strong style="color:#c084fc">${clockedHoursLabel(g)}</strong>
       </div>` : ''}
       ${reportButtonVisible(g)
-        ? `<button class="btn btn-outline btn-sm" style="margin-top:10px;border-color:#a855f7;color:#c084fc" onclick="openSurvey('${(g.log_ids || [g.log_id]).filter(Boolean).join(',')}')">📋 Submit Post-Gig Report</button>`
+        ? `<button class="btn btn-outline btn-sm" style="margin-top:10px;border-color:#a855f7;color:#c084fc" onclick="openSurvey('${(g.log_ids || [g.log_id]).filter(Boolean).join(',')}',${Number(g.collect_amount) || 0})">📋 Submit Post-Gig Report</button>`
         : ''}
     </div>` : '';
 
@@ -768,6 +836,7 @@ function gigCard(g, isAssigned) {
       ${g.event_type ? `<div>🎉 ${esc(g.event_type)}</div>` : ''}
     </div>
     ${contactInfo}
+    ${collectBlock(g, isAssigned)}
     ${checklist}
   </div>`;
 }
@@ -845,7 +914,14 @@ async function updateChecklist(logIds, assignmentIds, bookingId, staffId, status
 // ═══════════════════════════════════════
 // SURVEY MODAL
 // ═══════════════════════════════════════
-function openSurvey(logIds) {
+// `expected` is what the client owed, passed in from the gig card so the two
+// cannot disagree. It fills the PLACEHOLDER and the label, never the value: a
+// prefilled figure is one somebody submits without reading, and a client who
+// handed over $700 of a $745 balance would be recorded as having paid in
+// full. Blank is the honest default, with the expected amount right beside it
+// to compare against.
+function openSurvey(logIds, expected) {
+  const owed = Number(expected) > 0 ? Number(expected) : null;
   document.getElementById('modal-title').textContent = '📋 Post-Gig Report';
   document.getElementById('modal-body').innerHTML = `
     <p style="color:#a78bca;font-size:.85rem;margin-bottom:18px">Joe reviews all reports. Fill in what's relevant.</p>
@@ -853,7 +929,7 @@ function openSurvey(logIds) {
       ${field('Actual Guest Count','<input id="sv-guests" type="number" placeholder="e.g. 45">')}
       ${field('Event Rating','<select id="sv-rating"><option value="">Select…</option><option value="5">⭐⭐⭐⭐⭐ Amazing</option><option value="4">⭐⭐⭐⭐ Great</option><option value="3">⭐⭐⭐ Good</option><option value="2">⭐⭐ Rough</option><option value="1">⭐ Difficult</option></select>')}
       ${field('Balance Collected?','<select id="sv-balcollect"><option value="">Select…</option><option value="true">✅ Yes</option><option value="false">❌ No</option></select>')}
-      ${field('Amount Collected ($)','<input id="sv-balamount" type="number" step="0.01" placeholder="0.00">')}
+      ${field(owed ? 'Amount Collected — expected $' + owed.toFixed(2) : 'Amount Collected ($)','<input id="sv-balamount" type="number" step="0.01" placeholder="' + (owed ? owed.toFixed(2) : '0.00') + '">')}
       ${field('Gas Level After','<select id="sv-gas"><option value="">N/A</option><option>Full</option><option>3/4</option><option>1/2</option><option>1/4</option><option value="Low">Low — needs fill</option></select>')}
       ${field('Foam Fluid Needed?','<select id="sv-foam"><option value="">N/A</option><option value="true">⚠️ Yes — needs refill</option><option value="false">✅ No</option></select>')}
       ${field('Empty Jugs Refilled?','<select id="sv-jugs"><option value="">N/A</option><option value="true">✅ Yes</option><option value="false">❌ No</option></select>')}

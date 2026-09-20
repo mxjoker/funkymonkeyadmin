@@ -13,6 +13,7 @@
 // The one decider for a free-text service name -> catalogue service_id, shared
 // with import-bookings.js and scripts/backfill-service-ids.js.
 const { resolveServiceId, norm, catalogueServiceIds } = require('./_service-map');
+const { platformBooked, platformLabel } = require('./_source');
 
 const ITEM_KINDS = ['service', 'addon', 'travel', 'custom', 'discount'];
 
@@ -249,8 +250,38 @@ function balanceCharge(row) {
   return { balance, fee, total: toCents(balance + fee) };
 }
 
+// ── What the crew collect from the client on the day ────────────────────────
+// Deliberately NOT balanceCharge(). The 5% service fee above exists only on a
+// Stripe checkout session; quoting the fee-bearing total to someone taking cash
+// at a birthday party over-collects by 5% and there is no refund path for it.
+//
+// A platform booking is never collected from at all — GigSalad already took the
+// client's money and added its own fees, so asking for a balance bills them
+// twice. _source.js is the one decider for that, here as everywhere else.
+//
+// The three no-collect states are kept distinct rather than collapsed to "$0",
+// because a crew member acts on the difference: "paid in full" is settled,
+// "not priced yet" means the office has not finished and nobody should be
+// inventing a figure at the door.
+//
+// One function for both readers — the calendar feed and the staff portal —
+// because two copies of a "how much do we ask for" rule is how the brand rule
+// ended up wrong in three of its four writers.
+function collectFromClient(row) {
+  if (platformBooked(row)) {
+    return { amount: 0, note: `Paid through ${platformLabel(row)} — collect nothing` };
+  }
+  const raw = row && row.balance_due;
+  if (raw === null || raw === undefined || raw === '') {
+    return { amount: 0, note: 'Not priced yet — collect nothing' };
+  }
+  const n = Number(raw);
+  if (!isFinite(n) || n <= 0) return { amount: 0, note: 'Paid in full — collect nothing' };
+  return { amount: toCents(n), note: `COLLECT $${toCents(n).toFixed(2)} from the client` };
+}
+
 module.exports = {
-  linkCatalogueServices,
+  linkCatalogueServices, collectFromClient,
   ITEM_KINDS, ensureBookingItems, normaliseItems, rollupItems,
   getItems, getItemsForBookings, replaceItems, balanceIsDerivable,
   SERVICE_FEE_RATE, balanceCharge,
