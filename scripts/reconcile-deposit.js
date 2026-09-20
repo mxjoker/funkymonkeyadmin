@@ -135,8 +135,16 @@ function parseItems(file) {
       const amtComma = it.amount.toLocaleString('en-US', { minimumFractionDigits: 2 });
       // Two tiers of evidence, and nothing below them.
       //
-      // STRONG: the note names this deposit's date AND this amount. That is a
-      // previous reconciliation of this very cheque.
+      // STRONG: the note names this deposit's date, and names this amount as a
+      // CHEQUE — the figure followed by the word "check" with no other dollar
+      // amount in between. Patricia Gross's note reads "Square 2026-03-07
+      // $100.00 deposit + $585.00 check deposited 2026-03-16"; a plain
+      // contains-the-amount test claimed a separate $100 cheque was hers, when
+      // her $100 was a card payment.
+      //
+      // The leading boundary matters just as much: without it "100.00" matches
+      // INSIDE "$1,100.00", and a $100 cheque was claimed by a booking paid
+      // with an $1,100 one.
       // PLAUSIBLE: the recorded payment equals the cheque and the gig happened
       // in the months before the deposit.
       //
@@ -147,12 +155,14 @@ function parseItems(file) {
       const { rows: settled } = await client.query(`
         SELECT reference, client_name, event_date::text AS d, payment_note, balance_due::float bal,
                (payment_note LIKE '%' || $4 || '%' AND
-                (payment_note LIKE '%' || $2 || '%' OR payment_note LIKE '%' || $3 || '%')) AS names_this_deposit
+                (payment_note ~ ('(^|[^0-9,.])\\$?' || $2 || '[^$]{0,40}check')
+                 OR payment_note ~ ('(^|[^0-9,.])\\$?' || $3 || '[^$]{0,40}check'))) AS names_this_deposit
         FROM bookings
         WHERE balance_due <= 0
           AND (
             (payment_note LIKE '%' || $4 || '%' AND
-             (payment_note LIKE '%' || $2 || '%' OR payment_note LIKE '%' || $3 || '%'))
+             (payment_note ~ ('(^|[^0-9,.])\\$?' || $2 || '[^$]{0,40}check')
+              OR payment_note ~ ('(^|[^0-9,.])\\$?' || $3 || '[^$]{0,40}check')))
             OR (abs(payment_amount - $1) < 0.01 AND $4 <> ''
                 AND event_date <= $4::date AND event_date >= $4::date - INTERVAL '150 days')
           )

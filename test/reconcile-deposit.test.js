@@ -145,3 +145,13 @@ test('the strong claim requires the note to name BOTH this deposit and this amou
   assert.match(SRC, /names this very deposit/);
   assert.match(SRC, /MAYBE RECORDED/, 'a weaker match must be labelled as weaker');
 });
+
+// Money figures are substrings of each other, and notes mix card payments with
+// cheques. Both bit inside one deposit: "$100.00 deposit + $585.00 check"
+// claimed a $100 cheque for a booking whose $100 was a card payment, and then
+// "100.00" matched INSIDE "$1,100.00" and claimed it for a different booking.
+test('an amount must be a cheque, and must not match inside a bigger figure', () => {
+  const q = SRC.split('const { rows: settled }')[1].split('LIMIT 3')[0];
+  assert.match(q, /\[\^\$\]\{0,40\}check/, 'the figure must be followed by the word check');
+  assert.match(q, /\(\^\|\[\^0-9,\.\]\)/, 'and must not start inside another number');
+});
