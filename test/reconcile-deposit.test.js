@@ -141,7 +141,7 @@ test('a match must fit the deposit date, not just the amount', () => {
 test('the strong claim requires the note to name BOTH this deposit and this amount', () => {
   const q = SRC.split('const { rows: settled }')[1].split('LIMIT 3')[0];
   assert.match(q, /payment_note LIKE '%' \|\| \$4 \|\| '%' AND/, 'the deposit date must appear');
-  assert.match(q, /payment_note LIKE '%' \|\| \$2 \|\| '%' OR payment_note LIKE '%' \|\| \$3 \|\| '%'/, 'and the amount');
+  assert.match(q, /\|\| \$2 \|\| '\[\^\$\]\{0,40\}check'/, 'and the amount, as a cheque');
   assert.match(SRC, /names this very deposit/);
   assert.match(SRC, /MAYBE RECORDED/, 'a weaker match must be labelled as weaker');
 });
