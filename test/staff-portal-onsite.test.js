@@ -79,8 +79,17 @@ test('the card shows every stage, in order, and never hard-codes a stage time', 
 
 test('an estimated drive time is labelled as an estimate', () => {
   const card = HTML.slice(HTML.indexOf('function gigCard('), HTML.indexOf('function openGigCard('));
-  assert.ok(/zip_known/.test(card),
-    'an unknown ZIP falls back to a 30-minute guess; the on-site time must say so');
+  // The card used to test zip_known itself. That check now lives in
+  // estimateReasons(), which covers the guessed party length too — see
+  // test/staff-portal-estimates.test.js. The card's job is to render whatever
+  // that returns, so that is what is pinned here.
+  assert.ok(/estimateReasons\(g\)/.test(card),
+    'the card no longer asks why the times are soft');
+  assert.ok(/These times are an estimate/.test(card),
+    'the card computes the reasons and never shows them');
+  const helpers = HTML.slice(HTML.indexOf('// ══ PURE TIME HELPERS'), HTML.indexOf('// ══ END PURE TIME HELPERS'));
+  assert.ok(/zip_known/.test(helpers),
+    'an unknown ZIP falls back to a 30-minute guess; the times must still say so');
 });
 
 // ── Depart by ───────────────────────────────────────────────────────────────

@@ -62,9 +62,15 @@ test('a timed event carries local wall-clock times with a TZID', () => {
   assert.match(ics, /DTEND;TZID=America\/Chicago:20260905T153000/, '90 minutes later');
 });
 
-test('duration falls back to 90 minutes when the service has none', () => {
+test('duration falls back to the one shared guess when the service has none', () => {
+  // Was 90 here and 60 in _schedule.js — the same unknown answered two ways, so
+  // an unlinked booking blocked 90 minutes on the calendar around a party the
+  // crew were told ran 60. One constant now, and the event says it is a guess.
+  const { DEFAULT_MINUTES } = require('../netlify/functions/_schedule.js');
   const ics = buildEvent({ ...base, duration_minutes: null }, [], NOW).join('\r\n');
-  assert.match(ics, /DTEND;TZID=America\/Chicago:20260905T153000/);
+  assert.strictEqual(DEFAULT_MINUTES.party, 60, 'the shared fallback moved — is the DTEND below still right?');
+  assert.match(ics, /DTEND;TZID=America\/Chicago:20260905T150000/, '14:00 + 60 minutes');
+  assert.match(ics, /Times are a guess — no service linked/, 'and it must admit the length is invented');
 });
 
 test('a booking with no time becomes an all-day event, not a 9am guess', () => {
@@ -298,6 +304,22 @@ test('a completed gig is not nagged about staffing it', () => {
   assert.doesNotMatch(done, /Call time/);
   const upcoming = buildEvent({ ...base, status: 'confirmed' }, [], NOW).join('\r\n');
   assert.match(upcoming, /Call time: not set — nobody staffed yet/);
+});
+
+test('a finished gig is not warned about its own estimates', () => {
+  // Same reason the call-time line is skipped there: the feed carries 90 days
+  // of history, and 32 of 112 events had already happened. A warning about a
+  // van that is back in the drive buries the ones still worth acting on.
+  const soft = { ...base, zip_known: false, event_zip: '', duration_minutes: null };
+  assert.doesNotMatch(buildEvent({ ...soft, status: 'completed' }, CREW, NOW).join('\r\n'), /Times are a guess/);
+  assert.match(buildEvent({ ...soft, status: 'confirmed' }, CREW, NOW).join('\r\n'), /Times are a guess/);
+});
+
+test('both reasons are named when both apply, not just the first', () => {
+  // FM-BF5XDJVB as it stands: no ZIP and no service linked.
+  const ics = buildEvent({ ...base, zip_known: false, event_zip: '', duration_minutes: null }, CREW, NOW).join('\r\n');
+  assert.match(ics, /no ZIP/);
+  assert.match(ics, /no service linked/);
 });
 
 test('a missing ZIP and an unknown ZIP are different complaints', () => {

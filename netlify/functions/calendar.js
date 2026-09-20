@@ -16,7 +16,7 @@
 const crypto = require('crypto');
 const { withClient } = require('./_db');
 const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { getDriveMins, loadZipCoords, homeBase } = require('./_schedule');
+const { getDriveMins, loadZipCoords, homeBase, estimateReasons, DEFAULT_MINUTES } = require('./_schedule');
 const { collectFromClient } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
@@ -173,7 +173,10 @@ function summaryName(b) {
 function buildEvent(b, staff, now) {
   const uid = `booking-${b.id}@funkymonkeyadmin`;
   const time = parseTime(b.event_time);
-  const mins = Number(b.duration_minutes) || 90;
+  // The same fallback the shift maths uses (_schedule.js DEFAULT_MINUTES.party).
+  // This was 90 while that was 60, so an unlinked booking blocked 90 minutes on
+  // the calendar around a party the crew were told was 60.
+  const mins = Number(b.duration_minutes) || DEFAULT_MINUTES.party;
 
   const lines = ['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${stampUTC(now)}`];
 
@@ -234,14 +237,17 @@ function buildEvent(b, staff, now) {
   // which makes the call time above fiction rather than merely imprecise. Say so
   // here, where it is read, in the same words the staff portal uses. zip_known is
   // set on the row by buildFeed, exactly as bookings.js sets it for the list.
-  if (call && b.zip_known === false) {
-    // No ZIP at all and an unrecognised ZIP are different jobs: one is a field
-    // to fill in, the other is a drive time to set by hand. "no drive time for
-    // ZIP (none)" told Joe neither — measured on FM-BF5XDJVB, 2026-09-20.
-    when.push(String(b.event_zip || '').trim()
-      ? `⚠ Times are a guess — no drive time for ZIP ${b.event_zip}`
-      : '⚠ Times are a guess — this booking has no ZIP');
-  }
+  // Every reason the times are soft, named. Deliberately NOT gated on there
+  // being a call time: an unknown party length stretches the event block itself,
+  // which is wrong on the calendar whether or not anyone is staffed to it yet.
+  //
+  // Skipped on a completed gig, like the call-time line above. The feed carries
+  // 90 days of history and 32 of its 112 events had already happened (measured
+  // 2026-09-20) — a warning that a finished gig's times were estimated is a
+  // complaint about a van that is already back in the drive, and it buries the
+  // ones that are still actionable.
+  const guesses = b.status === 'completed' ? [] : estimateReasons(b);
+  if (guesses.length) when.push(`⚠ Times are a guess — ${guesses.join('; ')}`);
 
   // What to load and where to stand. Both are client-editable on the
   // finalisation page, so they are the fields most likely to have changed since

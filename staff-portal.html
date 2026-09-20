@@ -334,6 +334,25 @@ function departTime(scheduleStart, loadMins) {
   return onSiteTime(scheduleStart, loadMins, 0);
 }
 
+// Why these times are approximate, in the crew's words. Mirrors
+// estimateReasons() in netlify/functions/_schedule.js — a browser cannot
+// import it, so test/staff-portal-estimates.test.js pins the two lists to the
+// same set of reasons.
+//
+// The ZIP half was already here. The duration half was not, and that is the
+// gap this fixes: a booking with no service linked has NO party length, so the
+// 60 minutes inside every stage time is a guess. FM-BF5XDJVB is called
+// "Community Magic Walkaround 3 hours" and was being planned as a one-hour
+// gig — the screen called that solid.
+function estimateReasons(g) {
+  const out = [];
+  if (g && g.zip_known === false) out.push('we have no drive time for this ZIP');
+  if (g && (g.duration_minutes === null || g.duration_minutes === undefined)) {
+    out.push('nobody has set how long this one runs');
+  }
+  return out;
+}
+
 // ══ END PURE TIME HELPERS ══
 
 // ═══════════════════════════════════════
@@ -839,7 +858,12 @@ function gigCard(g, isAssigned) {
         ${party ? row('🎉', 'Party', party) : ''}
         ${homeBy ? row('🏠', 'Home by', homeBy) : ''}
         ${len && loadUp ? `<div style="color:#a78bca;font-size:.72rem;margin-left:82px">(${len} total${Number(g.drive_minutes_each_way) > 0 ? `, ${g.drive_minutes_each_way} min drive each way` : ''})</div>` : ''}
-        ${onSite && !g.zip_known ? `<div style="color:#a78bca;font-size:.7rem;margin-top:6px;font-style:italic">On-site time is an estimate — we have no drive time for this ZIP.</div>` : ''}
+        ${(() => {
+          const why = estimateReasons(g);
+          return why.length
+            ? `<div style="color:#fbbf24;font-size:.7rem;margin-top:6px;font-style:italic">⚠ These times are an estimate — ${why.join('; and ')}. Check with Joe before you plan around them.</div>`
+            : '';
+        })()}
       </div>`;
     })()}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:.78rem;color:#a78bca;margin-top:10px">

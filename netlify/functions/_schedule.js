@@ -25,7 +25,15 @@ const { ZIP_SEED, HOME_FALLBACK, MAX_DRIVEABLE_MILES, milesBetween, normZip,
 // instead of carrying its own copy. It used to: unload defaulted to 15 there
 // and 45 here (and in admin.html's Gig Time Templates UI) — an outlier
 // nobody meant to create. 45 is the value everywhere now.
-const DEFAULT_MINUTES = { load: 30, unload: 45, packOut: 20, homeUnload: 15 };
+// `party` joined these on 2026-09-20. It was a bare 60 here and a bare 90 in
+// calendar.js: the same unknown answered two different ways, so an unlinked
+// booking got a 90-minute block on Joe's calendar and a 60-minute party inside
+// the shift the crew were given. Measured that day: 9 of 30 upcoming bookings
+// have no service_id and so no duration, and one of them is called "Community
+// Magic Walkaround 3 hours" — the guess was wrong by two hours either way.
+// Consistency does not make 60 right; estimateReasons() below is what says it
+// is a guess.
+const DEFAULT_MINUTES = { load: 30, unload: 45, packOut: 20, homeUnload: 15, party: 60 };
 
 // The 30-minute fallback for an unknown ZIP is UNCHANGED and that is
 // deliberate: it flows into total_minutes and from there into payroll's
@@ -56,6 +64,35 @@ function getDriveMins(destZip, { coords, home } = {}) {
   // keeps treating it as an estimate and a human sets the real figure.
   if (miles > MAX_DRIVEABLE_MILES) return { minutes: 30, zipKnown: false, tooFarToDrive: true };
   return { minutes: Math.max(10, Math.round((miles / 35) * 60)) + 15, zipKnown: true };
+}
+
+// Why this gig's times are approximate, as a list of reasons a person can act
+// on — empty when they are solid.
+//
+// Two unknowns land here, and they are different jobs. An unrecognised or
+// missing ZIP makes the DRIVE a 30-minute fallback (getDriveMins above); a
+// booking with no service_id has no catalogue duration, so the PARTY length is
+// a fallback too. Either one moves every stage time on the screen.
+//
+// One function because three screens ask the same question: the staff portal,
+// the calendar feed, and whatever asks next. The portal warned about the ZIP
+// and said nothing about the duration, which is how a gig whose entire
+// timeline was assumption looked merely imprecise.
+//
+// Takes a plain row, not a client: both callers already have the booking and
+// the joined duration in hand, so this stays synchronous and free.
+function estimateReasons(row) {
+  const out = [];
+  const zip = String((row && row.event_zip) || '').trim();
+  if (row && row.zip_known === false) {
+    out.push(zip ? `no drive time for ZIP ${zip}` : 'this booking has no ZIP');
+  }
+  // null/undefined only. A zero-minute service would be odd but it is an
+  // answer, and treating it as missing would nag about a gig nobody guessed at.
+  if (row && (row.duration_minutes === null || row.duration_minutes === undefined)) {
+    out.push(`no service linked, so the ${DEFAULT_MINUTES.party}-minute length is a guess`);
+  }
+  return out;
 }
 
 async function spanFor(client, booking, overrides = {}) {
@@ -89,7 +126,7 @@ async function spanFor(client, booking, overrides = {}) {
   const pack   = overrides.pack_out_minutes       ?? tmpl?.pack_out_minutes       ?? DEFAULT_MINUTES.packOut;
   const homeUn = overrides.home_unload_minutes    ?? tmpl?.home_unload_minutes    ?? DEFAULT_MINUTES.homeUnload;
   const driveM = overrides.drive_minutes_each_way ?? drive.minutes;
-  const party  = svc?.duration_minutes ?? 60;
+  const party  = svc?.duration_minutes ?? DEFAULT_MINUTES.party;
   if (!svc) unknowns.push('service duration unknown — assumed 60 minutes');
 
   const totalMinutes = load + driveM + setup + party + pack + driveM + homeUn;
@@ -130,7 +167,7 @@ async function spanFor(client, booking, overrides = {}) {
   };
 }
 
-module.exports = { spanFor, getDriveMins, DEFAULT_MINUTES, TZ,
+module.exports = { spanFor, getDriveMins, estimateReasons, DEFAULT_MINUTES, TZ,
   // Re-exported so a caller needing a batch of ZIPs does not have to know
   // whether coordinates live here or in _geo.js.
   loadZipCoords, ensureZipCoords, homeBase };
