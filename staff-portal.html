@@ -320,6 +320,20 @@ function onSiteTime(scheduleStart, loadMins, driveMins) {
   return addMinutes(scheduleStart, offset === 0 ? 1440 : offset);
 }
 
+// When the van actually pulls off the drive: the call time plus the load
+// allowance, and nothing else. "Load up" is when you turn up to start loading
+// and this is when the loading has to be done by — two different instructions
+// that were sharing one line.
+//
+// Deliberately onSiteTime with no drive leg rather than its own arithmetic:
+// on-site IS the departure plus one drive, so sharing the sum means the two
+// rows can never disagree, and the null and zero handling is already tested
+// there (a missing load allowance yields no time at all, a zero one wraps a
+// full day to the same wall clock).
+function departTime(scheduleStart, loadMins) {
+  return onSiteTime(scheduleStart, loadMins, 0);
+}
+
 // ══ END PURE TIME HELPERS ══
 
 // ═══════════════════════════════════════
@@ -804,6 +818,9 @@ function gigCard(g, isAssigned) {
       const onSiteRaw = onSiteTime(g.schedule_start, g.load_minutes, g.drive_minutes_each_way);
       const onSite = onSiteRaw ? fmtTime(onSiteRaw) : '';
 
+      const departRaw = departTime(g.schedule_start, g.load_minutes);
+      const depart = departRaw ? fmtTime(departRaw) : '';
+
       if (!loadUp && !party) return '';
 
       const row = (icon, label, value, muted) => `
@@ -817,6 +834,7 @@ function gigCard(g, isAssigned) {
         ${loadUp
           ? row('🚚', 'Load up', loadUp)
           : row('🚚', 'Load up', isAssigned ? 'not calculated yet' : 'set once you are confirmed', true)}
+        ${depart ? row('🛣', 'Depart by', depart) : ''}
         ${onSite ? row('📍', 'On site', onSite) : ''}
         ${party ? row('🎉', 'Party', party) : ''}
         ${homeBy ? row('🏠', 'Home by', homeBy) : ''}

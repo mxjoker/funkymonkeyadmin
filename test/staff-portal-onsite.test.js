@@ -15,7 +15,7 @@ function loadHelpers() {
   const ctx = {};
   vm.createContext(ctx);
   const fmtTime = HTML.slice(HTML.indexOf('function fmtTime(t)'), HTML.indexOf('// ══ PURE TIME HELPERS'));
-  vm.runInContext(fmtTime + HTML.slice(a, b) + '\nout = { onSiteTime, addMinutes };', ctx);
+  vm.runInContext(fmtTime + HTML.slice(a, b) + '\nout = { onSiteTime, departTime, addMinutes };', ctx);
   return ctx.out;
 }
 
@@ -58,12 +58,21 @@ test('an on-site time after midnight wraps rather than reading 25:00', () => {
   assert.strictEqual(onSiteTime('23:30', 30, 30), '00:30');
 });
 
-test('the card shows all four stages and never hard-codes a stage time', () => {
+test('the card shows every stage, in order, and never hard-codes a stage time', () => {
   const card = HTML.slice(HTML.indexOf('function gigCard('), HTML.indexOf('function openGigCard('));
-  for (const label of ['Load up', 'On site', 'Party', 'Home by']) {
+  // Five now: 'Depart by' was added between loading and arriving, because when
+  // you start loading and when the loading must be done are two instructions.
+  const stages = ['Load up', 'Depart by', 'On site', 'Party', 'Home by'];
+  for (const label of stages) {
     assert.ok(card.includes(label), `the gig card must show "${label}"`);
   }
+  // A stage out of order reads as a different day's plan, so the order is
+  // pinned as well as the presence.
+  const positions = stages.map((l) => card.indexOf(l));
+  assert.deepStrictEqual(positions, [...positions].sort((x, y) => x - y),
+    'the stages are rendered out of chronological order');
   assert.ok(card.includes('onSiteTime('), 'the card must derive on-site through the tested helper');
+  assert.ok(card.includes('departTime('), 'the card must derive the departure through the tested helper');
   assert.ok(card.includes('addMinutes(g.schedule_start, g.total_minutes)'),
     'home-by must be derived from the persisted total, not re-added stage by stage');
 });
@@ -72,4 +81,39 @@ test('an estimated drive time is labelled as an estimate', () => {
   const card = HTML.slice(HTML.indexOf('function gigCard('), HTML.indexOf('function openGigCard('));
   assert.ok(/zip_known/.test(card),
     'an unknown ZIP falls back to a 30-minute guess; the on-site time must say so');
+});
+
+// ── Depart by ───────────────────────────────────────────────────────────────
+// "Load up" is when you turn up to start loading; "Depart by" is when the
+// loading has to be finished. Two instructions that were sharing one row.
+const { departTime, addMinutes } = loadHelpers();
+
+test('depart is the call time plus the load allowance', () => {
+  assert.strictEqual(departTime('13:45:00', 30), '14:15');
+  assert.strictEqual(departTime('15:20', 30), '15:50');
+});
+
+test('depart and on site stay one drive leg apart, by construction', () => {
+  // departTime IS onSiteTime with no drive, so these cannot drift apart. If
+  // this ever fails, one of the two grew its own arithmetic.
+  for (const [start, load, drive] of [['13:45', 30, 45], ['15:20', 30, 25], ['06:00', 45, 90]]) {
+    const depart = departTime(start, load);
+    assert.strictEqual(onSiteTime(start, load, drive), addMinutes(depart, drive),
+      `${start} +${load} +${drive}`);
+  }
+});
+
+test('an unknown load allowance yields no departure, not the call time', () => {
+  // Rendering the call time as the departure would tell a crew member to leave
+  // the moment they arrive — a specific, plausible, wrong instruction.
+  for (const v of [null, undefined, '', 'abc', NaN]) {
+    assert.strictEqual(departTime('13:45', v), '', String(v));
+  }
+  assert.strictEqual(departTime('', 30), '', 'no call time, no departure');
+});
+
+test('nothing to load means you leave when you arrive', () => {
+  // Zero is a real answer and is not the same as unknown: a walkaround gig
+  // with no kit departs at the call time.
+  assert.strictEqual(departTime('13:45', 0), '13:45');
 });
