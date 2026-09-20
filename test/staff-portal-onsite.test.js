@@ -117,3 +117,39 @@ test('nothing to load means you leave when you arrive', () => {
   // with no kit departs at the call time.
   assert.strictEqual(departTime('13:45', 0), '13:45');
 });
+
+// ── Setup time survives the round trip between two files ───────────────────
+// Joe, 2026-09-20: "the on site time and the party start time are both 3pm but
+// that should include a setup time as well." It does, and this is what keeps it
+// true. The two halves live apart: autoCalcTimes in staff-assignments.js writes
+// schedule_start as event_time - load - drive - setup, and this page re-derives
+// on-site as schedule_start + load + drive. Setup is the only stage that
+// survives as the GAP between the two, so it is the one that vanishes silently
+// if either half is changed alone — and a crew arriving with no time to set up
+// is a wrong answer nobody notices until they are standing there.
+test('on site always lands a full setup before the party', () => {
+  const pad = (n) => String(n).padStart(2, '0');
+  const clock = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+  // Measured on every upcoming assigned gig, 2026-09-20: load 30, setup 45,
+  // drives from 25 to 198 minutes, and all of them 45 minutes of setup.
+  for (const [party, load, drive, setup] of [
+    [13 * 60,      30,  30, 45],
+    [18 * 60 + 30, 30,  57, 45],
+    [21 * 60 + 45, 30, 198, 45],
+    [14 * 60,      30, 153, 45],
+    [19 * 60,      30,  25, 45],
+    // A service whose template says something else must work the same way.
+    [15 * 60,      45,  20, 90],
+    // Nothing to set up is legitimate — a walkaround act. On site IS the party.
+    [15 * 60,      30,  30,  0],
+  ]) {
+    // autoCalcTimes' own formula, spelled out rather than imported: if it ever
+    // changes, this test should fail rather than quietly follow it.
+    const scheduleStart = clock(party - load - drive - setup);
+    const onsite = onSiteTime(scheduleStart, load, drive);
+    assert.strictEqual(onsite, clock(party - setup),
+      `party ${clock(party)} with ${setup}m setup: on site should be ${clock(party - setup)}, got ${onsite}`);
+    // And the departure is still one drive leg short of it.
+    assert.strictEqual(departTime(scheduleStart, load), clock(party - setup - drive));
+  }
+});
