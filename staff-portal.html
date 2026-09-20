@@ -346,7 +346,16 @@ function departTime(scheduleStart, loadMins) {
 // gig — the screen called that solid.
 function estimateReasons(g) {
   const out = [];
-  if (g && g.zip_known === false) out.push('we have no drive time for this ZIP');
+  if (g && g.zip_known === false) {
+    // An out-of-town gig is not a missing ZIP. Past 300 miles the server
+    // refuses to compute a drive at all (see _geo.js MAX_DRIVEABLE_MILES), so
+    // the stage times on this card are a placeholder until somebody sets the
+    // real travel time — telling a crew member we "have no drive time for this
+    // ZIP" for a gig in Orlando reads as a data glitch rather than a flight.
+    out.push(g.too_far_to_drive
+      ? 'this one is out of town, so the travel time here is a placeholder'
+      : 'we have no drive time for this ZIP');
+  }
   if (g && (g.duration_minutes === null || g.duration_minutes === undefined)) {
     out.push('nobody has set how long this one runs');
   }

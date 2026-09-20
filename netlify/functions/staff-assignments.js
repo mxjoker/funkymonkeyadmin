@@ -6,7 +6,7 @@ const { esc, logChange, ensureBookingChanges, fmtEventDate } = require('./_email
 const { sendTemplate } = require('./automations');
 const { sendSms, ensureSmsTables } = require('./_sms');
 const { isValidPayType, resolvePayType, assignmentRefusal } = require('./_pay');
-const { spanFor, getDriveMins } = require('./_schedule');
+const { spanFor, getDriveMins, loadZipCoords, homeBase } = require('./_schedule');
 const { collectFromClient } = require('./_items');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
@@ -467,7 +467,20 @@ exports.handler = async (event) => {
           // — whether _schedule.js's ONE ZIP table recognises this gig's
           // event_zip, so the staff portal can label a guessed departure time
           // without ever shipping the ZIP table itself to the browser.
-          for (const g of myGigs) g.zip_known = getDriveMins(g.event_zip).zipKnown;
+          // Bulk-load the ZIP table first. This used to call getDriveMins with
+          // no coords and no home base, so it answered from the 67-ZIP seed and
+          // the fallback house — a ZIP that zip_coords knows perfectly well read
+          // as "estimated" here while Joe's calendar, which does pass them, read
+          // it as solid. The two screens disagreeing about the same gig is the
+          // thing this pair of files keeps being fixed for. loadZipCoords never
+          // reaches the network, so this costs one query, not a geocode.
+          const gigCoords = await loadZipCoords(client, myGigs.map((g) => g.event_zip));
+          const gigHome = await homeBase(client);
+          for (const g of myGigs) {
+            const d = getDriveMins(g.event_zip, { coords: gigCoords, home: gigHome });
+            g.zip_known = d.zipKnown;
+            g.too_far_to_drive = !!d.tooFarToDrive;
+          }
 
           // What to collect at the door, decided server-side by the same
           // function the calendar feed uses. The portal is handed a figure and

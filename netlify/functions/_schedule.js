@@ -85,7 +85,20 @@ function estimateReasons(row) {
   const out = [];
   const zip = String((row && row.event_zip) || '').trim();
   if (row && row.zip_known === false) {
-    out.push(zip ? `no drive time for ZIP ${zip}` : 'this booking has no ZIP');
+    // Three different situations wearing one flag, and they need three
+    // different things doing about them.
+    //
+    // too_far_to_drive is NOT an unknown ZIP: getDriveMins measured the
+    // distance, found it past MAX_DRIVEABLE_MILES, and refused to turn it into
+    // a drive on purpose (payroll counts the leg twice, so Orlando's real
+    // 1,833 minutes each way would bill a 5-hour minimum as 64 hours). Saying
+    // "no drive time for ZIP 32821" about a gig we know is 1,061 miles away
+    // sends Joe looking for a missing ZIP that is sitting right there.
+    if (row.too_far_to_drive) {
+      out.push(`out of town${zip ? ` (${zip})` : ''} — too far to drive, so set the travel time by hand`);
+    } else {
+      out.push(zip ? `no drive time for ZIP ${zip}` : 'this booking has no ZIP');
+    }
   }
   // null/undefined only. A zero-minute service would be odd but it is an
   // answer, and treating it as missing would nag about a gig nobody guessed at.

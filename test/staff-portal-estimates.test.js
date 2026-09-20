@@ -94,3 +94,51 @@ test('the two fallbacks for an unknown party length are now one', () => {
   const sch = fs.readFileSync(path.join(__dirname, '../netlify/functions/_schedule.js'), 'utf8');
   assert.ok(!/duration_minutes \?\? 60/.test(sch), 'the shift maths has its own 60-minute fallback again');
 });
+
+// ── Out of town is not a missing ZIP ───────────────────────────────────────
+// Joe, 2026-09-20: "for this wednesday it is an out of town gig so should we
+// just have a box for those or if the zip is outside of our area it already
+// falls in that estimate zone?" It already does — _geo.js refuses to compute a
+// drive past MAX_DRIVEABLE_MILES — but it was saying the wrong thing about it.
+//
+// FME-260923-SP is Orlando: ZIP 32821, 1,061 miles, measured and then refused
+// on purpose, because payroll counts the drive leg twice and the real 1,833
+// minutes each way would bill a 5-hour minimum as 64 hours. Reporting that as
+// "no drive time for ZIP 32821" sends someone looking for a missing ZIP that
+// is sitting right there.
+
+test('a gig too far to drive says so, rather than blaming the ZIP', () => {
+  const orlando = { zip_known: false, too_far_to_drive: true, event_zip: '32821', duration_minutes: 45 };
+  const server = serverReasons(orlando)[0];
+  assert.match(server, /out of town/);
+  assert.match(server, /32821/, 'Joe still needs to know which gig');
+  assert.doesNotMatch(server, /no drive time for ZIP/, 'the ZIP is known — that is how we measured 1,061 miles');
+  assert.match(browserReasons(orlando)[0], /out of town/);
+});
+
+test('an unknown ZIP still blames the ZIP', () => {
+  // The other branch must not have been swallowed by the new one.
+  const row = { zip_known: false, too_far_to_drive: false, event_zip: '99999', duration_minutes: 45 };
+  assert.match(serverReasons(row)[0], /no drive time for ZIP 99999/);
+  assert.doesNotMatch(serverReasons(row)[0], /out of town/);
+});
+
+test('out of town is still an estimate, not a pass', () => {
+  // The point of the rename is the wording, not the warning: these times are
+  // still a placeholder and both screens must still say so.
+  const orlando = { zip_known: false, too_far_to_drive: true, event_zip: '32821', duration_minutes: 45 };
+  assert.strictEqual(serverReasons(orlando).length, 1);
+  assert.strictEqual(browserReasons(orlando).length, 1);
+});
+
+test('the portal reads the real ZIP table, not just the seed', () => {
+  // It called getDriveMins(zip) with no coords and no home base, so a ZIP that
+  // zip_coords knows read as 'estimated' in the portal while the calendar,
+  // which passes them, read it as solid — the two screens disagreeing about
+  // one gig.
+  const sa = fs.readFileSync(path.join(__dirname, '../netlify/functions/staff-assignments.js'), 'utf8');
+  assert.ok(!/getDriveMins\(g\.event_zip\)\.zipKnown/.test(sa),
+    'the portal is back to answering from the 67-ZIP seed');
+  assert.ok(/loadZipCoords\(client, myGigs/.test(sa), 'the portal no longer loads the ZIP table');
+  assert.ok(/homeBase\(client\)/.test(sa), 'the portal no longer measures from the real home base');
+});

@@ -338,7 +338,12 @@ async function buildFeed(client) {
   const zipCoords = await loadZipCoords(client, bookings.map((b) => b.event_zip));
   const home = await homeBase(client);
   for (const b of bookings) {
-    b.zip_known = getDriveMins(b.event_zip, { coords: zipCoords, home }).zipKnown;
+    const d = getDriveMins(b.event_zip, { coords: zipCoords, home });
+    b.zip_known = d.zipKnown;
+    // Carried, not re-derived: "we do not know where this is" and "we know
+    // exactly where this is and it is 1,061 miles away" both arrive as
+    // zipKnown:false, and only this tells them apart.
+    b.too_far_to_drive = !!d.tooFarToDrive;
   }
 
   const now = new Date();
