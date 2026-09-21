@@ -155,3 +155,13 @@ test('an amount must be a cheque, and must not match inside a bigger figure', ()
   assert.match(q, /\[\^\$\]\{0,40\}check/, 'the figure must be followed by the word check');
   assert.match(q, /\(\^\|\[\^0-9,\.\]\)/, 'and must not start inside another number');
 });
+
+// A weak (amount-and-timing) match against an already-settled booking is only a
+// suggestion. When an OUTSTANDING booking sits at the same amount it is the
+// likelier answer and must be shown: the tool offered a paid booking for a $485
+// cheque and never mentioned the unpaid twin, which was the right one.
+test('a weak match still surfaces bookings that actually owe that amount', () => {
+  const block = SRC.split('if (!sure)')[1].split('continue;')[0];
+  assert.match(block, /balance_due > 0/, 'it must look for bookings that still owe');
+  assert.match(block, /still OWES/, 'and say so plainly beside the weak match');
+});

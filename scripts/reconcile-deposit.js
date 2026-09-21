@@ -176,6 +176,17 @@ function parseItems(file) {
         if (it.checkNo && !new RegExp('check (no\\.?|#) *0*' + it.checkNo, 'i').test(settled[0].payment_note || '')) {
           console.log(`${' '.repeat(12)}  → confirm, then: --record ${settled[0].reference}=${it.checkNo}`);
         }
+        // A weak match is only a suggestion, so an OUTSTANDING booking at the
+        // same amount deserves to be seen beside it — it is the likelier answer.
+        // This tool offered an already-paid booking for a $485 cheque and never
+        // mentioned the unpaid twin, which was the right one.
+        if (!sure) {
+          const { rows: alsoOwed } = await client.query(`
+            SELECT reference, client_name, event_date::text AS d, balance_due::float bal
+            FROM bookings WHERE status IN ('completed','confirmed') AND balance_due > 0
+              AND abs(balance_due - $1) < 0.01 ORDER BY event_date DESC LIMIT 3`, [it.amount]);
+          alsoOwed.forEach((o) => console.log(`${' '.repeat(12)}  …but ${o.reference} (${o.d}) ${o.client_name} still OWES ${money(o.bal)}`));
+        }
         continue;
       }
 
