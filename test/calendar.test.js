@@ -306,6 +306,36 @@ test('a completed gig is not nagged about staffing it', () => {
   assert.match(upcoming, /Call time: not set — nobody staffed yet/);
 });
 
+// ── A gig we cannot drive to has no departure time ─────────────────────────
+// getDriveMins returns a 30-minute PLACEHOLDER past MAX_DRIVEABLE_MILES, and
+// schedule_start is built from it. FME-260923-SP got a 7pm start time on
+// 2026-09-20 and immediately computed '5:15 PM at the house' for a show 1,061
+// miles away in Orlando. The travel is a flight; only a human knows when it
+// leaves, so no time at all beats a believable wrong one.
+test('an out-of-town gig shows no invented call time', () => {
+  const orlando = { ...base, too_far_to_drive: true, zip_known: false, event_zip: '32821' };
+  const ics = buildEvent(orlando, CREW, NOW).join('\r\n');
+  assert.doesNotMatch(ics, /Call time: \d/, 'a placeholder drive must not become a time to be somewhere');
+  assert.doesNotMatch(ics, /Home by/, 'home-by rests on the same placeholder, twice over');
+  assert.match(ics, /out of town — set the travel time/);
+});
+
+test('a shift somebody pinned by hand is shown, and not called a guess', () => {
+  // times_manual is exactly the fix the warning asks for, so taking it away
+  // again would make the instruction impossible to satisfy.
+  const pinned = [{ ...CREW[0], times_manual: true }];
+  const ics = buildEvent({ ...base, too_far_to_drive: true, zip_known: false, event_zip: '32821' },
+    pinned, NOW).join('\r\n');
+  assert.match(ics, /Call time: 1:45 PM/, 'a human typed these — show them');
+  assert.doesNotMatch(ics, /Times are a guess/, 'a pinned shift is not an estimate');
+});
+
+test('a driveable gig is unaffected by any of that', () => {
+  const ics = buildEvent({ ...base, too_far_to_drive: false, zip_known: true }, CREW, NOW).join('\r\n');
+  assert.match(ics, /Call time: 1:45 PM at the house/);
+  assert.match(ics, /Home by ~6:20 PM/);
+});
+
 test('a finished gig is not warned about its own estimates', () => {
   // Same reason the call-time line is skipped there: the feed carries 90 days
   // of history, and 32 of 112 events had already happened. A warning about a

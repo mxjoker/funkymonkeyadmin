@@ -127,6 +127,9 @@ function callFor(staff) {
     mins: best.mins,
     homeMins: isFinite(total) && total > 0 ? best.mins + total : null,
     driveMinutes: isFinite(drive) && drive > 0 ? drive : null,
+    // Did somebody type these, or did we work them out? A human-pinned shift
+    // is the best answer available and must not be second-guessed below.
+    manual: !!best.row.times_manual,
   };
 }
 
@@ -219,7 +222,21 @@ function buildEvent(b, staff, now) {
   // and that absence is stated rather than left as a gap, because "no call
   // time" and "nobody is going" are the same fact and both need doing something
   // about.
-  const call = callFor(staff);
+  // A gig too far to drive has NO usable departure time, and the arithmetic
+  // does not know that. getDriveMins hands back a 30-minute placeholder for
+  // anything past MAX_DRIVEABLE_MILES, so schedule_start on FME-260923-SP
+  // computed as 5:15 PM "at the house" for a 7pm show 1,061 miles away in
+  // Orlando — a specific, plausible, wrong instruction, which is worse than
+  // none. The travel is a flight and a hotel, and only a human knows when it
+  // leaves.
+  //
+  // Unless a human already said. times_manual means somebody typed the load,
+  // drive and total for this assignment, which is exactly the fix the warning
+  // asks for — so once they have, these are real times and get shown.
+  const derived = callFor(staff);
+  const pinned = !!(derived && derived.manual);
+  const travelUnknown = !!b.too_far_to_drive && !pinned;
+  const call = travelUnknown ? null : derived;
   const when = [];
   if (call) {
     when.push(`Call time: ${fmt12(call.mins)} at the house`);
@@ -227,6 +244,10 @@ function buildEvent(b, staff, now) {
     if (call.homeMins != null) tail.push(`Home by ~${fmt12(call.homeMins)}`);
     if (call.driveMinutes != null) tail.push(`${call.driveMinutes} min drive each way`);
     if (tail.length) when.push(tail.join(' · '));
+  } else if (travelUnknown) {
+    if (b.status !== 'completed') {
+      when.push('Call time: out of town — set the travel time and this fills in');
+    }
   } else if (b.status !== 'completed') {
     when.push('Call time: not set — nobody staffed yet');
   }
@@ -246,7 +267,10 @@ function buildEvent(b, staff, now) {
   // 2026-09-20) — a warning that a finished gig's times were estimated is a
   // complaint about a van that is already back in the drive, and it buries the
   // ones that are still actionable.
-  const guesses = b.status === 'completed' ? [] : estimateReasons(b);
+  // Nothing to warn about on a shift a human pinned: times_manual covers the
+  // drive AND the total, so both unknowns estimateReasons names are already
+  // answered by whoever typed them.
+  const guesses = b.status === 'completed' || pinned ? [] : estimateReasons(b);
   if (guesses.length) when.push(`⚠ Times are a guess — ${guesses.join('; ')}`);
 
   // What to load and where to stand. Both are client-editable on the
@@ -321,7 +345,7 @@ async function buildFeed(client) {
       // the call time. They live on the assignment, so this join — already here
       // for the crew list — is the whole cost of the feature: no second query.
       `SELECT sa.booking_id, sa.tag_filled AS role, sa.status,
-              sa.schedule_start, sa.total_minutes, sa.drive_minutes_each_way,
+              sa.schedule_start, sa.total_minutes, sa.drive_minutes_each_way, sa.times_manual,
               COALESCE(NULLIF(st.preferred_name,''), st.name) AS name
          FROM staff_assignments sa
          JOIN staff st ON st.id = sa.staff_id

@@ -840,13 +840,19 @@ function gigCard(g, isAssigned) {
       // (autoCalcTimes runs on the assign path, not on expressing interest),
       // so a pending gig legitimately has no shift window. Say that rather
       // than leaving a gap that reads as a broken screen.
-      const loadUp = g.schedule_start ? fmtTime(g.schedule_start) : '';
+      // Out of town, nobody has set the travel: every stage below is built on
+      // the 30-minute placeholder the server falls back to past 300 miles, so
+      // 'Load up 5:15 PM' for a gig in Orlando is a plausible wrong instruction.
+      // Shown again the moment someone pins the times (times_manual), which is
+      // what the warning asks for.
+      const travelUnknown = !!g.too_far_to_drive && !g.times_manual;
+      const loadUp = (g.schedule_start && !travelUnknown) ? fmtTime(g.schedule_start) : '';
       const homeBy = loadUp ? fmtTime(addMinutes(g.schedule_start, g.total_minutes)) : '';
 
-      const onSiteRaw = onSiteTime(g.schedule_start, g.load_minutes, g.drive_minutes_each_way);
+      const onSiteRaw = travelUnknown ? '' : onSiteTime(g.schedule_start, g.load_minutes, g.drive_minutes_each_way);
       const onSite = onSiteRaw ? fmtTime(onSiteRaw) : '';
 
-      const departRaw = departTime(g.schedule_start, g.load_minutes);
+      const departRaw = travelUnknown ? '' : departTime(g.schedule_start, g.load_minutes);
       const depart = departRaw ? fmtTime(departRaw) : '';
 
       if (!loadUp && !party) return '';
@@ -861,14 +867,18 @@ function gigCard(g, isAssigned) {
       <div style="margin-top:10px;padding:10px;background:rgba(124,58,237,.12);border:1px solid rgba(168,85,247,.25);border-radius:8px;font-size:.8rem">
         ${loadUp
           ? row('🚚', 'Load up', loadUp)
-          : row('🚚', 'Load up', isAssigned ? 'not calculated yet' : 'set once you are confirmed', true)}
+          : travelUnknown
+            ? row('✈️', 'Travel', 'out of town — Joe will confirm the plan', true)
+            : row('🚚', 'Load up', isAssigned ? 'not calculated yet' : 'set once you are confirmed', true)}
         ${depart ? row('🛣', 'Depart by', depart) : ''}
         ${onSite ? row('📍', 'On site', onSite) : ''}
         ${party ? row('🎉', 'Party', party) : ''}
         ${homeBy ? row('🏠', 'Home by', homeBy) : ''}
         ${len && loadUp ? `<div style="color:#a78bca;font-size:.72rem;margin-left:82px">(${len} total${Number(g.drive_minutes_each_way) > 0 ? `, ${g.drive_minutes_each_way} min drive each way` : ''})</div>` : ''}
         ${(() => {
-          const why = estimateReasons(g);
+          // times_manual covers the drive and the total, so a shift somebody
+          // typed answers both unknowns and needs no caveat.
+          const why = g.times_manual ? [] : estimateReasons(g);
           return why.length
             ? `<div style="color:#fbbf24;font-size:.7rem;margin-top:6px;font-style:italic">⚠ These times are an estimate — ${why.join('; and ')}. Check with Joe before you plan around them.</div>`
             : '';
