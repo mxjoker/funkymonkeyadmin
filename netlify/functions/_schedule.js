@@ -139,8 +139,16 @@ async function spanFor(client, booking, overrides = {}) {
   const pack   = overrides.pack_out_minutes       ?? tmpl?.pack_out_minutes       ?? DEFAULT_MINUTES.packOut;
   const homeUn = overrides.home_unload_minutes    ?? tmpl?.home_unload_minutes    ?? DEFAULT_MINUTES.homeUnload;
   const driveM = overrides.drive_minutes_each_way ?? drive.minutes;
-  const party  = svc?.duration_minutes ?? DEFAULT_MINUTES.party;
-  if (!svc) unknowns.push('service duration unknown — assumed 60 minutes');
+  // The booking's own figure wins over the catalogue: it was typed about THIS
+  // gig. ?? not ||, so an explicit 0 is honoured rather than falling through.
+  const party  = booking.duration_minutes_override ?? svc?.duration_minutes ?? DEFAULT_MINUTES.party;
+  // Reported against the RESOLVED length, not against the service row. A
+  // custom booking with an override is fully known and must stop being
+  // called an estimate; one with neither is still a guess even if a service
+  // row exists but carries no duration.
+  if (booking.duration_minutes_override == null && svc?.duration_minutes == null) {
+    unknowns.push(`service duration unknown — assumed ${DEFAULT_MINUTES.party} minutes`);
+  }
 
   const totalMinutes = load + driveM + setup + party + pack + driveM + homeUn;
   const leadMinutes = load + driveM + setup;   // home -> on stage

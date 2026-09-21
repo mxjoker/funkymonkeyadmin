@@ -13,7 +13,15 @@ const BOOKING = read('netlify/functions/booking.js');
 // 26-143 kept a 30-minute drive to a town 81 miles away and told its crew
 // member to leave 70 minutes too late, discovered two days before the gig.
 test('a booking edit that moves the schedule invalidates the derived times', () => {
-  assert.match(BOOKING, /const SCHEDULE_INPUTS = \['event_time', 'event_date', 'event_zip', 'service_id'\]/);
+  // Asserted as membership rather than one exact literal: the list grows (it
+  // gained duration_minutes_override on 2026-09-20, because total_minutes is
+  // built from the party length) and a formatting change is not a regression.
+  // Dropping a field still fails here, which is the point.
+  const list = BOOKING.split('const SCHEDULE_INPUTS = ')[1].split('];')[0];
+  for (const f of ['event_time', 'event_date', 'event_zip', 'service_id',
+                   'duration_minutes_override']) {
+    assert.ok(list.includes(`'${f}'`), `${f} no longer invalidates the stored shift times`);
+  }
   assert.match(BOOKING, /invalidateDerivedTimes\(c, parseInt\(id\)\)/);
 });
 

@@ -140,7 +140,11 @@ exports.handler = async (event) => {
                          // Blank means the payout has not arrived, which is NULL
                          // and not 0 — the report prints a blank cell for it, and
                          // a 0 would read as "the platform kept everything".
-                         'payment_amount', 'platform_payout']) {
+                         'payment_amount', 'platform_payout',
+                         // Blank means "ask the catalogue", which is NULL. A 0
+                         // here would be a real override meaning a zero-length
+                         // gig, so the two must not collapse.
+                         'duration_minutes_override']) {
           if (f in u && u[f] === '') u[f] = null;
         }
 
@@ -199,6 +203,9 @@ exports.handler = async (event) => {
           deposit_paid_at:   "deposit_paid_at",
           deposit_method:    "deposit_method",
           deposit_ref:       "deposit_ref",
+          // How long this gig runs, when no catalogue service can say. Blank
+          // clears it and hands the question back to the catalogue.
+          duration_minutes_override: "duration_minutes_override",
         };
 
         // The whole previous row — field-level change logging below diffs
@@ -408,7 +415,11 @@ exports.handler = async (event) => {
         // Compared prev-vs-updated rather than reading `u`, because service_id
         // also moves via the items rollup, which never appears in the payload.
         // Rows a human pinned are left alone — see invalidateDerivedTimes.
-        const SCHEDULE_INPUTS = ['event_time', 'event_date', 'event_zip', 'service_id'];
+        // duration_minutes_override belongs here for exactly the reason the
+        // other four do: total_minutes is built from the party length, so
+        // changing it leaves every stored shift on this booking stale.
+        const SCHEDULE_INPUTS = ['event_time', 'event_date', 'event_zip', 'service_id',
+                                 'duration_minutes_override'];
         const scheduleMoved = SCHEDULE_INPUTS.filter(
           (f) => String(prev[f] ?? '') !== String(updated[f] ?? ''));
         if (scheduleMoved.length) {

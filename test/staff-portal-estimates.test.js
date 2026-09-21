@@ -142,3 +142,52 @@ test('the portal reads the real ZIP table, not just the seed', () => {
   assert.ok(/loadZipCoords\(client, myGigs/.test(sa), 'the portal no longer loads the ZIP table');
   assert.ok(/homeBase\(client\)/.test(sa), 'the portal no longer measures from the real home base');
 });
+
+// ── A booking that knows its own length ────────────────────────────────────
+// duration_minutes_override, added 2026-09-20. Party length had only ever
+// lived on services.duration_minutes, reached through service_id — and a
+// custom booking has none (9 of 30 upcoming), so its length fell through to a
+// guessed 60 minutes baked into schedule_start and total_minutes.
+const { spanFor } = require('../netlify/functions/_schedule.js');
+
+// spanFor takes a client for three lookups. A stub is enough to prove which
+// duration it picks, which is the only thing under test here.
+function stubClient({ duration }) {
+  return { query: async (sql) => {
+    if (/service_time_templates/.test(sql)) return { rows: [] };
+    if (/FROM services/.test(sql)) return { rows: duration === undefined ? [] : [{ duration_minutes: duration }] };
+    return { rows: [] };
+  } };
+}
+const BK = { event_date: '2026-09-23', event_time: '18:30', event_zip: '73069', service_id: '' };
+
+test('the booking\'s own length beats the catalogue', async () => {
+  const withCat = await spanFor(stubClient({ duration: 90 }), { ...BK, duration_minutes_override: 120 });
+  const catOnly = await spanFor(stubClient({ duration: 90 }), { ...BK });
+  // 30 min longer party = 30 min longer shift. Nothing else moves.
+  assert.strictEqual(withCat.totalMinutes - catOnly.totalMinutes, 30);
+});
+
+test('an override stops the gig being called an estimate', async () => {
+  const guessed = await spanFor(stubClient({}), { ...BK });
+  assert.ok(guessed.unknowns.some(u => /duration unknown/.test(u)), 'a gig with no length should say so');
+  const known = await spanFor(stubClient({}), { ...BK, duration_minutes_override: 120 });
+  assert.ok(!known.unknowns.some(u => /duration unknown/.test(u)),
+    'a booking that states its own length is not a guess any more');
+});
+
+test('a zero-minute override is honoured, not treated as absent', async () => {
+  // ?? not ||. A zero-length gig is odd but it is an answer, and || would
+  // silently swap it for the catalogue or the 60-minute guess.
+  const zero = await spanFor(stubClient({ duration: 90 }), { ...BK, duration_minutes_override: 0 });
+  const ninety = await spanFor(stubClient({ duration: 90 }), { ...BK });
+  assert.strictEqual(ninety.totalMinutes - zero.totalMinutes, 90);
+});
+
+test('both screens resolve the override in SQL, so neither can disagree', () => {
+  for (const f of ['../netlify/functions/calendar.js', '../netlify/functions/staff-assignments.js']) {
+    const src = fs.readFileSync(path.join(__dirname, f), 'utf8');
+    assert.match(src, /COALESCE\(b\.duration_minutes_override, s(vc)?\.duration_minutes\)/,
+      `${f} reads the catalogue duration without preferring the booking's own`);
+  }
+});

@@ -2993,6 +2993,28 @@ function openBooking(id, seed) {
         ['Birthday','Fun day / Carnival','Wedding','Corporate','Community','School','Library','Other'])}
       ${bookingField('Event Type', 'event_type', b.event_type, 'text', EVENT_TYPE_LABELS)}
       ${bookingField('Guests', 'guest_count', b.guest_count, 'number')}
+      <!-- How long this gig runs, when no catalogue service can say. Blank
+           hands the question back to the service; the hint below says what
+           that currently answers, so an empty box is never a mystery.
+
+           It matters beyond the calendar: the party length feeds total_minutes,
+           which feeds the crew's Home by AND the payroll estimate. A booking
+           with no service_id was silently using 60 minutes — 9 of 30 upcoming
+           on 2026-09-20. -->
+      ${bookingField('Runs for (min)', 'duration_minutes_override', b.duration_minutes_override, 'number')}
+      <div style="grid-column:1/-1;margin-top:-6px">
+        <span style="font-size:.72rem;color:#9ca3af">${(() => {
+          if (b.duration_minutes_override != null && b.duration_minutes_override !== '') {
+            return 'Set on this booking. Clear the box to use the service\'s own length instead.';
+          }
+          // b.duration_minutes is the RESOLVED length the server sent (the
+          // override, else the catalogue). With the box blank it is the
+          // catalogue's own answer, which is exactly what the hint reports.
+          if (b.duration_minutes) return `Blank — using the service's own length: ${b.duration_minutes} min.`;
+          // The case this field exists for, named plainly rather than left blank.
+          return '⚠ No service length available, so 60 minutes is being assumed — set it here.';
+        })()}</span>
+      </div>
       ${bookingField('ZIP', 'event_zip', b.event_zip)}
       ${bookingField('Address', 'event_location', b.event_location)}
       <div style="grid-column:1/-1;margin-top:-6px">

@@ -452,7 +452,9 @@ exports.handler = async (event) => {
                     -- autoCalcTimes). Without the duration a gig reads as a
                     -- start time with no end, which is what staff were asking
                     -- about: "when am I working", not just "what day".
-                    svc.duration_minutes
+                    -- Resolved the same way as the calendar feed: the
+                    -- booking's own length first, the catalogue second.
+                    COALESCE(b.duration_minutes_override, svc.duration_minutes) AS duration_minutes
              FROM staff_assignments sa
              JOIN bookings b ON b.id = sa.booking_id
              LEFT JOIN services svc ON svc.service_id = b.service_id

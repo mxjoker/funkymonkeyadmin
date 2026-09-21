@@ -297,7 +297,11 @@ async function buildFeed(client) {
             b.source,
             b.total_price::float8 AS total_price, b.balance_due::float8 AS balance_due,
             b.mileage_cost::float8 AS mileage_cost,
-            s.duration_minutes, s.short_name
+            -- The booking's own length wins over the catalogue's. Resolved in
+            -- SQL so every reader downstream — the event block, the warning,
+            -- estimateReasons — sees one figure and cannot disagree.
+            COALESCE(b.duration_minutes_override, s.duration_minutes) AS duration_minutes,
+            s.short_name
        FROM bookings b
        LEFT JOIN services s ON s.service_id = b.service_id
       WHERE b.event_date IS NOT NULL

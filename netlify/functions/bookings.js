@@ -185,7 +185,21 @@ async function ensureTable(client) {
     // treats them that way.
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_paid_at TIMESTAMPTZ",
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_method VARCHAR(50) DEFAULT ''",
-    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_ref VARCHAR(255) DEFAULT ''"
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_ref VARCHAR(255) DEFAULT ''",
+    // How long THIS gig runs, when the catalogue cannot say.
+    //
+    // Party length has only ever lived on services.duration_minutes, reached
+    // through service_id. A custom booking has no service_id — measured
+    // 2026-09-20, 9 of 30 upcoming — so its length fell through to a guessed
+    // 60 minutes that got baked into schedule_start and total_minutes with
+    // nothing saying so. FME-260923-SP is a 60-minute game show the catalogue
+    // would have called 90; FME-260923-OA is a two-hour bingo night the
+    // catalogue has never heard of.
+    //
+    // NULL means "ask the catalogue", which is what every existing row wants.
+    // Deliberately not a default: 0 is a legitimate override and must be
+    // distinguishable from absence.
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS duration_minutes_override INTEGER"
   ];
   for (const sql of cols) {
     try { await client.query(sql); } catch (_) {}
@@ -277,8 +291,18 @@ exports.handler = async (event) => {
         conditions.push(`updated_at >= $${params.length}`);
       }
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+      // duration_minutes is resolved here, not left to the browser. admin.html
+      // has read `booking.duration_minutes` off these rows since the manual
+      // time editor was written (saveAssignmentTimes, to derive schedule_start)
+      // — and this SELECT never produced the column, so `|| 60` fired on every
+      // gig and the editor rebuilt a 45-minute show as an hour. The booking's
+      // own override wins over the catalogue, same order as everywhere else.
       const { rows } = await client.query(
-        `SELECT * FROM bookings ${where} ORDER BY created_at DESC`,
+        `SELECT b.*, COALESCE(b.duration_minutes_override, s.duration_minutes) AS duration_minutes
+           FROM bookings b
+           LEFT JOIN services s ON s.service_id = b.service_id
+         ${where.replace(/\bbrand\b/g, 'b.brand').replace(/\bupdated_at\b/g, 'b.updated_at')}
+         ORDER BY b.created_at DESC`,
         params
       );
       await ensureBookingItems(client);
