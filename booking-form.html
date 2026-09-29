@@ -1113,7 +1113,9 @@ async function buildQuote() {
     document.getElementById('mileage-notice').style.display = 'block';
     document.getElementById('mileage-notice').textContent = `🚗 Travel fee applies — approx. ${S.mileageMiles} miles round trip from OKC.`;
   } else {
-    document.getElementById('mileage-notice').style.display = 'none';
+    const note = document.getElementById('mileage-notice');
+    note.style.display = S.travelNote ? 'block' : 'none';
+    note.textContent = S.travelNote || '';
   }
 
   // Totals
@@ -1138,21 +1140,21 @@ async function buildQuote() {
   noteEl.style.display = 'block';
 }
 
+// The travel quote comes from the server, the same call that prices the
+// booking when it is saved, so the fee shown here is the fee we charge. It
+// used to be computed here from a hardcoded origin 7.4 miles from the real one.
 async function calcMileage(zip) {
+  S.mileageMiles = 0; S.travelNote = '';
   try {
-    const res = await fetch(`https://api.zippopotam.us/us/${zip}`);
+    const res = await fetch(`/api/travel?zip=${encodeURIComponent(zip)}`);
     if (!res.ok) return 0;
-    const data = await res.json();
-    const lat2 = parseFloat(data.places[0].latitude);
-    const lon2 = parseFloat(data.places[0].longitude);
-    const R = 3958.8, bLat = 35.5514, bLon = -97.4075;
-    const dLat = (lat2-bLat)*Math.PI/180;
-    const dLon = (lon2-bLon)*Math.PI/180;
-    const a = Math.sin(dLat/2)**2 + Math.cos(bLat*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
-    const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    const roundTrip = Math.round(dist * 2 * 1.25);
-    S.mileageMiles = roundTrip;
-    return roundTrip > 20 ? Math.round(roundTrip * 0.70) : 0;
+    const q = await res.json();
+    if (q.known && !q.driveable) {
+      S.travelNote = 'This location is outside our driving range, so travel will be quoted separately.';
+      return 0;
+    }
+    S.mileageMiles = q.miles || 0;
+    return q.fee || 0;
   } catch { return 0; }
 }
 

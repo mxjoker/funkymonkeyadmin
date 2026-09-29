@@ -7,16 +7,20 @@
 // for exactly that reason — not because its ZIP was missing, but because
 // nothing on the admin side has ever computed this.
 //
-// The arithmetic is _geo.travelFor, shared with everything else, measured from
-// the one home base in admin_settings rather than from a pair of literals.
+// The arithmetic is _geo.quoteTravel, the same call bookings.js makes when a
+// public booking is created, so the fee the form shows is the fee we store.
+//
+// Public since 2026-09-28: the booking form asks it for the quote. It reaches
+// zippopotam and may store one zip_coords row per ZIP asked about, which is
+// bounded by the number of five-digit ZIPs; nothing else is written.
 //
 // This ANSWERS a question; it never writes to a booking. The admin presses
 // Save, as with any other money field — a travel fee that changed itself when
 // somebody opened a record would be a quote editing itself.
 
 const { withClient } = require('./_db');
-const { CORS, preflight, requireAuth, unauthorized } = require('./_auth');
-const { ensureZipCoords, homeBase, milesBetween, travelFor, normZip, MAX_DRIVEABLE_MILES } = require('./_geo');
+const { CORS, preflight } = require('./_auth');
+const { quoteTravel, normZip } = require('./_geo');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -25,40 +29,18 @@ exports.handler = async (event) => {
   if (pre) return pre;
   if (event.httpMethod !== 'GET') return json(405, { error: 'Method not allowed' });
 
-  // Admin only. It reaches a third-party API and writes to zip_coords, so it is
-  // not something an anonymous caller should be able to drive.
-  const auth = await requireAuth(event, ['admin']);
-  if (!auth) return unauthorized();
-
   const zip = normZip((event.queryStringParameters || {}).zip);
   if (!zip) return json(400, { error: 'A five-digit ZIP is required' });
 
   return withClient(async (client) => {
-    const [coords, home] = await Promise.all([
-      ensureZipCoords(client, [zip]),
-      homeBase(client),
-    ]);
-    const dest = coords.get(zip);
-    if (!dest) {
-      // Not an error: an unknown ZIP is a real answer, and the caller must be
-      // able to tell it apart from "zero miles away".
-      return json(200, { zip, known: false, miles: null, fee: null,
-        message: 'That ZIP could not be located, so travel has to be entered by hand.' });
-    }
-    const oneWay = milesBetween(home, dest);
-    // Past the driveable limit the per-mile rule stops applying: Orlando is
-    // 1,100 miles, which would offer to add a $1,900 travel line to a gig
-    // somebody flies to. Answer honestly and let a human price it.
-    if (oneWay > MAX_DRIVEABLE_MILES) {
-      return json(200, { zip, known: true, driveable: false,
-        one_way_miles: Math.round(oneWay), miles: null, fee: null,
-        message: 'That is ' + Math.round(oneWay) + ' miles away — too far to drive, so travel has to be priced by hand.' });
-    }
-    const { miles, fee } = travelFor(oneWay);
-    return json(200, {
-      zip, known: true, driveable: true,
-      one_way_miles: Math.round(oneWay * 10) / 10,
-      miles, fee,
-    });
+    const q = await quoteTravel(client, zip);
+    // An unknown ZIP is a real answer, not an error: the caller must be able to
+    // tell it apart from "zero miles away".
+    const message = !q.known
+      ? 'That ZIP could not be located, so travel has to be entered by hand.'
+      : !q.driveable
+        ? 'That is ' + q.one_way_miles + ' miles away — too far to drive, so travel has to be priced by hand.'
+        : undefined;
+    return json(200, { zip, ...q, message });
   });
 };

@@ -215,8 +215,33 @@ async function ensureZipCoords(client, zips) {
   return map;
 }
 
+// The one travel quote: what /api/travel answers and what a public booking is
+// charged. Before 2026-09-28 the form did this arithmetic in the browser from
+// its own origin and the server stored whatever figure was posted, so the fee
+// a client saw and the fee we recorded were two separate calculations.
+// Pure, so the three outcomes can be tested without a database.
+function travelQuote(home, dest) {
+  if (!dest) return { known: false, driveable: false, one_way_miles: null, miles: null, fee: null };
+  const oneWay = milesBetween(home, dest);
+  // Past the driveable limit the per-mile rule stops applying (Orlando would
+  // be a $1,900 line on a gig somebody flies to). Priced by hand instead.
+  if (oneWay > MAX_DRIVEABLE_MILES) {
+    return { known: true, driveable: false, one_way_miles: Math.round(oneWay), miles: null, fee: null };
+  }
+  const { miles, fee } = travelFor(oneWay);
+  return { known: true, driveable: true, one_way_miles: Math.round(oneWay * 10) / 10, miles, fee };
+}
+
+async function quoteTravel(client, zip) {
+  const z = normZip(zip);
+  if (!z) return travelQuote(null, null);
+  const [coords, home] = await Promise.all([ensureZipCoords(client, [z]), homeBase(client)]);
+  return travelQuote(home, coords.get(z));
+}
+
 module.exports = {
   HOME_FALLBACK, HOME_SETTING_KEY, HOME_ZIP, ZIP_SEED, TRAVEL, MAX_DRIVEABLE_MILES,
   normZip, ensureZipTable, milesBetween, travelFor,
   homeBase, loadZipCoords, fetchZipCoords, ensureZipCoords,
+  travelQuote, quoteTravel,
 };

@@ -8,6 +8,7 @@ const { sendSms, SMS_CONSENT_TEXT } = require('./_sms');
 const { sendTemplate } = require('./automations');
 const { normaliseAddress } = require('./_address');
 const { getDriveMins, loadZipCoords, homeBase } = require('./_schedule');
+const { quoteTravel } = require('./_geo');
 const { ensureTables: ensureCampTables } = require('./camps');
 const { generateReference } = require('./_reference');
 
@@ -441,7 +442,7 @@ exports.handler = async (event) => {
     const extraHours = Math.max(0, Math.floor(rawExtraHours));
 
     const rawMileageMiles = b.mileage_miles !== undefined ? Number(b.mileage_miles) : 0;
-    const mileageMiles = Math.max(0, Math.floor(isNaN(rawMileageMiles) ? 0 : rawMileageMiles));
+    let mileageMiles = Math.max(0, Math.floor(isNaN(rawMileageMiles) ? 0 : rawMileageMiles));
 
     // A day of a camp — set only by admin.html's "+ Day" flow, which always
     // supplies a real camp's id. Anything else (missing, 0, non-numeric)
@@ -462,11 +463,24 @@ exports.handler = async (event) => {
     // 'direct' and carried a balance we could never collect, one of them $465
     // on a live confirmed gig. balanceIsDerivable then protects the zero from a
     // later quote edit, the same way it protects a customer who paid in full.
-    const balanceDue = platformBooked({ source })
+    const balanceFor = () => platformBooked({ source })
       ? 0
       : Math.max(0, totalPrice + mileageCost - depositAmount);
 
+    // Travel on a public booking is the server's figure, never the browser's.
+    // The form used to compute it client-side from its own origin and post it,
+    // and this endpoint stored the number without looking. An admin keeps the
+    // posted figure: a gig too far to drive is priced by hand on purpose.
+    const adminAuth = await requireAuth(event, ['admin']);
+
     return withClient(async (client) => {
+      if (!adminAuth) {
+        const q = await quoteTravel(client, addr.zip);
+        mileageCost = q.fee || 0;
+        mileageMiles = q.miles || 0;
+      }
+      const balanceDue = balanceFor();
+
       await ensureTable(client);
       // Guarantees bookings.camp_id exists before it's referenced below —
       // see camps.js's comment on why this can't just live in ensureTable.

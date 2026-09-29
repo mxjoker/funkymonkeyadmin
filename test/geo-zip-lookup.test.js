@@ -133,11 +133,12 @@ test('scheduling one booking may fill its ZIP, and survives the attempt failing'
 });
 
 // The travel endpoint and its button.
-test('the travel endpoint is admin-only and writes nothing to the booking', () => {
+// Public since 2026-09-28: the booking form quotes travel from it.
+test('the travel endpoint writes nothing to the booking', () => {
   const src = read('netlify/functions/travel.js');
-  assert.ok(/requireAuth\(event, \['admin'\]\)/.test(src));
+  assert.ok(/quoteTravel\(client, zip\)/.test(src), 'it uses the one shared quote');
   assert.ok(!/UPDATE bookings|INSERT INTO bookings/.test(src), 'it answers a question, it does not edit a quote');
-  assert.ok(/known: false/.test(src), 'an unlocatable ZIP is a real answer, distinct from zero miles');
+  assert.ok(/known: false/.test(read('netlify/functions/_geo.js')), 'an unlocatable ZIP is a real answer, distinct from zero miles');
 });
 
 test('pressing Calculate travel twice does not double the charge', () => {
@@ -176,7 +177,7 @@ test('payroll still treats a too-far gig as a guess', () => {
 });
 
 test('the travel endpoint refuses to price a flight by the mile', () => {
-  const src = read('netlify/functions/travel.js');
+  const src = read('netlify/functions/_geo.js');
   assert.ok(/if \(oneWay > MAX_DRIVEABLE_MILES\)/.test(src));
   assert.ok(/driveable: false/.test(src), 'and says so in a way the UI can act on');
   const admin = read('admin.html');
@@ -187,4 +188,29 @@ test('the scheduler explains which kind of unknown it hit', () => {
   const src = read('netlify/functions/_schedule.js');
   assert.ok(/too far to drive to; set the drive minutes by hand/.test(src));
   assert.ok(/is not in the table/.test(src), 'the original wording stays for a genuinely unknown ZIP');
+});
+
+// One travel quote for the form and the server. Before 2026-09-28 the form did
+// this arithmetic in the browser and the server stored the posted figure.
+test('travelQuote: unknown, too far, and a real fee', () => {
+  const home = geo.HOME_FALLBACK;
+  assert.deepStrictEqual(geo.travelQuote(home, undefined),
+    { known: false, driveable: false, one_way_miles: null, miles: null, fee: null });
+  const orlando = geo.travelQuote(home, { lat: 28.5384, lng: -81.3789 });
+  assert.strictEqual(orlando.driveable, false, 'a flown gig is priced by hand');
+  assert.strictEqual(orlando.fee, null);
+  const tonkawa = geo.travelQuote(home, { lat: 36.6806, lng: -97.3067 });
+  assert.ok(tonkawa.driveable);
+  assert.deepStrictEqual({ miles: tonkawa.miles, fee: tonkawa.fee },
+    geo.travelFor(geo.milesBetween(home, { lat: 36.6806, lng: -97.3067 })));
+  assert.ok(tonkawa.fee > 100, 'Tonkawa carries a real travel fee: ' + tonkawa.fee);
+});
+
+test('the form asks the server for travel and a public booking is re-priced there', () => {
+  const form = read('booking-form.html');
+  assert.ok(form.includes('/api/travel?zip='), 'the form quotes from /api/travel');
+  assert.ok(!/api\.zippopotam\.us/.test(form), 'the form no longer computes travel itself');
+  const bookings = read('netlify/functions/bookings.js');
+  assert.ok(/if \(!adminAuth\) \{\s*const q = await quoteTravel\(client, addr\.zip\)/.test(bookings),
+    'a public booking takes the server travel figure, not the posted one');
 });
