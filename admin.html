@@ -5499,7 +5499,7 @@ async function renderStaff() {
       </div>` : ''}
       <div class="staff-card-actions">
         <button class="btn btn-primary btn-sm" onclick="openStaffModal(${s.id})">Edit</button>
-        <button class="btn btn-danger btn-sm" onclick="archiveStaff(${s.id})">Remove</button>
+        <button class="btn btn-outline btn-sm" onclick="archiveStaff(${s.id})" title="Take off the roster; history is kept and Restore brings them back">Archive</button>
       </div>
     </div>`;
   }).join('');
@@ -5735,7 +5735,9 @@ async function addCustomTagPicker(staffId) {
 }
 
 async function archiveStaff(id) {
-  if (!confirm('Remove this staff member? Their history is preserved.')) return;
+  // Labelled 'Remove' in red until 2026-09-28, which read as a delete, so the
+  // owner never found it. It has always archived: active=FALSE, history kept.
+  if (!confirm('Archive this staff member? They leave the roster and lose portal access. Their history is kept, and Restore (under Archived) brings them back.')) return;
   await apiFetch('/api/staff/' + id, { method: 'DELETE' });
   renderStaff();
 }
