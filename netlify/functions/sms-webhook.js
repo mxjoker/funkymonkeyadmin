@@ -103,7 +103,7 @@ exports.handler = async (event) => {
     });
 
     if (reply) {
-      await withClient(c => sendSms(c, from, reply, { trigger_label: 'Reply' }));
+      await withClient(c => sendSms(c, from, reply, { trigger_label: 'Reply', reply: true }));
     }
   } catch (e) {
     console.error('sms-webhook error:', e.message);

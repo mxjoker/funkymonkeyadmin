@@ -213,3 +213,26 @@ test('the same message with a single em dash becomes two segments', () => {
   const segs = smsSegments(withDash);
   assert.strictEqual(segs, 2, '1 em dash (UCS-2) pushes 73 UTF-16 units into 2 segments at 67 units per segment');
 });
+
+// A START/HELP answer is a reply to the person's own text, not a message we
+// start, so quiet hours do not apply. Before 2026-09-28 a 10:35pm START
+// confirmation sat 'held' until 9am.
+test('a keyword reply goes out during quiet hours, but never to an opted-out number', async () => {
+  withCreds();
+  const night = new Date('2026-08-16T03:30:00Z'); // 22:30 CDT
+  let calls = stubFetch({ ok: true });
+  const { sendSms } = loadSms();
+  const res = await sendSms(fakeClient(), '4055417953', "You're back on the list.", { now: night, reply: true });
+  assert.strictEqual(calls.length, 1, 'the reply is sent now, not held');
+  assert.notStrictEqual(res.status, 'held');
+
+  calls = stubFetch({ ok: true });
+  const blocked = await sendSms(fakeClient({ optedOut: true }), '4055417953', 'hi', { now: night, reply: true });
+  assert.strictEqual(calls.length, 0);
+  assert.strictEqual(blocked.status, 'opted_out');
+});
+
+test('the webhook marks its keyword replies as replies', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '../netlify/functions/sms-webhook.js'), 'utf8');
+  assert.ok(/sendSms\(c, from, reply, \{ trigger_label: 'Reply', reply: true \}\)/.test(src));
+});

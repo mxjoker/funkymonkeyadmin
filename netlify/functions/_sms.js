@@ -237,6 +237,10 @@ async function logSms(client, row) {
 // five non-send outcomes resembles success.
 //
 // `meta.now` exists only so quiet hours are testable without faking the clock.
+// `meta.reply` marks an answer to a text the person just sent us (START, HELP).
+// Quiet hours exist for messages WE start; holding a reply to someone's own
+// text until 9am left a START confirmation unsent overnight (2026-09-28).
+// Opt-out is still checked first, so a reply never reaches a STOPped number.
 async function sendSms(client, to, body, meta = {}) {
   body = toGsm7(body);
   const sid   = process.env.TWILIO_ACCOUNT_SID;
@@ -275,7 +279,7 @@ async function sendSms(client, to, body, meta = {}) {
   }
 
   // Held, not dropped. flushHeldSms() in Task 8 sends these at 9am Central.
-  if (isQuietHours(meta.now || new Date())) {
+  if (!meta.reply && isQuietHours(meta.now || new Date())) {
     const logged = await logSms(client, { ...base, phone: e164, status: 'held' });
     if (!logged) console.error('sendSms: HELD NOT LOGGED —', e164);
     return { status: 'held', logged: !!logged };
