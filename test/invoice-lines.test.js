@@ -58,3 +58,20 @@ test('a legacy booking with no items still builds its lines', () => {
   assert.strictEqual(lines[0].primary, true);
   assert.ok(lines.every(l => !l.discount), 'a legacy booking cannot have a discount');
 });
+
+const { invoiceNotes, invoicePaidInFull } = require('../netlify/functions/generate-invoice.js');
+
+// admin_notes is the office's scratchpad. It printed on client invoices until
+// 2026-09-28 — a paid client was nearly sent our payment forensics.
+test('admin notes never print on an invoice', () => {
+  const notes = invoiceNotes({ notes: 'Gate code 1234\nPark out back', admin_notes: 'cheque ran $100 over' });
+  assert.strictEqual(notes, 'Gate code 1234 Park out back');
+  assert.strictEqual(invoiceNotes({ admin_notes: 'internal only' }), '');
+});
+
+test('a balance paid by check shows as paid; a zero balance with no money does not', () => {
+  assert.strictEqual(invoicePaidInFull({ balance_due: 0, deposit_paid: false, payment_amount: 2000 }), true);
+  assert.strictEqual(invoicePaidInFull({ balance_due: 0, deposit_paid: true, payment_amount: 0 }), true);
+  assert.strictEqual(invoicePaidInFull({ balance_due: 0, deposit_paid: false, payment_amount: 0 }), false);
+  assert.strictEqual(invoicePaidInFull({ balance_due: 500, deposit_paid: true, payment_amount: 100 }), false);
+});

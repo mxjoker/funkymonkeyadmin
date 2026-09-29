@@ -98,6 +98,25 @@ function invoiceDiscountTotal(booking) {
     .reduce((s, i) => s + Number(i.price || 0) * Math.max(1, Number(i.quantity) || 1), 0);
 }
 
+// What the NOTES box prints. Client-facing only: admin_notes is the office's
+// own scratchpad (payment forensics, "client wants invoices", overpayments)
+// and until 2026-09-28 it printed on every invoice, including the one a
+// client downloads from their booking page. Whitespace is flattened because
+// wrapText splits on spaces, so a newline drew two lines on top of each other.
+function invoiceNotes(booking) {
+  return String(booking.notes || '').replace(/\s+/g, ' ').trim();
+}
+
+// PAID IN FULL needs money on record, not just a zero balance: a zero balance
+// with nothing received is a legacy import or a platform-collected gig, and
+// the invoice must not claim it was paid. A balance settled by check is
+// recorded as payment_amount with deposit_paid untouched, so the old
+// deposit_paid-only test never showed it as paid.
+function invoicePaidInFull(booking) {
+  return Number(booking.balance_due || 0) === 0
+    && (Boolean(booking.deposit_paid) || Number(booking.payment_amount || 0) > 0);
+}
+
 exports.handler = async (event, context) => {
   const pre = preflight(event);
   if (pre) return pre;
@@ -357,7 +376,7 @@ exports.handler = async (event, context) => {
         page.drawText('Balance Due:', { x: 400, y: y - 5, size: 12, font: fontBold, color: brownText });
         page.drawText(`$${balanceDue.toFixed(2)}`, { x: 480, y: y - 5, size: 14, font: fontBold, color: brownText });
         y -= 30;
-      } else if (depositPaid && balanceDue === 0) {
+      } else if (invoicePaidInFull(booking)) {
         y -= 5; // Add spacing before paid box
         page.drawRectangle({ x: 380, y: y - 25, width: 182, height: 30, color: rgb(0.820, 0.980, 0.898) });
         page.drawText('PAID IN FULL', { x: 430, y: y - 5, size: 12, font: fontBold, color: green });
@@ -381,11 +400,11 @@ exports.handler = async (event, context) => {
       // ══════════════════════════════════════════════════
       // NOTES
       // ══════════════════════════════════════════════════
-      if (booking.notes || booking.admin_notes) {
+      const notes = invoiceNotes(booking);
+      if (notes) {
         y -= 30;
         page.drawText('NOTES:', { x: 50, y, size: 12, font: fontBold, color: darkBlue });
         y -= 20;
-        const notes = [booking.notes, booking.admin_notes].filter(Boolean).join(' | ');
         const noteLines = wrapText(notes, 80);
         noteLines.forEach(line => {
           page.drawText(line, { x: 50, y, size: 9, font, color: gray });
@@ -462,3 +481,5 @@ function wrapText(text, maxChars) {
 module.exports.buildInvoiceLines = buildInvoiceLines;
 module.exports.invoiceDiscountTotal = invoiceDiscountTotal;
 module.exports.buildCampInvoiceBooking = buildCampInvoiceBooking;
+module.exports.invoiceNotes = invoiceNotes;
+module.exports.invoicePaidInFull = invoicePaidInFull;
