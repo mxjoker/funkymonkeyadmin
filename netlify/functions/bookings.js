@@ -210,6 +210,38 @@ async function ensureTable(client) {
   return schemaReady;
 }
 
+// A public booking is priced by the catalogue, never by the browser. The form
+// reads the same catalogue, so an honest request prices identically; what this
+// closes is a posted figure nobody checked: a page left open across a price
+// change, or an edited request asking for a $1 deposit, which the deposit link
+// would then have charged. Admin entry is exempt: custom prices are Joe's.
+// Pure, so the arithmetic is testable without a database.
+const PUBLIC_DEPOSIT = 100;   // booking-form.html shows the same figure
+const MAX_EXTRA_HOURS = 12;
+function catalogueQuote(service, addonRows, posted) {
+  if (!service || service.active === false) return { error: 'That service is not available to book online' };
+  const cents = (n) => Math.round(n * 100) / 100;
+  const isQuote = service.is_quote === true;
+  const servicePrice = isQuote ? 0 : Number(service.price) || 0;
+  const rate = Number(service.extra_hour_rate);
+  const hours = rate > 0
+    ? Math.min(MAX_EXTRA_HOURS, Math.max(0, Math.floor(Number(posted.extra_hours) || 0)))
+    : 0;
+  const extraHoursCost = cents(rate > 0 ? rate * hours : 0);
+  const byId = new Map((addonRows || []).filter((r) => r.active !== false).map((r) => [r.addon_id, r]));
+  const addons = (Array.isArray(posted.addons) ? posted.addons : [])
+    .map((a) => byId.get(a && a.id))
+    .filter(Boolean)
+    .map((r) => ({ id: r.addon_id, name: r.name, price: Number(r.price) || 0 }));
+  const addonTotal = cents(addons.reduce((sum, a) => sum + a.price, 0));
+  return {
+    isQuote, servicePrice, extraHours: hours, extraHoursCost, addons, addonTotal,
+    totalPrice: cents(servicePrice + extraHoursCost + addonTotal),
+    depositAmount: PUBLIC_DEPOSIT,
+  };
+}
+exports.catalogueQuote = catalogueQuote;
+
 exports.handler = async (event) => {
   const pre = preflight(event);
   if (pre) return pre;
@@ -439,7 +471,7 @@ exports.handler = async (event) => {
 
     const rawExtraHours = b.extra_hours !== undefined ? Number(b.extra_hours) : 0;
     if (isNaN(rawExtraHours)) return json(400, { error: 'extra_hours must be a number' });
-    const extraHours = Math.max(0, Math.floor(rawExtraHours));
+    let extraHours = Math.max(0, Math.floor(rawExtraHours));
 
     const rawMileageMiles = b.mileage_miles !== undefined ? Number(b.mileage_miles) : 0;
     let mileageMiles = Math.max(0, Math.floor(isNaN(rawMileageMiles) ? 0 : rawMileageMiles));
@@ -454,7 +486,7 @@ exports.handler = async (event) => {
     const cap255 = (v) => String(v || '').trim().slice(0, 255);
 
     // Get deposit_amount from request or default to 100
-    const depositAmount = Math.min(Math.max(Number(b.deposit_amount) || 100, 0), 100000);
+    let depositAmount = Math.min(Math.max(Number(b.deposit_amount) || 100, 0), 100000);
 
     // Balance calc: total_price + mileage_cost - deposit_amount
     // Who collects decides whether there is a balance at all. GigSalad takes
@@ -474,7 +506,19 @@ exports.handler = async (event) => {
     const adminAuth = await requireAuth(event, ['admin']);
 
     return withClient(async (client) => {
+      let addons = b.addons || [];
+      let isCustomQuote = b.is_custom_quote === true;
+      let serviceName = cap255(b.service_name);
       if (!adminAuth) {
+        const [{ rows: svcRows }, { rows: addonRows }] = await Promise.all([
+          client.query('SELECT * FROM services WHERE service_id = $1', [cap255(b.service_id)]),
+          client.query('SELECT * FROM addons'),
+        ]);
+        const priced = catalogueQuote(svcRows[0], addonRows, b);
+        if (priced.error) return json(400, { error: priced.error });
+        ({ servicePrice, extraHoursCost, addonTotal, totalPrice, addons, depositAmount, extraHours } = priced);
+        isCustomQuote = priced.isQuote;
+        serviceName = cap255(svcRows[0].name) || serviceName;
         const q = await quoteTravel(client, addr.zip);
         mileageCost = q.fee || 0;
         mileageMiles = q.miles || 0;
@@ -534,9 +578,9 @@ exports.handler = async (event) => {
       `, [
         reference,
         cap255(b.service_id),
-        cap255(b.service_name),
+        serviceName,
         servicePrice,
-        JSON.stringify(b.addons || []),
+        JSON.stringify(addons),
         addonTotal,
         mileageCost,
         mileageMiles,
@@ -551,7 +595,7 @@ exports.handler = async (event) => {
         cap255(b.event_type_id),
         guestCount,
         cap5k(b.notes),
-        b.is_custom_quote === true,
+        isCustomQuote,
         extraHours,
         extraHoursCost,
         clientName,

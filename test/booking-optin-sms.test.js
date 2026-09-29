@@ -15,7 +15,10 @@ stub('_db', {
   withClient: async (fn) => fn({
     query: async (sql) => /INSERT INTO bookings/i.test(sql)
       ? { rows: [{ id: 1, reference: 'FM-TEST0001', client_phone: '+14055551212', total_price: 400, balance_due: 300 }] }
-      : { rows: [] },
+      // A public booking is priced from the catalogue since 2026-09-28.
+      : /FROM services WHERE service_id/i.test(sql)
+        ? { rows: [{ service_id: 'deluxe_magic', name: 'Deluxe Birthday Magic Show', price: '385.00', active: true }] }
+        : { rows: [] },
   }),
 });
 stub('_sms', { sendSms: async (...a) => { sent.push(a); return { sent: true }; } });

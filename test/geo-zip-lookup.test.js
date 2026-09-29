@@ -211,6 +211,7 @@ test('the form asks the server for travel and a public booking is re-priced ther
   assert.ok(form.includes('/api/travel?zip='), 'the form quotes from /api/travel');
   assert.ok(!/api\.zippopotam\.us/.test(form), 'the form no longer computes travel itself');
   const bookings = read('netlify/functions/bookings.js');
-  assert.ok(/if \(!adminAuth\) \{\s*const q = await quoteTravel\(client, addr\.zip\)/.test(bookings),
+  const publicPath = bookings.split('if (!adminAuth) {')[1].split('const balanceDue = balanceFor()')[0];
+  assert.ok(/await quoteTravel\(client, addr\.zip\)/.test(publicPath),
     'a public booking takes the server travel figure, not the posted one');
 });
