@@ -100,7 +100,7 @@ function itemsFor(b) {
     .reduce((s, i) => s + Number(i.price || 0) * Math.max(1, Number(i.quantity) || 1), 0);
   const gap = +(Number(b.total_price || 0) - billable).toFixed(2);
   if (gap > 0.005) {
-    items.push({ name: 'Unitemised balance (pre-Phase-3 import)', price: gap, quantity: 1, kind: 'custom' });
+    items.push({ name: 'Additional services', price: gap, quantity: 1, kind: 'custom' });
   }
   // A negative gap cannot be represented — normaliseItems clamps price to >= 0,
   // and inventing a discount would be a guess about money. 22 bookings are in

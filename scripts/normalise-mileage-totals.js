@@ -8,7 +8,7 @@
  * in the codebase (bookings.js:329, booking.js:196-197) assumes total_price
  * EXCLUDES it — `balance_due = max(0, total_price + mileage_cost - deposit)`.
  * The backfill faithfully copied that defect into a balancing booking_items
- * line (kind='custom', name='Unitemised balance (pre-Phase-3 import)'), so
+ * line (kind='custom', originally named 'Unitemised balance (pre-Phase-3 import)', now 'Additional services'), so
  * travel is now double-recorded: once as a 'travel' item, once folded into
  * that line. Fixing bookings alone would leave the items still wrong.
  *
@@ -83,7 +83,7 @@ const ACCEPT_CLOBBER_RISK = process.argv.includes('--accept-clobber-risk');
 const SNAPSHOT = path.join(__dirname, '..', '.superpowers', 'sdd',
   '2026-08-01-crm-takeover-phase-3', 'mileage-normalise-rollback.json');
 
-const BALANCING_NAME = 'Unitemised balance (pre-Phase-3 import)';
+const BALANCING_NAME = 'Additional services'; // renamed 2026-09-28: invoices print item names verbatim
 const TOLERANCE = 0.005;
 
 const round2 = (n) => +(Number(n) || 0).toFixed(2);
