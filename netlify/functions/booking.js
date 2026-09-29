@@ -5,6 +5,7 @@ const { triggerStatusChange } = require('./automations');
 const { notifyMatchingStaff, invalidateDerivedTimes } = require('./staff-assignments');
 const { ensureBookingItems, replaceItems, rollupItems, getItems, balanceIsDerivable, normaliseItems } = require('./_items');
 const { normaliseAddress } = require('./_address');
+const { platformBooked } = require('./_source');
 
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
@@ -13,6 +14,11 @@ const SITE = "https://funkymonkeyadmin.netlify.app";
 // ── Stripe Checkout Session ───────────────────────────────────────────────────
 const createStripeLink = async (booking) => {
   if (!process.env.STRIPE_SECRET_KEY) return null;
+
+  // GigSalad already took this client's money. Confirming a platform booking
+  // used to mint a live deposit checkout anyway — the one mint path that never
+  // asked _source.js — so the client could be asked for a second deposit.
+  if (platformBooked(booking)) return null;
 
   // NOT `|| 100`. A booking with no deposit — a school, a library, or one
   // where Joe pressed "Waive deposit" — must not be billed $100 that exists
@@ -511,3 +517,4 @@ exports.handler = async (event) => {
 };
 
 module.exports.paymentLogEntry = paymentLogEntry;
+module.exports.createStripeLink = createStripeLink;
